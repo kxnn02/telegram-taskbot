@@ -552,6 +552,101 @@ describe("/blocked (no arguments): read-only blocked list, issue #6", () => {
   });
 });
 
+describe("Mark unblocked button on blocked notifications (issue #9)", () => {
+  let roster: Roster;
+  let testBot: ReturnType<typeof makeTestBot>;
+
+  beforeEach(() => {
+    roster = makeRoster();
+    testBot = makeTestBot(roster);
+  });
+
+  async function seedBlockedTask(): Promise<{ taskId: number; higherUpId: number; aliceId: number }> {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const task = testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      {
+        assigneeUsername: "alice",
+        title: "Write the onboarding doc",
+        description: "Draft it",
+        dueDate: "2026-09-05",
+      },
+    );
+    if (!task.ok) throw new Error("setup failed");
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    await testBot.bot.handleUpdate(
+      messageUpdate(aliceId, aliceId, `/blocked ${task.value.id} waiting on API access`),
+    );
+    return { taskId: task.value.id, higherUpId, aliceId };
+  }
+
+  it("the blocked notification to the assigning higher-up includes a 'Mark unblocked' button", async () => {
+    const { taskId } = await seedBlockedTask();
+
+    const callbackData = lastKeyboardCallbackData(testBot.calls);
+    expect(callbackData).toContain(`unblock:${taskId}`);
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/flagged as blocked/i);
+  });
+
+  it("tapping the button clears the blocked flag via the same TaskService logic as /unblocked", async () => {
+    const { taskId, higherUpId } = await seedBlockedTask();
+
+    await testBot.bot.handleUpdate(callbackUpdate(higherUpId, higherUpId, `unblock:${taskId}`));
+
+    const result = testBot.service.getTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      taskId,
+    );
+    expect(result.ok && result.value.blocked).toBe(false);
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/no longer blocked/i);
+  });
+
+  it("only a higher-up can act on the button, matching the Approve/Revise permission pattern", async () => {
+    const { taskId, aliceId } = await seedBlockedTask();
+
+    await testBot.bot.handleUpdate(callbackUpdate(aliceId, aliceId, `unblock:${taskId}`));
+
+    const result = testBot.service.getTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      taskId,
+    );
+    expect(result.ok && result.value.blocked).toBe(true);
+  });
+
+  it("tapping the button after the task was already unblocked (e.g. via the typed command) fails gracefully", async () => {
+    const { taskId, higherUpId } = await seedBlockedTask();
+
+    // Cleared first via the typed command, simulating a race or a different device.
+    testBot.service.clearBlocked(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      taskId,
+    );
+
+    await testBot.bot.handleUpdate(callbackUpdate(higherUpId, higherUpId, `unblock:${taskId}`));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/isn't currently marked blocked/i);
+  });
+
+  it("the existing /unblocked <task_id> typed command still works unchanged", async () => {
+    const { taskId, higherUpId } = await seedBlockedTask();
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/unblocked ${taskId}`));
+
+    const result = testBot.service.getTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      taskId,
+    );
+    expect(result.ok && result.value.blocked).toBe(false);
+    expect(lastReplyText(testBot.calls)).toMatch(/no longer blocked/i);
+  });
+});
+
 describe("/alltasks and /mytasks pagination (issue #7)", () => {
   let roster: Roster;
   let testBot: ReturnType<typeof makeTestBot>;
