@@ -227,6 +227,17 @@ explicitly rather than left to whatever falls out of implementation.
   Approve/Revise decision — never for browsing or listing, where typed commands and IDs remain
   simpler and more direct.
 
+**Group chat command support (revised from initial DM-only design)**: commands, including the
+assignment/edit wizards, work directly inside the cohort's group chat, not just in DM — a
+deliberate reversal decided after initial testing. This requires the bot's Telegram privacy mode
+to be turned **off** (via `@BotFather` → `/setprivacy` → Disable), so the bot receives every
+message in the group, not just ones starting with `/`, since a wizard's follow-up questions
+(title, description, due date) are plain text. Consequence: task descriptions, notes, and full
+task detail are now posted publicly into the group chat whenever a command is run there — this
+is an explicit accepted tradeoff, not an oversight (see §8, §12 for the permission and privacy
+implications this reverses). The bot ignores ordinary group conversation that isn't a command or
+an active wizard reply — it doesn't reply to every message it now technically receives.
+
 ## 7. Identity & Registration
 
 Originally designed around passively listening to the group chat to auto-capture identities.
@@ -281,9 +292,10 @@ data-collection feature, just a daily-cadence aggregation of what's already trac
    counts (e.g. "5 on track, 2 overdue, 1 blocked") plus one line per intern (name + short
    status). Deliberately **counts/status-level only** — no task descriptions, no feedback notes
    — to give the cohort shared visibility and a natural daily rhythm without turning into a
-   public callout of who's behind. This requires the bot to be a member of the group chat with
-   permission to post — a much lighter requirement than the group-listening approach removed in
-   §7, since it only needs to send, never read.
+   public callout of who's behind. This still deliberately stays counts-only even though the bot
+   now has full read access to the group chat for command support (§6) — the group summary's
+   restraint was about avoiding a public callout, not a technical read-access limitation, so that
+   reasoning still applies unchanged.
 
 No standup response-collection in v1 (i.e. no "what did you do yesterday" prompt-and-reply
 flow) — this is a genuinely separate feature from the automated digest above; revisit as a v2
@@ -341,9 +353,12 @@ just not surfaced by default, so it remains available directly in the database i
   size.
 - **Platform limits acknowledged**: no bot-initiated DMs without a prior `/start` — this is why
   registration requires that one-time step (§7) regardless of how identity is otherwise known.
-- **Group chat posting**: the bot needs membership and send-permission in the cohort's group
-  chat for the daily standup summary (§8) — send-only, no message-reading/privacy-mode
-  requirement, unlike the group-listening approach that was removed from the design (§7).
+- **Group chat access**: the bot needs membership in the cohort's group chat, both to post the
+  daily standup summary (§8) and to receive commands/wizard input typed directly in the group
+  (§6). This requires the bot's Telegram **privacy mode disabled** (`@BotFather` →
+  `/setprivacy` → Disable) so it receives every group message, not just slash commands — a
+  reversal of the original send-only, no-read-access plan, made deliberately after initial
+  testing surfaced that commands needed to work in-group, not just via DM.
 - **Timezone**: all scheduling and due-date logic uses Asia/Manila.
 - **Date parsing**: due dates are entered as natural language and parsed with a
   natural-language date library (e.g. `chrono-node`), with the parsed result always echoed back
