@@ -433,7 +433,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       }
       wizards.start(ctx.from!.id, "assign");
       await ctx.reply(
-        "Who is this task for? Send their Telegram username (without @).",
+        "Who is this task for? Type @ to pick from Telegram's suggestions, or just send their username.",
       );
     }),
   );
@@ -458,7 +458,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       wizards.start(ctx.from!.id, "edit", { taskId: id });
       await ctx.reply(
         `Editing Task ${id} ("${found.value.title}"). For each field, send a new value or "-" to keep it as-is.\n\n` +
-          `New assignee username, or "-" to keep @${found.value.assigneeUsername}:`,
+          `New assignee (type @ for suggestions), or "-" to keep @${found.value.assigneeUsername}:`,
       );
     }),
   );
