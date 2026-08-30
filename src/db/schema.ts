@@ -60,5 +60,13 @@ export function openDatabase(path: string): DatabaseSyncType {
       registered_at TEXT NOT NULL
     );
   `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS overdue_notifications (
+      cohort_id TEXT NOT NULL,
+      task_id INTEGER NOT NULL,
+      notified_at TEXT NOT NULL,
+      PRIMARY KEY (cohort_id, task_id)
+    );
+  `);
   return db;
 }
