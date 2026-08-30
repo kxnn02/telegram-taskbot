@@ -17,6 +17,7 @@ function makeRoster() {
     { username: "alice", role: "Intern", cohortId: COHORT },
     { username: "bob", role: "Intern", cohortId: COHORT },
     { username: "carla", role: "HigherUp", cohortId: COHORT },
+    { username: "dave", role: "HigherUp", cohortId: COHORT },
   ]);
 }
 
@@ -183,5 +184,263 @@ describe("GET / (oversight view)", () => {
     const res = await request(app).get("/").set("Cookie", cookie);
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe("/login");
+  });
+});
+
+async function loginCookie(app: import("express").Express, username = "carla") {
+  const login = await loginAs(app, username);
+  return sessionCookieFrom(login);
+}
+
+describe("GET /tasks/new", () => {
+  it("redirects to /login when not authenticated", async () => {
+    const { app } = makeApp();
+    const res = await request(app).get("/tasks/new");
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe("/login");
+  });
+
+  it("shows a creation form listing the cohort's known interns as assignee options", async () => {
+    const { app } = makeApp();
+    const cookie = await loginCookie(app);
+    const res = await request(app).get("/tasks/new").set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("alice");
+    expect(res.text).toContain("bob");
+    expect(res.text).toMatch(/<form[^>]*method="post"[^>]*action="\/tasks\/new"/i);
+  });
+});
+
+describe("POST /tasks/new", () => {
+  it("parses the due date and shows a confirm step instead of saving immediately", async () => {
+    const { app, service } = makeApp();
+    const cookie = await loginCookie(app);
+    const res = await request(app)
+      .post("/tasks/new")
+      .set("Cookie", cookie)
+      .type("form")
+      .send({
+        assigneeUsername: "alice",
+        title: "Write the onboarding doc",
+        description: "Draft the checklist",
+        dueDateText: "Sept 5, 2026",
+      });
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("Saturday, September 5, 2026");
+    expect(res.text).toMatch(/<form[^>]*action="\/tasks\/new\/confirm"/i);
+
+    // Not saved yet — confirm step required first.
+    const all = service.listAllTasks({ username: "carla", role: "HigherUp", cohortId: COHORT });
+    expect(all.ok && all.value).toHaveLength(0);
+  });
+
+  it("re-renders the form with an error when the due date can't be parsed", async () => {
+    const { app } = makeApp();
+    const cookie = await loginCookie(app);
+    const res = await request(app)
+      .post("/tasks/new")
+      .set("Cookie", cookie)
+      .type("form")
+      .send({
+        assigneeUsername: "alice",
+        title: "Write the onboarding doc",
+        description: "Draft the checklist",
+        dueDateText: "asdfasdf not a date",
+      });
+    expect(res.status).toBe(400);
+    expect(res.text).toContain("couldn&#39;t understand that date");
+    expect(res.text).toContain("Write the onboarding doc"); // preserved
+  });
+});
+
+describe("POST /tasks/new/confirm", () => {
+  it("creates the task via TaskService once confirmed, and redirects", async () => {
+    const { app, service } = makeApp();
+    const cookie = await loginCookie(app);
+    const res = await request(app)
+      .post("/tasks/new/confirm")
+      .set("Cookie", cookie)
+      .type("form")
+      .send({
+        assigneeUsername: "alice",
+        title: "Write the onboarding doc",
+        description: "Draft the checklist",
+        dueDate: "2026-09-05",
+      });
+    expect(res.status).toBe(302);
+
+    const all = service.listAllTasks({ username: "carla", role: "HigherUp", cohortId: COHORT });
+    expect(all.ok && all.value).toHaveLength(1);
+    expect(all.ok && all.value[0]?.assigneeUsername).toBe("alice");
+    expect(all.ok && all.value[0]?.status).toBe("Assigned");
+  });
+
+  it("rejects assigning to someone who isn't a known intern, via the same TaskService rule the bot uses", async () => {
+    const { app, service } = makeApp();
+    const cookie = await loginCookie(app);
+    const res = await request(app)
+      .post("/tasks/new/confirm")
+      .set("Cookie", cookie)
+      .type("form")
+      .send({
+        assigneeUsername: "carla", // a higher-up, not an intern
+        title: "Bad assignment",
+        description: "d",
+        dueDate: "2026-09-05",
+      });
+    expect(res.status).toBe(400);
+    expect(res.text).toContain("isn&#39;t a known intern");
+    const all = service.listAllTasks({ username: "carla", role: "HigherUp", cohortId: COHORT });
+    expect(all.ok && all.value).toHaveLength(0);
+  });
+});
+
+describe("GET /tasks/:id/edit", () => {
+  it("shows a prefilled edit form for an editable task", async () => {
+    const { app, service } = makeApp();
+    const created = service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Write the onboarding doc", description: "d", dueDate: "2026-09-05" },
+    );
+    if (!created.ok) throw new Error("setup failed");
+    const cookie = await loginCookie(app);
+
+    const res = await request(app).get(`/tasks/${created.value.id}/edit`).set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("Write the onboarding doc");
+    expect(res.text).toMatch(/<form[^>]*action="\/tasks\/\d+\/edit"/i);
+  });
+
+  it("shows a locked message instead of a form once the task is Approved, without editing it", async () => {
+    const { app, service } = makeApp();
+    const caller = { username: "carla", role: "HigherUp" as const, cohortId: COHORT };
+    const created = service.assignTask(caller, {
+      assigneeUsername: "alice",
+      title: "Write the onboarding doc",
+      description: "d",
+      dueDate: "2026-09-05",
+    });
+    if (!created.ok) throw new Error("setup failed");
+    service.submitTask({ username: "alice", role: "Intern", cohortId: COHORT }, created.value.id);
+    service.approveTask(caller, created.value.id);
+    const cookie = await loginCookie(app);
+
+    const res = await request(app).get(`/tasks/${created.value.id}/edit`).set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    expect(res.text.toLowerCase()).toContain("locked");
+    expect(res.text).not.toMatch(/<form[^>]*action="\/tasks\/\d+\/edit"/i);
+  });
+
+  it("404s for a task id that doesn't exist", async () => {
+    const { app } = makeApp();
+    const cookie = await loginCookie(app);
+    const res = await request(app).get("/tasks/999/edit").set("Cookie", cookie);
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("POST /tasks/:id/edit and /tasks/:id/edit/confirm", () => {
+  it("edits any task, not just ones the caller personally assigned", async () => {
+    const { app, service } = makeApp();
+    // Assigned by carla; dave (a different higher-up) will edit it.
+    const created = service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Original title", description: "d", dueDate: "2026-09-05" },
+    );
+    if (!created.ok) throw new Error("setup failed");
+
+    const cookie = await loginCookie(app, "dave");
+    const confirmRes = await request(app)
+      .post(`/tasks/${created.value.id}/edit`)
+      .set("Cookie", cookie)
+      .type("form")
+      .send({
+        assigneeUsername: "alice",
+        title: "Updated title",
+        description: "d2",
+        dueDateText: "2026-09-10",
+      });
+    expect(confirmRes.status).toBe(200);
+    expect(confirmRes.text).toMatch(/<form[^>]*action="\/tasks\/\d+\/edit\/confirm"/i);
+
+    const applyRes = await request(app)
+      .post(`/tasks/${created.value.id}/edit/confirm`)
+      .set("Cookie", cookie)
+      .type("form")
+      .send({
+        assigneeUsername: "alice",
+        title: "Updated title",
+        description: "d2",
+        dueDate: "2026-09-10",
+      });
+    expect(applyRes.status).toBe(302);
+
+    const all = service.listAllTasks({ username: "carla", role: "HigherUp", cohortId: COHORT });
+    expect(all.ok && all.value[0]?.title).toBe("Updated title");
+    expect(all.ok && all.value[0]?.dueDate).toBe("2026-09-10");
+  });
+
+  it("refuses to save an edit once the task has become Approved (checked again at confirm time)", async () => {
+    const { app, service } = makeApp();
+    const caller = { username: "carla", role: "HigherUp" as const, cohortId: COHORT };
+    const created = service.assignTask(caller, {
+      assigneeUsername: "alice",
+      title: "Write the onboarding doc",
+      description: "d",
+      dueDate: "2026-09-05",
+    });
+    if (!created.ok) throw new Error("setup failed");
+    const cookie = await loginCookie(app);
+
+    // Someone approves the task after the edit form was loaded but before confirm.
+    service.submitTask({ username: "alice", role: "Intern", cohortId: COHORT }, created.value.id);
+    service.approveTask(caller, created.value.id);
+
+    const res = await request(app)
+      .post(`/tasks/${created.value.id}/edit/confirm`)
+      .set("Cookie", cookie)
+      .type("form")
+      .send({
+        assigneeUsername: "alice",
+        title: "Sneaky post-approval edit",
+        description: "d",
+        dueDate: "2026-09-06",
+      });
+    expect(res.status).toBe(400);
+    expect(res.text).toContain("locked from further edits");
+
+    const stored = service.getTask(caller, created.value.id);
+    expect(stored.ok && stored.value.title).toBe("Write the onboarding doc");
+  });
+});
+
+describe("GET /stats", () => {
+  it("redirects to /login when not authenticated", async () => {
+    const { app } = makeApp();
+    const res = await request(app).get("/stats");
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe("/login");
+  });
+
+  it("shows completed-per-intern, completion rate, average time-to-submit, and completed-this-week", async () => {
+    const { app, service } = makeApp();
+    const caller = { username: "carla", role: "HigherUp" as const, cohortId: COHORT };
+    const t1 = service.assignTask(caller, {
+      assigneeUsername: "alice",
+      title: "Task one",
+      description: "d",
+      dueDate: "2026-09-05",
+    });
+    if (!t1.ok) throw new Error("setup failed");
+    service.submitTask({ username: "alice", role: "Intern", cohortId: COHORT }, t1.value.id);
+    service.approveTask(caller, t1.value.id);
+
+    const cookie = await loginCookie(app);
+    const res = await request(app).get("/stats").set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("alice");
+    expect(res.text).toMatch(/completion rate/i);
+    expect(res.text).toMatch(/average time.to.submit/i);
+    expect(res.text).toMatch(/completed this week/i);
   });
 });
