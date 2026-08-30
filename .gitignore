@@ -2,6 +2,7 @@ node_modules/
 dist/
 .env
 roster.local.json
+.tools/
 *.sqlite
 *.sqlite-journal
 *.db
