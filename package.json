@@ -1,0 +1,31 @@
+{
+  "name": "telegram-taskbot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DevCon PH Cohort 5 Telegram task-management bot",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "tsx src/bot/index.ts",
+    "start": "node dist/bot/index.js"
+  },
+  "dependencies": {
+    "chrono-node": "^2.7.7",
+    "dotenv": "^16.4.5",
+    "grammy": "^1.30.0",
+    "luxon": "^3.5.0"
+  },
+  "devDependencies": {
+    "@types/luxon": "^3.4.2",
+    "@types/node": "^22.9.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.1"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}
