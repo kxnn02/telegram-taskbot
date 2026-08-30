@@ -628,3 +628,31 @@ describe("listPending", () => {
     expect(pending.ok && pending.value).toHaveLength(1);
   });
 });
+
+describe("listBlocked", () => {
+  it("only higher-ups can view the cohort-wide blocked list", () => {
+    const { service } = makeService();
+    const result = service.listBlocked(alice);
+    expect(result.ok).toBe(false);
+  });
+
+  it("lists blocked tasks across all interns, not just ones the caller assigned", () => {
+    const { service } = makeService();
+    const created = assign(service, { assigneeUsername: "alice" });
+    if (!created.ok) throw new Error("setup failed");
+    service.setBlocked(alice, created.value.id, "waiting on API access");
+    const notBlocked = assign(service, { assigneeUsername: "bob" });
+    if (!notBlocked.ok) throw new Error("setup failed");
+
+    const blocked = service.listBlocked(dave); // dave didn't assign it
+    expect(blocked.ok && blocked.value).toHaveLength(1);
+    expect(blocked.ok && blocked.value[0].id).toBe(created.value.id);
+  });
+
+  it("excludes tasks that aren't currently flagged blocked", () => {
+    const { service } = makeService();
+    assign(service, { assigneeUsername: "alice" });
+    const result = service.listBlocked(carla);
+    expect(result.ok && result.value).toHaveLength(0);
+  });
+});
