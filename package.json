@@ -10,7 +10,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "dev": "tsx src/bot/index.ts",
-    "start": "node dist/bot/index.js"
+    "start": "node dist/bot/index.js",
+    "dashboard:dev": "tsx src/web/index.ts",
+    "dashboard:start": "node dist/web/index.js"
   },
   "dependencies": {
     "chrono-node": "^2.7.7",
