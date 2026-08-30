@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { TaskWithFlags } from "../service/taskService.js";
-import { groupByAssignee, filterByStatusGroup, STATUS_GROUPS } from "./taskView.js";
+import {
+  groupByAssignee,
+  filterByStatusGroup,
+  STATUS_GROUPS,
+  groupByAction,
+  ACTION_GROUPS,
+} from "./taskView.js";
 
 function task(overrides: Partial<TaskWithFlags>): TaskWithFlags {
   return {
@@ -71,5 +77,77 @@ describe("filterByStatusGroup", () => {
 
   it("exposes the canonical set of status groups the dashboard filters by", () => {
     expect(STATUS_GROUPS).toEqual(["done", "to-be-reviewed", "blocked", "overdue-backlog"]);
+  });
+});
+
+describe("groupByAction", () => {
+  it("exposes the canonical set of action groups in precedence order", () => {
+    expect(ACTION_GROUPS).toEqual(["needs-review", "blocked", "overdue", "done", "open"]);
+  });
+
+  it("puts a Submitted task in needs-review", () => {
+    const tasks = [task({ id: 1, status: "Submitted" })];
+    const grouped = groupByAction(tasks);
+    expect(grouped.get("needs-review")?.map((t) => t.id)).toEqual([1]);
+  });
+
+  it("puts a Submitted+overdue task in needs-review, not overdue (Submitted wins precedence)", () => {
+    const tasks = [task({ id: 1, status: "Submitted", overdue: true, daysOverdue: 2 })];
+    const grouped = groupByAction(tasks);
+    expect(grouped.get("needs-review")?.map((t) => t.id)).toEqual([1]);
+    expect(grouped.get("overdue")?.map((t) => t.id) ?? []).toEqual([]);
+  });
+
+  it("puts a blocked+overdue task in blocked, not overdue", () => {
+    const tasks = [
+      task({ id: 1, status: "InProgress", blocked: true, blockedReason: "stuck", overdue: true, daysOverdue: 1 }),
+    ];
+    const grouped = groupByAction(tasks);
+    expect(grouped.get("blocked")?.map((t) => t.id)).toEqual([1]);
+    expect(grouped.get("overdue")?.map((t) => t.id) ?? []).toEqual([]);
+  });
+
+  it("puts a plain overdue task (not submitted, not blocked) in overdue", () => {
+    const tasks = [task({ id: 1, status: "InProgress", overdue: true, daysOverdue: 5 })];
+    const grouped = groupByAction(tasks);
+    expect(grouped.get("overdue")?.map((t) => t.id)).toEqual([1]);
+  });
+
+  it("puts Approved and Cancelled tasks in done, even if overdue is somehow true", () => {
+    const tasks = [
+      task({ id: 1, status: "Approved", overdue: true, daysOverdue: 3 }),
+      task({ id: 2, status: "Cancelled", overdue: true, daysOverdue: 3 }),
+    ];
+    const grouped = groupByAction(tasks);
+    expect(grouped.get("done")?.map((t) => t.id)).toEqual([1, 2]);
+  });
+
+  it("puts NeedsRevision in open (it's the intern's ball again)", () => {
+    const tasks = [task({ id: 1, status: "NeedsRevision" })];
+    const grouped = groupByAction(tasks);
+    expect(grouped.get("open")?.map((t) => t.id)).toEqual([1]);
+  });
+
+  it("puts ordinary Assigned/InProgress tasks in open", () => {
+    const tasks = [task({ id: 1, status: "Assigned" }), task({ id: 2, status: "InProgress" })];
+    const grouped = groupByAction(tasks);
+    expect(grouped.get("open")?.map((t) => t.id)).toEqual([1, 2]);
+  });
+
+  it("preserves input order within each group", () => {
+    const tasks = [
+      task({ id: 3, status: "Assigned" }),
+      task({ id: 1, status: "Assigned" }),
+      task({ id: 2, status: "Assigned" }),
+    ];
+    const grouped = groupByAction(tasks);
+    expect(grouped.get("open")?.map((t) => t.id)).toEqual([3, 1, 2]);
+  });
+
+  it("every group key is present in the map even when empty", () => {
+    const grouped = groupByAction([]);
+    for (const g of ACTION_GROUPS) {
+      expect(grouped.get(g)).toEqual([]);
+    }
   });
 });
