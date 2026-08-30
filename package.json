@@ -10,18 +10,24 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "dev": "tsx src/bot/index.ts",
-    "start": "node dist/bot/index.js"
+    "start": "node dist/bot/index.js",
+    "dashboard:dev": "tsx src/web/index.ts",
+    "dashboard:start": "node dist/web/index.js"
   },
   "dependencies": {
     "chrono-node": "^2.7.7",
     "dotenv": "^16.4.5",
+    "express": "^4.22.2",
     "grammy": "^1.30.0",
     "luxon": "^3.5.0",
     "node-cron": "^4.6.0"
   },
   "devDependencies": {
+    "@types/express": "^4.17.25",
     "@types/luxon": "^3.4.2",
     "@types/node": "^22.9.0",
+    "@types/supertest": "^6.0.3",
+    "supertest": "^7.2.2",
     "tsx": "^4.19.1",
     "typescript": "^5.6.2",
     "vitest": "^2.1.1"
