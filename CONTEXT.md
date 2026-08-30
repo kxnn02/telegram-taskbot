@@ -164,6 +164,34 @@ footer at all, unchanged from before this issue; a page argument that isn't a po
 clamped to the last page rather than treated as an error, since that's a page that used to exist
 and simply ran out.
 
+### Assignee typo suggestion uses Levenshtein distance <=2, cohort-scoped (issue #8)
+
+The `/assign` and `/edit` wizards' "who is this task for?" step already rejected an unknown
+username outright; issue #8 asked for a "did you mean @y?" hint when the typed username is a
+close typo of an actual intern, to cut down on wizard restarts. The matching itself is a small
+pure function, `suggestClosestUsername` (`src/bot/usernameSuggest.ts`, backed by a plain
+`levenshteinDistance` implementation), independently unit-tested with no roster/DB/bot
+dependency — it just takes the typed text and a list of candidate usernames.
+
+Threshold: a Levenshtein distance of **1–2** is treated as "close enough". Cohort usernames are
+short (first names/handles), so a single dropped, added, swapped, or substituted character (or
+two of those combined) covers the realistic typo shapes without the threshold growing wide
+enough to start matching unrelated names in an ~8-person roster. Two more rules keep the
+suggestion honest rather than a guess: an input matching a candidate exactly returns no
+suggestion (nothing to suggest), and if two or more candidates tie for the closest distance, the
+function returns `undefined` rather than picking one — the ticket explicitly required no
+suggestion over an ambiguous one.
+
+The wizard step handler in `createBot.ts` (the shared `awaiting_assignee` step used by both
+`/assign` and `/edit`'s assignee-change field) builds the candidate list from
+`roster.all()` filtered to `role === "Intern"` and the **caller's own** `cohortId` before calling
+`suggestClosestUsername` — so a suggestion can only ever point at an intern in the caller's
+current cohort, never a different cohort or a higher-up, matching the ticket's constraint. The
+suggestion is appended to the existing rejection text ("did you mean @y?"); the wizard's control
+flow is unchanged — it still just waits for the next message (a corrected username or
+`/cancel`), same as before. There is no auto-accept: the caller must type the suggested username
+themselves for it to take effect.
+
 ## Out of scope (deferred to v2)
 
 Mini App UI, file attachments, CSV export, recurring tasks, and standup response-collection were
