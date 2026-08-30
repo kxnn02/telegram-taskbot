@@ -26,6 +26,37 @@ export interface TaskWithFlags extends Task {
   daysOverdue: number;
 }
 
+export interface InternCompletionStats {
+  username: string;
+  completed: number;
+}
+
+/** Cohort-wide stats for the dashboard's stats view (issue #4), derived
+ * entirely from existing task fields — no new tracking/columns. See the
+ * per-field doc comments on `getStats` for the exact definitions used. */
+export interface CohortStats {
+  /** Approved-task count per known intern in the cohort, including interns
+   * with zero, sorted by username. */
+  completedPerIntern: InternCompletionStats[];
+  /** Approved / (all non-Cancelled tasks) for the cohort. 0 when there are
+   * no countable tasks. Cancelled tasks are excluded entirely (PRD §4). */
+  completionRate: number;
+  /** Average hours between createdAt and updatedAt for tasks *currently* in
+   * Submitted status. This is a best-effort approximation: `updatedAt` is a
+   * single last-write-wins timestamp, not a status-change history, so it
+   * only reflects the actual submission instant for tasks that haven't been
+   * edited or reviewed since — which is exactly the currently-Submitted
+   * subset. `null` when there's no such data yet. */
+  averageTimeToSubmitHours: number | null;
+  /** Count of tasks Approved within the last 7 days. Reliable because
+   * `editTask` refuses to touch a task once Approved, so `updatedAt` on an
+   * Approved task is frozen at the moment it was approved. */
+  completedThisWeek: number;
+}
+
+const MS_PER_HOUR = 60 * 60 * 1000;
+const MS_PER_WEEK = 7 * 24 * MS_PER_HOUR;
+
 const OPEN_STATUSES: TaskStatus[] = [
   "Assigned",
   "InProgress",
@@ -408,6 +439,59 @@ export class TaskService {
       .listByCohort(caller.cohortId)
       .filter((t) => t.blocked);
     return ok(blocked.map((t) => this.withFlags(t)));
+  }
+
+  /** Cohort-wide stats for the dashboard's stats view (issue #4). Higher-up
+   * only, same audience gate as the dashboard itself. See `CohortStats` for
+   * exact field definitions and the judgment calls behind them. */
+  getStats(caller: Caller): ServiceResult<CohortStats> {
+    if (caller.role !== "HigherUp") {
+      return fail("Only higher-ups can view cohort stats.");
+    }
+
+    const all = this.repo.listByCohort(caller.cohortId);
+    const countable = all.filter((t) => t.status !== "Cancelled");
+    const approved = countable.filter((t) => t.status === "Approved");
+
+    const interns = this.roster
+      .all()
+      .filter((e) => e.role === "Intern" && e.cohortId === caller.cohortId)
+      .map((e) => e.username)
+      .sort();
+    const completedByIntern = new Map<string, number>();
+    for (const username of interns) completedByIntern.set(username, 0);
+    for (const task of approved) {
+      completedByIntern.set(
+        task.assigneeUsername,
+        (completedByIntern.get(task.assigneeUsername) ?? 0) + 1,
+      );
+    }
+    const completedPerIntern: InternCompletionStats[] = [...completedByIntern.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([username, completed]) => ({ username, completed }));
+
+    const completionRate = countable.length === 0 ? 0 : approved.length / countable.length;
+
+    const submitted = countable.filter((t) => t.status === "Submitted");
+    const timesToSubmitHours = submitted.map(
+      (t) => (Date.parse(t.updatedAt) - Date.parse(t.createdAt)) / MS_PER_HOUR,
+    );
+    const averageTimeToSubmitHours =
+      timesToSubmitHours.length === 0
+        ? null
+        : timesToSubmitHours.reduce((sum, h) => sum + h, 0) / timesToSubmitHours.length;
+
+    const now = this.clock.now().getTime();
+    const completedThisWeek = approved.filter(
+      (t) => now - Date.parse(t.updatedAt) <= MS_PER_WEEK,
+    ).length;
+
+    return ok({
+      completedPerIntern,
+      completionRate,
+      averageTimeToSubmitHours,
+      completedThisWeek,
+    });
   }
 
   listBacklog(caller: Caller): ServiceResult<TaskWithFlags[]> {

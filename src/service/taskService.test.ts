@@ -659,3 +659,105 @@ describe("listBlocked", () => {
     expect(result.ok && result.value).toHaveLength(0);
   });
 });
+
+describe("getStats", () => {
+  it("only higher-ups can view cohort stats", () => {
+    const { service } = makeService();
+    const result = service.getStats(alice);
+    expect(result.ok).toBe(false);
+  });
+
+  it("counts tasks completed (Approved) per intern, including interns with zero", () => {
+    const { service } = makeService();
+    const t1 = assign(service, { assigneeUsername: "alice" });
+    const t2 = assign(service, { assigneeUsername: "alice" });
+    if (!t1.ok || !t2.ok) throw new Error("setup failed");
+    service.submitTask(alice, t1.value.id);
+    service.approveTask(carla, t1.value.id);
+    service.submitTask(alice, t2.value.id);
+    // t2 stays Submitted, not Approved -> shouldn't count as completed.
+
+    const result = service.getStats(carla);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.completedPerIntern).toEqual(
+      expect.arrayContaining([
+        { username: "alice", completed: 1 },
+        { username: "bob", completed: 0 },
+      ]),
+    );
+  });
+
+  it("excludes Cancelled tasks from the completion-rate denominator", () => {
+    const { service } = makeService();
+    const t1 = assign(service, { assigneeUsername: "alice" });
+    const t2 = assign(service, { assigneeUsername: "bob" });
+    const t3 = assign(service, { assigneeUsername: "bob" });
+    if (!t1.ok || !t2.ok || !t3.ok) throw new Error("setup failed");
+    service.submitTask(alice, t1.value.id);
+    service.approveTask(carla, t1.value.id);
+    service.cancelTask(carla, t2.value.id);
+    // t3 stays Assigned (not completed, not cancelled).
+
+    const result = service.getStats(carla);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // 1 Approved out of 2 countable (t1, t3) — t2 (Cancelled) excluded entirely.
+    expect(result.value.completionRate).toBeCloseTo(0.5);
+  });
+
+  it("computes average time-to-submit (hours) from currently-Submitted tasks' createdAt/updatedAt", () => {
+    const db_ = openDatabase(":memory:");
+    const roster = makeRoster();
+    const clock = { now: () => new Date("2026-08-20T00:00:00.000Z") };
+    let service = new TaskService(db_, roster, clock as unknown as import("../domain/clock.js").Clock);
+    const created = service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "Task A",
+      description: "d",
+      dueDate: "2026-09-05",
+    });
+    if (!created.ok) throw new Error("setup failed");
+
+    // Move the clock forward 5 hours before submitting.
+    clock.now = () => new Date("2026-08-20T05:00:00.000Z");
+    service.submitTask(alice, created.value.id);
+
+    const result = service.getStats(carla);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.averageTimeToSubmitHours).toBeCloseTo(5, 1);
+  });
+
+  it("reports null average time-to-submit when there is no Submitted-status data", () => {
+    const { service } = makeService();
+    assign(service, { assigneeUsername: "alice" });
+    const result = service.getStats(carla);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.averageTimeToSubmitHours).toBeNull();
+  });
+
+  it("counts tasks approved within the last 7 days as completed this week", () => {
+    const { service } = makeService(new Date("2026-08-31T00:00:00.000Z"));
+    const t1 = assign(service, { assigneeUsername: "alice" });
+    if (!t1.ok) throw new Error("setup failed");
+    service.submitTask(alice, t1.value.id);
+    service.approveTask(carla, t1.value.id); // approved "now" -> within the last 7 days
+
+    const result = service.getStats(carla);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.completedThisWeek).toBe(1);
+  });
+
+  it("scopes all stats to the caller's cohort", () => {
+    const { service } = makeService();
+    assign(service, { assigneeUsername: "alice" });
+    const result = service.getStats(caller("frank", "HigherUp", OTHER_COHORT));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.completedPerIntern).toEqual([{ username: "erin", completed: 0 }]);
+    expect(result.value.completionRate).toBe(0);
+  });
+});
