@@ -33,6 +33,32 @@ dashboard login with real task data.
 not deployed anywhere permanent — see `README.md` for local setup, and this file will get an
 entry once a real deployment happens.
 
+## 2026-08-31 — Post-v1 bot/backend improvements
+
+Four small bot-side improvements shipped, based on a review of the bot's rough edges after v1
+launched (dashboard visual design was deliberately left out of this round — that's being handled
+separately):
+
+- **`/blocked` list command** ([#6](https://github.com/kxnn02/telegram-taskbot/issues/6)) — see
+  every currently-blocked task on demand (cohort-wide for higher-ups, your own for interns),
+  instead of only seeing blocked tasks inside the weekly digest.
+- **Pagination for `/alltasks` and `/mytasks`**
+  ([#7](https://github.com/kxnn02/telegram-taskbot/issues/7)) — long task lists now come back 10
+  at a time instead of one giant wall of text, with a page number to see more.
+- **"Did you mean @y?" on assignee typos**
+  ([#8](https://github.com/kxnn02/telegram-taskbot/issues/8)) — mistyping a username while
+  assigning or editing a task now suggests the closest real match in the cohort instead of just
+  rejecting it outright.
+- **One-tap "Mark unblocked" button**
+  ([#9](https://github.com/kxnn02/telegram-taskbot/issues/9)) — clearing a blocked flag from a
+  notification is now one tap, the same way approving/revising a submission already was.
+
+Also fixed earlier the same week (no ticket needed): the `/assign` and `/edit` wizard prompts now
+mention that typing `@` triggers Telegram's own autocomplete for usernames.
+
+All four verified independently (typecheck clean, full test suite green — 218 tests by the end of
+this round) before merging. The GitHub issue tracker is now empty — nothing else planned.
+
 ## Earlier — planning
 
 The project's design went through an extensive back-and-forth before any code was written,
