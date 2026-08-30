@@ -1,11 +1,14 @@
 export type WizardKind = "assign" | "edit";
 
 export type WizardStep =
+  | "awaiting_field_choice"
   | "awaiting_assignee"
   | "awaiting_title"
   | "awaiting_description"
   | "awaiting_due_date"
   | "awaiting_due_date_confirm";
+
+export type EditField = "assignee" | "title" | "description" | "dueDate";
 
 export interface WizardData {
   assigneeUsername?: string;
@@ -15,9 +18,9 @@ export interface WizardData {
   pendingDueDate?: { isoDate: string; friendly: string };
   /** Only present for /edit — the task being edited. */
   taskId?: number;
-  /** For /edit: which fields the wizard is walking through (assignee is
-   * optional there, since editing doesn't force reassignment). */
-  fieldsToCollect?: WizardStep[];
+  /** Only present for /edit — which single field this edit wizard is
+   * collecting, chosen via the field-choice menu. */
+  editField?: EditField;
 }
 
 export interface WizardState {
@@ -53,7 +56,7 @@ export class WizardManager {
 
   start(userId: number, kind: WizardKind, initial: WizardData = {}): WizardState {
     const step: WizardStep =
-      kind === "assign" ? "awaiting_assignee" : "awaiting_title";
+      kind === "assign" ? "awaiting_assignee" : "awaiting_field_choice";
     const state: WizardState = {
       kind,
       step,
