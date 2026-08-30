@@ -347,8 +347,13 @@ just not surfaced by default, so it remains available directly in the database i
 
 ## 12. Technical Constraints
 
-- **Hosting**: free-tier only (e.g. Railway/Render for bot + dashboard, Neon/Supabase free
-  Postgres tier). No budget for paid infrastructure.
+- **Hosting**: free-tier only. No budget for paid infrastructure. This was left as an open menu
+  ("e.g. Railway/Render, Neon/Supabase") rather than a decision, and the codebase went on to
+  answer it implicitly by picking a file-backed synchronous SQLite driver, long polling, and an
+  in-process cron — which together require an always-on host with a persistent disk. **Now
+  decided**: Vercel + Supabase, matching DevCon's Cohort 4 operations dashboard. See
+  [ADR-0001](./docs/adr/0001-replatform-to-vercel-supabase.md). Free-tier caveat to plan around:
+  a Supabase project with no database requests for 7 consecutive days is paused automatically.
 - **Scale**: ~8 interns, small number of higher-ups. No performance/scaling concerns at this
   size.
 - **Platform limits acknowledged**: no bot-initiated DMs without a prior `/start` — this is why
