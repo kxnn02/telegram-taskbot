@@ -192,6 +192,33 @@ flow is unchanged — it still just waits for the next message (a corrected user
 `/cancel`), same as before. There is no auto-accept: the caller must type the suggested username
 themselves for it to take effect.
 
+### "Mark unblocked" inline button reuses `clearBlocked` as-is, no new rule (issue #9)
+
+Issue #9 asked for a one-tap alternative to typing `/unblocked <task_id>` on the blocked-flag
+notification a higher-up already receives (PRD §8). The button (`unblock:<id>` callback data,
+attached via the same `InlineKeyboard` pattern as the Approve/Revise buttons) does not add any
+new business logic: its handler in `createBot.ts` calls `TaskService.clearBlocked` — the exact
+same method `/unblocked` already calls — so the two entry points can never disagree about what
+clearing a blocked flag means or when it's allowed.
+
+Permission gating mirrors the existing Approve/Revise callback precedent exactly: the callback
+handler checks the resolved caller is a registered `HigherUp` before calling the service, the
+same shape as the `decision:(approve|revise)` handler, even though `clearBlocked` itself also
+permits the assignee intern to self-clear (used by the typed `/unblocked` command). This isn't a
+gap — the button only ever reaches a higher-up in the first place, since it's attached to a
+notification that's only ever sent to the assigning higher-up; an intern can still self-clear via
+the typed command, unchanged.
+
+**Race / already-unblocked edge case**: tapping the button after the flag was already cleared —
+by the typed command, by someone else's tap, or on a different device — is not treated specially.
+`clearBlocked` already returns a clear failure (`"Task N isn't currently marked blocked."`) when
+called on a task that isn't blocked, and the callback handler edits the notification message to
+show that error text in place, the same as any other failed decision (e.g. re-tapping
+Approve/Revise on an already-decided task). No optimistic-locking or "someone already handled
+this" special-casing was added — the existing status-check-first behavior the PRD already
+requires for `/submit`/`/approve`/`/revise`/`/canceltask` (§4) covers this uniformly, and the
+notification message simply reflects whatever the service says happened (or didn't).
+
 ## Out of scope (deferred to v2)
 
 Mini App UI, file attachments, CSV export, recurring tasks, and standup response-collection were
