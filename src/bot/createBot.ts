@@ -468,7 +468,12 @@ export function createBot(options: CreateBotOptions): Bot {
     const userId = ctx.from.id;
     const state = wizards.get(userId);
     if (!state) {
-      await ctx.reply("Not sure what you mean — try /help");
+      // With privacy mode off, the bot sees every message in a group chat,
+      // not just ones meant for it — only DMs can assume every message is
+      // addressed to the bot, so only reply with the fallback there.
+      if (ctx.chat.type === "private") {
+        await ctx.reply("Not sure what you mean — try /help");
+      }
       return;
     }
     const resolved = requireCaller(userId);
