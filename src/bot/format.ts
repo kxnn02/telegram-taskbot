@@ -75,6 +75,18 @@ export function formatBlocked(tasks: TaskWithFlags[]): string {
   ].join("\n");
 }
 
+export function formatApproved(tasks: TaskWithFlags[]): string {
+  if (tasks.length === 0) {
+    return "Nothing was approved in the past week.";
+  }
+  return [
+    "Approved this past week:",
+    ...tasks.map(
+      (t) => `- #${t.id} ${t.title} (@${t.assigneeUsername})`,
+    ),
+  ].join("\n");
+}
+
 export function formatTaskDetail(task: TaskWithFlags): string {
   const flags: string[] = [];
   if (task.overdue) flags.push(`OVERDUE (${task.daysOverdue} day(s))`);

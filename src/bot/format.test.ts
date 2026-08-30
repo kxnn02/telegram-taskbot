@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TaskWithFlags } from "../service/taskService.js";
-import { formatBlocked } from "./format.js";
+import { formatApproved, formatBlocked } from "./format.js";
 
 function task(overrides: Partial<TaskWithFlags> = {}): TaskWithFlags {
   return {
@@ -33,5 +33,17 @@ describe("formatBlocked", () => {
     expect(text).toContain("#1");
     expect(text).toContain("@alice");
     expect(text).toContain("waiting on API access");
+  });
+});
+
+describe("formatApproved", () => {
+  it("says nothing when the list is empty", () => {
+    expect(formatApproved([])).toBe("Nothing was approved in the past week.");
+  });
+
+  it("lists approved tasks with assignee", () => {
+    const text = formatApproved([task({ status: "Approved", blocked: false, blockedReason: null })]);
+    expect(text).toContain("#1");
+    expect(text).toContain("@alice");
   });
 });
