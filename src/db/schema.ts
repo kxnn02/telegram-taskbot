@@ -1,4 +1,6 @@
 import { createRequire } from "node:module";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 
 const require = createRequire(import.meta.url);
@@ -13,6 +15,9 @@ export type { DatabaseSyncType as DatabaseSync };
  * Pass ":memory:" for tests, a file path for real use.
  */
 export function openDatabase(path: string): DatabaseSyncType {
+  if (path !== ":memory:") {
+    mkdirSync(dirname(path), { recursive: true });
+  }
   const db = new DatabaseSync(path);
   db.exec("PRAGMA foreign_keys = ON;");
   db.exec(`
@@ -46,6 +51,13 @@ export function openDatabase(path: string): DatabaseSyncType {
     CREATE TABLE IF NOT EXISTS cohort_counters (
       cohort_id TEXT PRIMARY KEY,
       next_id INTEGER NOT NULL
+    );
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS registrations (
+      telegram_user_id INTEGER PRIMARY KEY,
+      username TEXT NOT NULL,
+      registered_at TEXT NOT NULL
     );
   `);
   return db;
