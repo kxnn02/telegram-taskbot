@@ -271,11 +271,13 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         return;
       }
       await ctx.reply(`Task ${id} flagged as blocked.`);
+      const unblockKeyboard = new InlineKeyboard().text("Mark unblocked", `unblock:${id}`);
       await notifyUser(
         bot,
         registrations,
         result.value.assignedByUsername,
         `Task ${id} ("${result.value.title}", @${result.value.assigneeUsername}) was flagged as blocked: ${result.value.blockedReason}`,
+        unblockKeyboard,
       );
     }),
   );
@@ -449,6 +451,24 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       registrations,
       result.value.assigneeUsername,
       `Task ${id} ("${result.value.title}") was ${decision === "approve" ? "approved" : "sent back for revision"} by @${resolved.caller.username}. ${hint}`,
+    );
+  });
+
+  // ---- "Mark unblocked" inline button on blocked notifications (issue #9) -
+
+  bot.callbackQuery(/^unblock:(\d+)$/, async (ctx) => {
+    const userId = ctx.from.id;
+    const resolved = requireCaller(userId);
+    if (resolved.status !== "ok" || resolved.caller.role !== "HigherUp") {
+      await ctx.answerCallbackQuery({ text: "Only higher-ups can do that." });
+      return;
+    }
+    const [, idStr] = ctx.match as unknown as [string, string];
+    const id = Number(idStr);
+    const result = service.clearBlocked(resolved.caller, id);
+    await ctx.answerCallbackQuery();
+    await ctx.editMessageText(
+      result.ok ? `Task ${id} is no longer blocked.` : result.error,
     );
   });
 
