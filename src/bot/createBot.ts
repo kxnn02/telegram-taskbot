@@ -166,16 +166,26 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   bot.command(
     "alltasks",
     withCaller(async (ctx, caller) => {
+      const page = parsePageArg(ctx.match);
+      if (page === undefined) {
+        await ctx.reply("Usage: /alltasks [page]");
+        return;
+      }
       const result = service.listAllTasks(caller);
-      await ctx.reply(result.ok ? formatAllTasksGrouped(result.value) : result.error);
+      await ctx.reply(result.ok ? formatAllTasksGrouped(result.value, page) : result.error);
     }),
   );
 
   bot.command(
     "mytasks",
     withCaller(async (ctx, caller) => {
+      const page = parsePageArg(ctx.match);
+      if (page === undefined) {
+        await ctx.reply("Usage: /mytasks [page]");
+        return;
+      }
       const result = service.listMyTasks(caller);
-      await ctx.reply(result.ok ? formatMyTasks(result.value) : result.error);
+      await ctx.reply(result.ok ? formatMyTasks(result.value, page) : result.error);
     }),
   );
 
@@ -770,6 +780,20 @@ function parseIdArg(match: CommandMatch): number | undefined {
   const trimmed = matchToString(match).trim();
   if (!/^\d+$/.test(trimmed)) return undefined;
   return Number(trimmed);
+}
+
+/** Page-number argument for /alltasks and /mytasks (issue #7). No argument
+ * defaults to page 1; a non-numeric or non-positive argument is rejected
+ * with a usage message rather than silently falling back — an
+ * out-of-range-but-valid page number (e.g. past the last page) is instead
+ * clamped by `paginate` in format.ts, since that's a page that once
+ * existed and just ran out, not a malformed request. */
+function parsePageArg(match: CommandMatch): number | undefined {
+  const trimmed = matchToString(match).trim();
+  if (trimmed.length === 0) return 1;
+  if (!/^\d+$/.test(trimmed)) return undefined;
+  const page = Number(trimmed);
+  return page >= 1 ? page : undefined;
 }
 
 function parseIdAndRest(match: CommandMatch): { id: number | undefined; rest: string } {

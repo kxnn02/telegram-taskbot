@@ -143,6 +143,27 @@ own blocked tasks" requirement. `formatBlocked` (already used by the weekly/dail
 reused as-is for the command reply, unchanged, consistent with `/backlog`/`/pending` always
 showing the assignee regardless of caller role.
 
+### `/alltasks` and `/mytasks` paginate via a page-number argument (issue #7)
+
+Both list commands now cap a reply at 10 tasks per page (`PAGE_SIZE` in `src/bot/format.ts`),
+with `/alltasks 2` / `/mytasks 2` requesting the next page. A command-argument page number was
+chosen over inline Next/Previous buttons, unlike the Approve/Revise buttons or issue #5's
+`/edit` field-choice menu: those buttons attach to a message meant for one specific person to act
+on once, but `/alltasks` and `/mytasks` can be run by anyone in the group chat, their output is
+plain broadcastable text, and a page number keeps each reply self-contained and re-requestable on
+its own — no dependency on a particular message staying around and editable. This also matches
+the ticket's steer toward the simpler option absent a clear reason for buttons.
+
+Pagination is display-only: `TaskService.listAllTasks`/`listMyTasks` are unchanged and still
+return the full cohort/role-scoped result set (so cohort-scoping and role-based filtering are
+untouched), and only `format.ts` slices a page out of that list before rendering. `/alltasks`'s
+existing per-assignee grouping is preserved by grouping only the tasks within the requested
+page, not across the whole result set. A result set of 10 or fewer renders with no pagination
+footer at all, unchanged from before this issue; a page argument that isn't a positive integer
+(e.g. `/mytasks abc`) is rejected with a usage message, while a page number past the last page is
+clamped to the last page rather than treated as an error, since that's a page that used to exist
+and simply ran out.
+
 ## Out of scope (deferred to v2)
 
 Mini App UI, file attachments, CSV export, recurring tasks, and standup response-collection were

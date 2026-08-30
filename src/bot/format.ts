@@ -1,6 +1,39 @@
 import type { TaskWithFlags } from "../service/taskService.js";
 import type { Role } from "../domain/types.js";
 
+/** Tasks per page for the paginated list commands (/alltasks, /mytasks) —
+ * issue #7. A command-argument page number was chosen over inline
+ * Next/Previous buttons: both commands can be run in the group chat by
+ * anyone, their output is plain broadcastable text (not a single caller
+ * interacting with buttons like Approve/Revise or the /edit field menu),
+ * and a page number keeps the reply self-contained and re-runnable instead
+ * of depending on a specific message staying editable. */
+const PAGE_SIZE = 10;
+
+interface Page<T> {
+  items: T[];
+  page: number;
+  totalPages: number;
+}
+
+/** Clamps the requested page into [1, totalPages] so an out-of-range page
+ * number (e.g. 0, or past the end) degrades gracefully to the nearest valid
+ * page instead of erroring or returning an empty page. */
+function paginate<T>(items: T[], requestedPage: number, pageSize = PAGE_SIZE): Page<T> {
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+  const page = Math.min(Math.max(1, requestedPage), totalPages);
+  const start = (page - 1) * pageSize;
+  return { items: items.slice(start, start + pageSize), page, totalPages };
+}
+
+function paginationFooter(commandName: string, page: number, totalPages: number): string | null {
+  if (totalPages <= 1) return null;
+  if (page < totalPages) {
+    return `Page ${page} of ${totalPages} — send /${commandName} ${page + 1} for more`;
+  }
+  return `Page ${page} of ${totalPages}.`;
+}
+
 export function formatTaskLine(task: TaskWithFlags): string {
   const flags: string[] = [];
   if (task.overdue) flags.push(`OVERDUE ${task.daysOverdue}d`);
@@ -9,21 +42,27 @@ export function formatTaskLine(task: TaskWithFlags): string {
   return `#${task.id} ${task.title} — ${task.status} (due ${task.dueDate})${flagText}`;
 }
 
-export function formatMyTasks(tasks: TaskWithFlags[]): string {
+export function formatMyTasks(tasks: TaskWithFlags[], page = 1): string {
   if (tasks.length === 0) {
     return "You have no tasks right now.";
   }
-  return ["Your open tasks:", ...tasks.map((t) => "- " + formatTaskLine(t))].join(
-    "\n",
-  );
+  const paged = paginate(tasks, page);
+  const lines = [
+    "Your open tasks:",
+    ...paged.items.map((t) => "- " + formatTaskLine(t)),
+  ];
+  const footer = paginationFooter("mytasks", paged.page, paged.totalPages);
+  if (footer) lines.push("", footer);
+  return lines.join("\n");
 }
 
-export function formatAllTasksGrouped(tasks: TaskWithFlags[]): string {
+export function formatAllTasksGrouped(tasks: TaskWithFlags[], page = 1): string {
   if (tasks.length === 0) {
     return "No tasks in this cohort yet.";
   }
+  const paged = paginate(tasks, page);
   const byAssignee = new Map<string, TaskWithFlags[]>();
-  for (const t of tasks) {
+  for (const t of paged.items) {
     const list = byAssignee.get(t.assigneeUsername) ?? [];
     list.push(t);
     byAssignee.set(t.assigneeUsername, list);
@@ -34,7 +73,8 @@ export function formatAllTasksGrouped(tasks: TaskWithFlags[]): string {
       const lines = list.map((t) => "  - " + formatTaskLine(t));
       return `@${assignee}:\n${lines.join("\n")}`;
     });
-  return sections.join("\n\n");
+  const footer = paginationFooter("alltasks", paged.page, paged.totalPages);
+  return footer ? `${sections.join("\n\n")}\n\n${footer}` : sections.join("\n\n");
 }
 
 export function formatPending(tasks: TaskWithFlags[]): string {

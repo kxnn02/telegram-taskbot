@@ -458,3 +458,93 @@ describe("/blocked (no arguments): read-only blocked list, issue #6", () => {
     expect(result.ok && result.value.blocked).toBe(true);
   });
 });
+
+describe("/alltasks and /mytasks pagination (issue #7)", () => {
+  let roster: Roster;
+  let testBot: ReturnType<typeof makeTestBot>;
+
+  beforeEach(() => {
+    roster = makeRoster();
+    testBot = makeTestBot(roster);
+  });
+
+  function assignEleven() {
+    for (let i = 1; i <= 11; i++) {
+      const result = testBot.service.assignTask(
+        { username: "carla", role: "HigherUp", cohortId: COHORT },
+        {
+          assigneeUsername: "alice",
+          title: `Task ${i}`,
+          description: "d",
+          dueDate: "2026-09-05",
+        },
+      );
+      if (!result.ok) throw new Error("setup failed");
+    }
+  }
+
+  it("/mytasks with 11 tasks shows page 1 of 2 and hints at the next page", async () => {
+    assignEleven();
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/mytasks"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("Page 1 of 2");
+    expect(text).toContain("/mytasks 2");
+    expect(text).toContain("#1");
+    expect(text).not.toContain("#11");
+  });
+
+  it("/mytasks 2 shows the second page", async () => {
+    assignEleven();
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/mytasks 2"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("Page 2 of 2");
+    expect(text).toContain("#11");
+  });
+
+  it("/alltasks with a small result set shows no pagination footer", async () => {
+    const result = testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      {
+        assigneeUsername: "alice",
+        title: "Write the onboarding doc",
+        description: "d",
+        dueDate: "2026-09-05",
+      },
+    );
+    if (!result.ok) throw new Error("setup failed");
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/alltasks"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).not.toMatch(/Page \d+ of \d+/);
+    expect(text).toContain("@alice:");
+  });
+
+  it("/alltasks paginates and preserves grouping by assignee within a page", async () => {
+    assignEleven();
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/alltasks 2"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("Page 2 of 2");
+    expect(text).toContain("@alice:");
+    expect(text).toContain("#11");
+  });
+
+  it("/mytasks with a non-numeric page argument gets a usage message", async () => {
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/mytasks abc"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/usage/i);
+  });
+});

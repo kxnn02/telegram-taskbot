@@ -23,8 +23,8 @@ it's not private. If you want to keep something private, do it in a DM with the 
 | Command | What it does |
 |---|---|
 | `/help` | Shows the command list |
-| `/mytasks` | Lists tasks assigned to you |
-| `/alltasks` | Lists every task in the cohort, grouped by status |
+| `/mytasks` | Lists tasks assigned to you. Long lists come back 10 at a time — send `/mytasks 2` for the next page |
+| `/alltasks` | Lists every task in the cohort, grouped by status. Long lists come back 10 at a time — send `/alltasks 2` for the next page |
 | `/backlog` | Lists tasks that are open but not yet started |
 | `/pending` | Lists tasks currently in review |
 | `/blocked` | Lists blocked tasks — yours if you're an intern, the whole cohort's if you're a higher-up |
