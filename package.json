@@ -5,14 +5,15 @@
   "type": "module",
   "description": "DevCon PH Cohort 5 Telegram task-management bot",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && npm run copy-assets",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "dev": "tsx src/bot/index.ts",
     "start": "node dist/bot/index.js",
     "dashboard:dev": "tsx src/web/index.ts",
-    "dashboard:start": "node dist/web/index.js"
+    "dashboard:start": "node dist/web/index.js",
+    "copy-assets": "node -e \"require('fs').cpSync('src/web/public','dist/web/public',{recursive:true})\""
   },
   "dependencies": {
     "chrono-node": "^2.7.7",

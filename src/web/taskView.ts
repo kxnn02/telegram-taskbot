@@ -33,6 +33,40 @@ export function groupByAssignee(
   return grouped;
 }
 
+/**
+ * Action-first grouping (issue #5 / the dashboard visual redesign): every
+ * task lands in exactly one section describing what it needs from a
+ * higher-up, not who owns it. Precedence, first match wins — a
+ * Submitted-and-overdue task counts as "needs your review", not "overdue",
+ * since what it needs from the higher-up is a review; the due date still
+ * renders red in the UI, but the grouping itself is about the pending
+ * action, not the date.
+ */
+export type ActionGroup = "needs-review" | "blocked" | "overdue" | "done" | "open";
+
+export const ACTION_GROUPS: ActionGroup[] = ["needs-review", "blocked", "overdue", "done", "open"];
+
+export function groupByAction(tasks: TaskWithFlags[]): Map<ActionGroup, TaskWithFlags[]> {
+  const grouped = new Map<ActionGroup, TaskWithFlags[]>(ACTION_GROUPS.map((g) => [g, []]));
+  for (const task of tasks) {
+    const group = classify(task);
+    grouped.get(group)!.push(task);
+  }
+  return grouped;
+}
+
+function classify(task: TaskWithFlags): ActionGroup {
+  if (task.status === "Submitted") return "needs-review";
+  // Approved/Cancelled always land in Done, even if `overdue` were somehow
+  // still true (in practice it never is once a task is closed — see
+  // isOverdue — but this keeps the pure function's own invariant explicit
+  // rather than relying on that upstream guarantee).
+  if (task.status === "Approved" || task.status === "Cancelled") return "done";
+  if (task.blocked) return "blocked";
+  if (task.overdue) return "overdue";
+  return "open";
+}
+
 export function filterByStatusGroup(
   tasks: TaskWithFlags[],
   group: StatusGroup | undefined,

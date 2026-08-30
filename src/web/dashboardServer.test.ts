@@ -444,3 +444,144 @@ describe("GET /stats", () => {
     expect(res.text).toMatch(/completed this week/i);
   });
 });
+
+describe("GET / — action grouping (default, group=action)", () => {
+  it("renders the five action-group section headings in precedence order", async () => {
+    const { app } = makeApp();
+    const cookie = await loginCookie(app);
+    const res = await request(app).get("/").set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    const order = ["Needs your review", "Blocked", "Overdue", "Done", "Open"];
+    const indices = order.map((label) => res.text.indexOf(label));
+    for (const i of indices) expect(i).toBeGreaterThan(-1);
+    for (let i = 1; i < indices.length; i++) {
+      expect(indices[i]).toBeGreaterThan(indices[i - 1] as number);
+    }
+  });
+
+  it("puts a Submitted-and-overdue task under Needs your review, not Overdue", async () => {
+    const { app, service } = makeApp();
+    const caller = { username: "carla", role: "HigherUp" as const, cohortId: COHORT };
+    const created = service.assignTask(caller, {
+      assigneeUsername: "alice",
+      title: "Late but submitted task",
+      description: "d",
+      dueDate: "2026-08-01", // well before NOW, so overdue
+    });
+    if (!created.ok) throw new Error("setup failed");
+    service.submitTask({ username: "alice", role: "Intern", cohortId: COHORT }, created.value.id);
+
+    const cookie = await loginCookie(app);
+    const res = await request(app).get("/").set("Cookie", cookie);
+    expect(res.status).toBe(200);
+
+    const needsReviewIdx = res.text.indexOf("Needs your review");
+    const blockedIdx = res.text.indexOf("Blocked");
+    const taskIdx = res.text.indexOf("Late but submitted task");
+    expect(taskIdx).toBeGreaterThan(needsReviewIdx);
+    expect(taskIdx).toBeLessThan(blockedIdx);
+    // Due date still renders red / late, even though it's grouped as review.
+    expect(res.text).toContain("late");
+  });
+
+  it("renders Done collapsed — no table rows for its tasks", async () => {
+    const { app, service } = makeApp();
+    const caller = { username: "carla", role: "HigherUp" as const, cohortId: COHORT };
+    const created = service.assignTask(caller, {
+      assigneeUsername: "alice",
+      title: "A completed task title xyz",
+      description: "d",
+      dueDate: "2026-09-05",
+    });
+    if (!created.ok) throw new Error("setup failed");
+    service.submitTask({ username: "alice", role: "Intern", cohortId: COHORT }, created.value.id);
+    service.approveTask(caller, created.value.id);
+
+    const cookie = await loginCookie(app);
+    const res = await request(app).get("/").set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    expect(res.text).not.toContain("A completed task title xyz");
+  });
+
+  it("gives Approved tasks no Edit action even in the Done section context", async () => {
+    const { app, service } = makeApp();
+    const caller = { username: "carla", role: "HigherUp" as const, cohortId: COHORT };
+    const created = service.assignTask(caller, {
+      assigneeUsername: "alice",
+      title: "Open task without edit check",
+      description: "d",
+      dueDate: "2026-09-05",
+    });
+    if (!created.ok) throw new Error("setup failed");
+    const cookie = await loginCookie(app);
+    const res = await request(app).get("/").set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    expect(res.text).toMatch(new RegExp(`/tasks/${created.value.id}/edit`));
+  });
+
+  it("falls back to action grouping for an unrecognised ?group= value instead of 400ing", async () => {
+    const { app } = makeApp();
+    const cookie = await loginCookie(app);
+    const res = await request(app).get("/?group=bogus").set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("Needs your review");
+  });
+
+  it("keeps ?status= filtering working under the default action grouping", async () => {
+    const { app, service } = makeApp();
+    service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Not overdue task", description: "d", dueDate: "2026-09-05" },
+    );
+    service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "bob", title: "Overdue task", description: "d", dueDate: "2026-08-01" },
+    );
+    const cookie = await loginCookie(app);
+    const res = await request(app).get("/?status=overdue-backlog").set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("Overdue task");
+    expect(res.text).not.toContain("Not overdue task");
+  });
+
+  it("serves a real stylesheet with @font-face rules referencing the static font files", async () => {
+    const { app } = makeApp();
+    const cookie = await loginCookie(app);
+    const res = await request(app).get("/").set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("@font-face");
+    expect(res.text).toContain("/fonts/ProximaNova-Regular.woff2");
+    expect(res.text).toContain("<style>");
+  });
+});
+
+describe("GET /?group=intern", () => {
+  it("renders per-intern headings and keeps the status chip row", async () => {
+    const { app, service } = makeApp();
+    service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Alice's intern-mode task", description: "d", dueDate: "2026-09-05" },
+    );
+    const cookie = await loginCookie(app);
+    const res = await request(app).get("/?group=intern").set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("@alice");
+    expect(res.text).toContain("Alice&#39;s intern-mode task");
+  });
+
+  it("does not render the action-group section headings", async () => {
+    const { app } = makeApp();
+    const cookie = await loginCookie(app);
+    const res = await request(app).get("/?group=intern").set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    expect(res.text).not.toContain("Needs your review");
+  });
+});
+
+describe("GET /fonts/*.woff2", () => {
+  it("serves the brand font files as static assets", async () => {
+    const { app } = makeApp();
+    const res = await request(app).get("/fonts/ProximaNova-Regular.woff2");
+    expect(res.status).toBe(200);
+  });
+});
