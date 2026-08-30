@@ -100,6 +100,30 @@ single in-process scheduler is simpler to reason about and sufficient at this sc
 mean the bot process needs to actually stay running for reminders/digests to fire; see the
 README's deploy notes once the project moves off local `npm run dev`.
 
+### /edit is single-field, /assign stays a fixed 4-step chain
+
+`/edit <id>` now opens with an inline-keyboard menu ("Which field?") instead of walking all four
+fields with `"-"` to skip — issue #5. `WizardState.step` gained `awaiting_field_choice` as the
+starting step for kind `"edit"` (kind `"assign"` still starts at `awaiting_assignee`); the field
+tapped is recorded as `WizardData.editField` and drives which single shared step handler
+(`awaiting_assignee`/`title`/`description`/`due_date`) runs before going straight to
+`finishWizard`. The due-date field still routes through `awaiting_due_date_confirm` for both
+wizards — that Yes/No step was never edit-only. This also fixed a pre-existing bug where
+`WizardManager.start()` set kind `"edit"`'s initial step to `awaiting_title` while the command
+handler actually prompted for assignee first — dead code (`WizardData.fieldsToCollect`, never
+read anywhere) was removed rather than reconciled.
+
+### Bot-layer dispatch tests: real grammy `Bot`, no network
+
+`createBot.test.ts` drives the actual command/callback dispatch (not just pure formatting, like
+`format.test.ts`) via `bot.handleUpdate()` on hand-built `Update` objects, against a real
+`TaskService`/`node:sqlite`-memory/`Roster` stack. `createBot()` accepts optional `bot`/`roster`
+injection for this: a `new Bot(token, { botInfo })` sidesteps the real `getMe` network call, and
+`bot.api.config.use(transformer)` intercepts every outgoing API call instead of hitting Telegram.
+One gotcha: synthetic `/command` messages need a `bot_command` entity (grammy's command filter
+reads entities, not just leading `/` in the text) or every command silently misses and falls
+through to the "not sure what you mean" fallback.
+
 ## Out of scope (deferred to v2)
 
 Mini App UI, file attachments, CSV export, recurring tasks, and standup response-collection were

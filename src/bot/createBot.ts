@@ -6,7 +6,7 @@ import { SystemClock } from "../domain/clock.js";
 import { TaskService } from "../service/taskService.js";
 import { parseDueDate } from "../date/parseDueDate.js";
 import { resolveCaller } from "./callerResolution.js";
-import { WizardManager, type WizardState } from "./wizard.js";
+import { WizardManager, type WizardState, type EditField } from "./wizard.js";
 import { notifyUser } from "./notify.js";
 import {
   formatAllTasksGrouped,
@@ -17,12 +17,20 @@ import {
   formatTaskDetail,
 } from "./format.js";
 import type { Caller } from "../domain/types.js";
+import type { Roster } from "../domain/roster.js";
 
 export interface CreateBotOptions {
   token: string;
   dbPath: string;
   rosterPath?: string;
   dashboardUrl: string;
+  /** Injected Bot instance — used by tests to avoid a real network `getMe`
+   * call and to intercept outgoing API calls via `bot.api.config.use(...)`.
+   * Production code always omits this and gets a freshly constructed Bot. */
+  bot?: Bot;
+  /** Injected Roster — used by tests to seed roster data without reading a
+   * config file from disk. Production code always omits this. */
+  roster?: Roster;
 }
 
 const NEXT_STEP_HINT: Record<string, string> = {
@@ -36,14 +44,15 @@ export interface CreatedBot {
   bot: Bot;
   db: ReturnType<typeof openDatabase>;
   service: TaskService;
-  roster: ReturnType<typeof loadRoster>;
+  roster: Roster;
   registrations: RegistrationRepository;
+  wizards: WizardManager;
 }
 
 export function createBot(options: CreateBotOptions): CreatedBot {
-  const bot = new Bot(options.token);
+  const bot = options.bot ?? new Bot(options.token);
   const db = openDatabase(options.dbPath);
-  const roster = loadRoster(options.rosterPath);
+  const roster = options.roster ?? loadRoster(options.rosterPath);
   const registrations = new RegistrationRepository(db);
   const clock = new SystemClock();
   const service = new TaskService(db, roster, clock);
@@ -455,13 +464,90 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await ctx.reply(found.error);
         return;
       }
+      if (found.value.status === "Approved") {
+        await ctx.reply(
+          `Task ${id} is already Approved and is locked from further edits.`,
+        );
+        return;
+      }
       wizards.start(ctx.from!.id, "edit", { taskId: id });
+      const keyboard = new InlineKeyboard()
+        .text("Assignee", "editfield:assignee")
+        .text("Title", "editfield:title")
+        .row()
+        .text("Description", "editfield:description")
+        .text("Due date", "editfield:duedate");
       await ctx.reply(
-        `Editing Task ${id} ("${found.value.title}"). For each field, send a new value or "-" to keep it as-is.\n\n` +
-          `New assignee (type @ for suggestions), or "-" to keep @${found.value.assigneeUsername}:`,
+        `Editing Task ${id} ("${found.value.title}"). Which field do you want to change?`,
+        { reply_markup: keyboard },
       );
     }),
   );
+
+  // ---- /edit field-choice menu -----------------------------------------
+
+  bot.callbackQuery(/^editfield:(assignee|title|description|duedate)$/, async (ctx) => {
+    const userId = ctx.from.id;
+    const state = wizards.get(userId);
+    if (!state || state.step !== "awaiting_field_choice") {
+      await ctx.answerCallbackQuery({ text: "That form has expired." });
+      return;
+    }
+    const resolved = requireCaller(userId);
+    if (resolved.status !== "ok") {
+      await ctx.answerCallbackQuery({ text: "Send /start first." });
+      return;
+    }
+    const found = service.getTask(resolved.caller, state.data.taskId!);
+    if (!found.ok) {
+      wizards.cancel(userId);
+      await ctx.answerCallbackQuery();
+      await ctx.editMessageText(found.error);
+      return;
+    }
+    const task = found.value;
+    const [, fieldParam] = ctx.match as unknown as [string, string];
+    await ctx.answerCallbackQuery();
+
+    if (fieldParam === "assignee") {
+      wizards.update(userId, {
+        step: "awaiting_assignee",
+        data: { editField: "assignee" },
+      });
+      await ctx.editMessageText(
+        `Task ${task.id} is currently assigned to @${task.assigneeUsername}. New assignee (type @ for suggestions), or send their username:`,
+      );
+      return;
+    }
+    if (fieldParam === "title") {
+      wizards.update(userId, {
+        step: "awaiting_title",
+        data: { editField: "title" },
+      });
+      await ctx.editMessageText(
+        `Task ${task.id}'s current title is "${task.title}". New title:`,
+      );
+      return;
+    }
+    if (fieldParam === "description") {
+      wizards.update(userId, {
+        step: "awaiting_description",
+        data: { editField: "description" },
+      });
+      await ctx.editMessageText(
+        `Task ${task.id}'s current description is "${task.description}". New description:`,
+      );
+      return;
+    }
+    // duedate
+    wizards.update(userId, {
+      step: "awaiting_due_date",
+      data: { editField: "dueDate" },
+    });
+    await ctx.editMessageText(
+      `Task ${task.id} is currently due ${task.dueDate}. New due date (e.g. "next Friday", "in 3 days", "Sept 5"):`,
+    );
+  });
 
   // ---- Free-text wizard step handling --------------------------------
 
@@ -501,6 +587,11 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   ) {
     const userId = ctx.from!.id;
 
+    if (state.step === "awaiting_field_choice") {
+      await ctx.reply("Please tap a button above to choose a field, or send /cancel.");
+      return;
+    }
+
     if (state.step === "awaiting_assignee") {
       const username = text.replace(/^@/, "");
       if (!roster.isIntern(username, caller.cohortId)) {
@@ -509,63 +600,49 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         );
         return;
       }
-      wizards.update(userId, {
-        step: "awaiting_title",
+      const updated = wizards.update(userId, {
         data: { assigneeUsername: username },
-      });
+      })!;
+      if (state.kind === "edit") {
+        await finishWizard(ctx, caller, userId, updated);
+        return;
+      }
+      wizards.update(userId, { step: "awaiting_title" });
       await ctx.reply("Title?");
       return;
     }
 
     if (state.step === "awaiting_title") {
-      if (state.kind === "edit" && text === "-") {
-        wizards.update(userId, { step: "awaiting_description" });
-        await ctx.reply('Description, or "-" to keep it as-is:');
-        return;
-      }
       if (text.length === 0) {
         await ctx.reply("Title can't be empty. Try again, or /cancel.");
         return;
       }
-      wizards.update(userId, {
-        step: "awaiting_description",
-        data: { title: text },
-      });
-      await ctx.reply(
-        state.kind === "edit" ? 'Description, or "-" to keep it as-is:' : "Description?",
-      );
+      const updated = wizards.update(userId, { data: { title: text } })!;
+      if (state.kind === "edit") {
+        await finishWizard(ctx, caller, userId, updated);
+        return;
+      }
+      wizards.update(userId, { step: "awaiting_description" });
+      await ctx.reply("Description?");
       return;
     }
 
     if (state.step === "awaiting_description") {
-      if (state.kind === "edit" && text === "-") {
-        wizards.update(userId, { step: "awaiting_due_date" });
-        await ctx.reply(
-          'Due date (e.g. "next Friday", "in 3 days", "Sept 5"), or "-" to keep it as-is:',
-        );
-        return;
-      }
       if (text.length === 0) {
         await ctx.reply("Description can't be empty. Try again, or /cancel.");
         return;
       }
-      wizards.update(userId, {
-        step: "awaiting_due_date",
-        data: { description: text },
-      });
-      await ctx.reply(
-        state.kind === "edit"
-          ? 'Due date (e.g. "next Friday", "in 3 days", "Sept 5"), or "-" to keep it as-is:'
-          : 'Due date? (e.g. "next Friday", "in 3 days", "Sept 5")',
-      );
+      const updated = wizards.update(userId, { data: { description: text } })!;
+      if (state.kind === "edit") {
+        await finishWizard(ctx, caller, userId, updated);
+        return;
+      }
+      wizards.update(userId, { step: "awaiting_due_date" });
+      await ctx.reply('Due date? (e.g. "next Friday", "in 3 days", "Sept 5")');
       return;
     }
 
     if (state.step === "awaiting_due_date") {
-      if (state.kind === "edit" && text === "-") {
-        await finishWizard(ctx, caller, userId, wizards.get(userId)!);
-        return;
-      }
       const parsed = parseDueDate(text, new Date());
       if (!parsed) {
         await ctx.reply(
@@ -659,10 +736,17 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       await ctx.reply(`Couldn't save the edit: ${result.error}`);
       return;
     }
-    await ctx.reply(`Task ${state.data.taskId} updated.`);
+    const fieldLabel: Record<EditField, string> = {
+      assignee: "assignee",
+      title: "title",
+      description: "description",
+      dueDate: "due date",
+    };
+    const label = state.data.editField ? fieldLabel[state.data.editField] : "task";
+    await ctx.reply(`Task ${state.data.taskId} updated — ${label} changed.`);
   }
 
-  return { bot, db, service, roster, registrations };
+  return { bot, db, service, roster, registrations, wizards };
 }
 
 type CommandMatch = string | RegExpMatchArray | undefined;
