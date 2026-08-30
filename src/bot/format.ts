@@ -62,6 +62,19 @@ export function formatBacklog(tasks: TaskWithFlags[]): string {
   ].join("\n");
 }
 
+export function formatBlocked(tasks: TaskWithFlags[]): string {
+  if (tasks.length === 0) {
+    return "Nothing is currently flagged blocked.";
+  }
+  return [
+    "Blocked:",
+    ...tasks.map(
+      (t) =>
+        `- ${formatTaskLine(t)} (assigned to @${t.assigneeUsername}): ${t.blockedReason}`,
+    ),
+  ].join("\n");
+}
+
 export function formatTaskDetail(task: TaskWithFlags): string {
   const flags: string[] = [];
   if (task.overdue) flags.push(`OVERDUE (${task.daysOverdue} day(s))`);
