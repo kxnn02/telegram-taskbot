@@ -1,0 +1,8 @@
+{
+  "_comment": "Sample roster for Cohort 5. Real usage: replace with actual Telegram usernames before deploy. Adding a late-joining intern is a one-line addition here, not a code change (PRD §7).",
+  "entries": [
+    { "username": "example_intern1", "role": "Intern", "cohortId": "cohort-5" },
+    { "username": "example_intern2", "role": "Intern", "cohortId": "cohort-5" },
+    { "username": "example_higherup", "role": "HigherUp", "cohortId": "cohort-5" }
+  ]
+}
