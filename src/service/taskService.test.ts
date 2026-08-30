@@ -645,8 +645,11 @@ describe("listBlocked", () => {
     if (!notBlocked.ok) throw new Error("setup failed");
 
     const blocked = service.listBlocked(dave); // dave didn't assign it
-    expect(blocked.ok && blocked.value).toHaveLength(1);
-    expect(blocked.ok && blocked.value[0].id).toBe(created.value.id);
+    expect(blocked.ok).toBe(true);
+    if (blocked.ok) {
+      expect(blocked.value).toHaveLength(1);
+      expect(blocked.value[0]?.id).toBe(created.value.id);
+    }
   });
 
   it("excludes tasks that aren't currently flagged blocked", () => {
