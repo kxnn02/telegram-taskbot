@@ -124,6 +124,25 @@ One gotcha: synthetic `/command` messages need a `bot_command` entity (grammy's 
 reads entities, not just leading `/` in the text) or every command silently misses and falls
 through to the "not sure what you mean" fallback.
 
+### `/blocked` overloads the existing command name (issue #6)
+
+Issue #6 asked for a new read-only `/blocked` (no arguments) list command, mirroring
+`/backlog`/`/pending`. But `/blocked <task_id> <reason>` already existed (PRD §5, intern-facing:
+flags a task as blocked). Rather than invent a different name for the list view — which the
+ticket didn't ask for and which would fragment the "blocked" vocabulary the cohort already uses —
+`bot.command("blocked", ...)` in `createBot.ts` now dispatches on argument presence: no arguments
+lists (delegates to `TaskService.listBlocked`); `<task_id> <reason>` still sets the flag via
+`TaskService.setBlocked`, unchanged. Both are documented as one entry in `USER_GUIDE.md`'s intern
+table with a note explaining the split, plus the plain list entry in the "Everyone can" table.
+
+This also required widening `TaskService.listBlocked`, which previously rejected any non-
+`HigherUp` caller outright (it only existed to feed the higher-up daily digest). It now follows
+the same scope-by-role shape as `listBacklog`: cohort-wide for a higher-up, filtered to the
+caller's own tasks for an intern — never rejected, matching the ticket's "intern sees only their
+own blocked tasks" requirement. `formatBlocked` (already used by the weekly/daily digest) is
+reused as-is for the command reply, unchanged, consistent with `/backlog`/`/pending` always
+showing the assignee regardless of caller role.
+
 ## Out of scope (deferred to v2)
 
 Mini App UI, file attachments, CSV export, recurring tasks, and standup response-collection were

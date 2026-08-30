@@ -428,16 +428,19 @@ export class TaskService {
     return ok(pending.map((t) => this.withFlags(t)));
   }
 
-  /** Cohort-wide blocked-flag view for higher-ups (used by the daily/weekly
-   * digests, issue #2), mirroring the same cohort-wide-not-just-caller's-own
-   * shape as listPending. */
+  /** Blocked-flag view: cohort-wide for higher-ups (used by the daily/weekly
+   * digests, issue #2, and the on-demand /blocked command, issue #6), scoped
+   * to just the caller's own tasks for interns — the same
+   * scope-by-role-not-reject-interns shape as listBacklog. */
   listBlocked(caller: Caller): ServiceResult<TaskWithFlags[]> {
-    if (caller.role !== "HigherUp") {
-      return fail("Only higher-ups have a cohort-wide blocked view.");
-    }
-    const blocked = this.repo
-      .listByCohort(caller.cohortId)
-      .filter((t) => t.blocked);
+    const all = this.repo.listByCohort(caller.cohortId);
+    const scoped =
+      caller.role === "Intern"
+        ? all.filter(
+            (t) => t.assigneeUsername === normalizeUsername(caller.username),
+          )
+        : all;
+    const blocked = scoped.filter((t) => t.blocked);
     return ok(blocked.map((t) => this.withFlags(t)));
   }
 

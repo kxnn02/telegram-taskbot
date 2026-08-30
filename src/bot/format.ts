@@ -121,6 +121,7 @@ const EVERYONE_HELP = [
   "/alltasks — every task in the cohort, grouped by assignee",
   "/task <id> — full detail on one task",
   "/backlog — overdue tasks",
+  "/blocked — blocked tasks",
 ];
 
 const INTERN_HELP = [

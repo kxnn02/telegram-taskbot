@@ -27,6 +27,7 @@ it's not private. If you want to keep something private, do it in a DM with the 
 | `/alltasks` | Lists every task in the cohort, grouped by status |
 | `/backlog` | Lists tasks that are open but not yet started |
 | `/pending` | Lists tasks currently in review |
+| `/blocked` | Lists blocked tasks — yours if you're an intern, the whole cohort's if you're a higher-up |
 | `/task <id>` | Shows full details for one task, e.g. `/task 3` |
 | `/dashboard` | Sends the link to the web dashboard |
 | `/cancel` | Cancels whatever multi-step process (wizard) you're in the middle of |
@@ -38,6 +39,10 @@ it's not private. If you want to keep something private, do it in a DM with the 
 | `/submit <id>` | Marks a task as submitted for review, e.g. `/submit 3` |
 | `/blocked <id> <reason>` | Flags a task as blocked and why, e.g. `/blocked 3 waiting on API access` |
 | `/unblocked <id>` | Clears a blocked flag |
+
+`/blocked` does two different things depending on how you send it: with no arguments it lists
+blocked tasks (see the "Everyone can" table above); with a task id and reason it flags that task
+as blocked.
 
 When a higher-up approves or sends back a task you submitted, you'll get a message about it
 automatically — no need to check manually.

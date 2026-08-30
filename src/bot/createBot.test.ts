@@ -343,3 +343,118 @@ describe("/assign full 4-step flow (regression, unaffected by /edit changes)", (
     }
   });
 });
+
+describe("/blocked (no arguments): read-only blocked list, issue #6", () => {
+  let roster: Roster;
+  let testBot: ReturnType<typeof makeTestBot>;
+
+  beforeEach(() => {
+    roster = makeRoster();
+    testBot = makeTestBot(roster);
+  });
+
+  it("a higher-up sees every blocked task in the cohort, with assignee shown", async () => {
+    const aliceTask = testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      {
+        assigneeUsername: "alice",
+        title: "Write the onboarding doc",
+        description: "Draft it",
+        dueDate: "2026-09-05",
+      },
+    );
+    if (!aliceTask.ok) throw new Error("setup failed");
+    testBot.service.setBlocked(
+      { username: "alice", role: "Intern", cohortId: COHORT },
+      aliceTask.value.id,
+      "waiting on API access",
+    );
+
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/blocked"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain(`#${aliceTask.value.id}`);
+    expect(text).toContain("@alice");
+    expect(text).toContain("waiting on API access");
+  });
+
+  it("an intern sees only their own blocked tasks, not another intern's", async () => {
+    const aliceTask = testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      {
+        assigneeUsername: "alice",
+        title: "Write the onboarding doc",
+        description: "Draft it",
+        dueDate: "2026-09-05",
+      },
+    );
+    const bobTask = testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      {
+        assigneeUsername: "bob",
+        title: "Set up CI",
+        description: "Configure it",
+        dueDate: "2026-09-05",
+      },
+    );
+    if (!aliceTask.ok || !bobTask.ok) throw new Error("setup failed");
+    testBot.service.setBlocked(
+      { username: "alice", role: "Intern", cohortId: COHORT },
+      aliceTask.value.id,
+      "waiting on API access",
+    );
+    testBot.service.setBlocked(
+      { username: "bob", role: "Intern", cohortId: COHORT },
+      bobTask.value.id,
+      "waiting on design review",
+    );
+
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/blocked"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain(`#${aliceTask.value.id}`);
+    expect(text).not.toContain(`#${bobTask.value.id}`);
+    expect(text).not.toContain("design review");
+  });
+
+  it("a caller with zero blocked tasks gets a clear 'nothing blocked' message", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/blocked"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/nothing.*blocked/i);
+  });
+
+  it("/blocked <id> <reason> still flags a task as blocked (regression: shared command name)", async () => {
+    const aliceTask = testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      {
+        assigneeUsername: "alice",
+        title: "Write the onboarding doc",
+        description: "Draft it",
+        dueDate: "2026-09-05",
+      },
+    );
+    if (!aliceTask.ok) throw new Error("setup failed");
+
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    await testBot.bot.handleUpdate(
+      messageUpdate(aliceId, aliceId, `/blocked ${aliceTask.value.id} waiting on API access`),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/flagged as blocked/i);
+
+    const result = testBot.service.getTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      aliceTask.value.id,
+    );
+    expect(result.ok && result.value.blocked).toBe(true);
+  });
+});

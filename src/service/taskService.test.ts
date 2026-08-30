@@ -630,13 +630,7 @@ describe("listPending", () => {
 });
 
 describe("listBlocked", () => {
-  it("only higher-ups can view the cohort-wide blocked list", () => {
-    const { service } = makeService();
-    const result = service.listBlocked(alice);
-    expect(result.ok).toBe(false);
-  });
-
-  it("lists blocked tasks across all interns, not just ones the caller assigned", () => {
+  it("lists blocked tasks across all interns for a higher-up, not just ones the caller assigned", () => {
     const { service } = makeService();
     const created = assign(service, { assigneeUsername: "alice" });
     if (!created.ok) throw new Error("setup failed");
@@ -656,6 +650,31 @@ describe("listBlocked", () => {
     const { service } = makeService();
     assign(service, { assigneeUsername: "alice" });
     const result = service.listBlocked(carla);
+    expect(result.ok && result.value).toHaveLength(0);
+  });
+
+  it("scopes an intern's blocked list to only their own tasks", () => {
+    const { service } = makeService();
+    const aliceTask = assign(service, { assigneeUsername: "alice" });
+    if (!aliceTask.ok) throw new Error("setup failed");
+    service.setBlocked(alice, aliceTask.value.id, "waiting on API access");
+
+    const bobTask = assign(service, { assigneeUsername: "bob" });
+    if (!bobTask.ok) throw new Error("setup failed");
+    service.setBlocked(bob, bobTask.value.id, "waiting on design review");
+
+    const aliceBlocked = service.listBlocked(alice);
+    expect(aliceBlocked.ok).toBe(true);
+    if (aliceBlocked.ok) {
+      expect(aliceBlocked.value).toHaveLength(1);
+      expect(aliceBlocked.value[0]?.id).toBe(aliceTask.value.id);
+    }
+  });
+
+  it("an intern with no blocked tasks gets an empty list, not an error", () => {
+    const { service } = makeService();
+    assign(service, { assigneeUsername: "alice" });
+    const result = service.listBlocked(alice);
     expect(result.ok && result.value).toHaveLength(0);
   });
 });

@@ -11,6 +11,7 @@ import { notifyUser } from "./notify.js";
 import {
   formatAllTasksGrouped,
   formatBacklog,
+  formatBlocked,
   formatHelp,
   formatMyTasks,
   formatPending,
@@ -236,12 +237,21 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }),
   );
 
+  // `/blocked` is dual-purpose: with no arguments it's the read-only
+  // cohort/own blocked-task list (issue #6); with `<task_id> <reason>` it
+  // flags a task as blocked (PRD §5). Both share the same command name, so
+  // dispatch on whether any argument text was given.
   bot.command(
     "blocked",
     withCaller(async (ctx, caller) => {
+      if (matchToString(ctx.match).trim().length === 0) {
+        const result = service.listBlocked(caller);
+        await ctx.reply(result.ok ? formatBlocked(result.value) : result.error);
+        return;
+      }
       const { id, rest } = parseIdAndRest(ctx.match);
       if (id === undefined || rest.trim().length === 0) {
-        await ctx.reply("Usage: /blocked <task_id> <reason>");
+        await ctx.reply("Usage: /blocked <task_id> <reason>, or /blocked with no arguments to list blocked tasks");
         return;
       }
       const result = service.setBlocked(caller, id, rest);
