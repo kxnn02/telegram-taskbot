@@ -2,7 +2,7 @@
 
 A Telegram-native task management system for DevCon PH's internship program: interns and
 higher-ups assign, track, and review tasks directly inside Telegram (DM or the cohort's group
-chat), plus a read-only web dashboard for higher-up oversight.
+chat), plus a web dashboard for higher-up oversight, task creation/editing, and stats.
 
 See [`PRD.md`](./PRD.md) for the full product spec and design decisions, and
 [`CONTEXT.md`](./CONTEXT.md) for the "why" behind the technical choices. For how to actually use
@@ -81,7 +81,7 @@ src/
 │                    daily/weekly digests (node-cron)
 ├── bot/            Telegram bot: commands, wizards, formatting, notifications
 └── web/            Dashboard: Express server, Telegram Login Widget auth,
-                     read-only task view
+                     task oversight/creation/editing, and stats views
 ```
 
 ## Issue tracker

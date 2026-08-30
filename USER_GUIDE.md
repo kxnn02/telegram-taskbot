@@ -64,9 +64,14 @@ tap directly — no need to type the command.
 ## The `/assign` and `/edit` wizards
 
 These are conversations, not single commands — the bot asks you one question at a time (who,
-what, due date, etc.) and you reply with plain text. Due dates understand natural language, e.g.
-"next Friday" or "in 3 days" — you don't need to type an exact date. Send `/cancel` at any point
-to back out without making changes.
+what, due date, etc.) and you reply with plain text. When it asks for a username, type `@` to
+pick from Telegram's own suggestions instead of typing the full username by hand (this works
+most reliably in the group chat — in a DM it can only suggest people who are already your
+Telegram contacts). If you mistype a username anyway, the bot will suggest the closest real match
+in the cohort so you can just retype the corrected one. Due dates understand natural language,
+e.g. "next Friday" or "in 3 days" — you don't need to type an exact date. `/edit <id>` opens with
+a menu asking which single field you want to change, instead of walking through all of them.
+Send `/cancel` at any point to back out without making changes.
 
 ## Automatic notifications
 
@@ -75,16 +80,20 @@ You don't need to ask for these — they happen on their own:
 - A reminder the day before a task is due.
 - A notice when a task crosses its due date without being finished (sent to both you and the
   higher-up who assigned it).
+- If you're a higher-up, a notice when someone flags one of your assigned tasks as blocked —
+  with a **Mark unblocked** button you can tap once it's cleared, no need to type
+  `/unblocked <id>` yourself.
 - A daily and weekly summary posted to the group chat. This summary is deliberately just counts
   (e.g. "3 tasks due today, 1 overdue") — it never names specific task titles, to avoid
   publicly calling anyone out.
 
 ## The web dashboard
 
-Higher-ups can log in to a read-only dashboard using their Telegram account (no separate
-password) to see every task at a glance — filterable by status or by intern. It doesn't support
-creating or editing tasks yet; that's for the bot commands above. Ask whoever's running the
-project for the current dashboard URL, or send `/dashboard` to the bot.
+Higher-ups can log in using their Telegram account (no separate password) to see every task at a
+glance — filterable by status or by intern — and can also create new tasks, edit an existing
+task's fields, and view cohort-wide stats (completion rate, average time-to-submit, tasks
+completed this week) directly from the dashboard, using the same rules the bot enforces. Ask
+whoever's running the project for the current dashboard URL, or send `/dashboard` to the bot.
 
 ## Something not working?
 
