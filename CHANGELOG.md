@@ -1,0 +1,42 @@
+# Changelog
+
+A running log of what's shipped, for interns, higher-ups, and anyone else following along. Not a
+technical changelog — see `git log` or the GitHub issues for that level of detail. See
+`PRD.md` for the full design and `CONTEXT.md` for why things were built the way they were.
+
+## 2026-08-30 — v1 complete: full task lifecycle, notifications, and dashboard
+
+Everything planned for launch is built and working. All four tracked issues are closed:
+
+- **Core bot** ([#1](https://github.com/kxnn02/telegram-taskbot/issues/1)) — registration via
+  `/start`, the `/assign` and `/edit` step-by-step wizards, the full task lifecycle
+  (assign → submit → approve/revise, blocked/unblocked, cancel), and DM notifications on every
+  status change. Works both in a private chat with the bot **and** directly inside the cohort's
+  group chat.
+- **Scheduled notifications** ([#2](https://github.com/kxnn02/telegram-taskbot/issues/2)) — a
+  reminder the day before a task is due, a one-time notice when a task goes overdue, and daily +
+  weekly digests. The group chat's digest deliberately only shows counts, never task titles, to
+  avoid publicly calling anyone out.
+- **Dashboard login & oversight view** ([#3](https://github.com/kxnn02/telegram-taskbot/issues/3))
+  — higher-ups can log in with their Telegram account (no separate password) and see every task
+  in the cohort, filterable by status or by intern.
+- **Dashboard task management & stats** ([#4](https://github.com/kxnn02/telegram-taskbot/issues/4))
+  — higher-ups can now also create and edit tasks from the dashboard, with the exact same rules
+  the bot enforces, plus a stats view (tasks completed per intern, completion rate, average
+  time-to-submit, tasks completed this week).
+
+**Confirmed working live**, not just by automated tests: bot commands in the group chat, and
+dashboard login with real task data.
+
+**Not yet done**: the dashboard's new create/edit/stats pages haven't had a manual pass yet
+(only covered by automated tests so far). The bot and dashboard are also still running locally,
+not deployed anywhere permanent — see `README.md` for local setup, and this file will get an
+entry once a real deployment happens.
+
+## Earlier — planning
+
+The project's design went through an extensive back-and-forth before any code was written,
+including one notable reversal: the bot was originally meant to be DM-only, with the group chat
+only ever receiving a read-only daily summary. After early testing, that was changed so commands
+also work directly in the group chat — see `CONTEXT.md` for the full reasoning and the tradeoff
+that came with it. Full narrative is in `PRD.md`.
