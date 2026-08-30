@@ -268,6 +268,84 @@ describe("/edit wizard field picker", () => {
     expect(result.ok && result.value.assigneeUsername).toBe("alice"); // unchanged
   });
 
+  it("tapping Assignee with a close-typo username gets a 'did you mean' suggestion (issue #8)", async () => {
+    const taskId = await seedTask();
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/edit ${taskId}`));
+    await testBot.bot.handleUpdate(callbackUpdate(higherUpId, higherUpId, "editfield:assignee"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "alicw")); // typo of alice
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/isn't a known intern/i);
+    expect(text).toMatch(/did you mean @alice/i);
+
+    // still waiting for the next message: no auto-accept
+    const result = testBot.service.getTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      taskId,
+    );
+    expect(result.ok && result.value.assigneeUsername).toBe("alice"); // unchanged (was already alice)
+    expect(testBot.wizards.has(higherUpId)).toBe(true);
+
+    // caller must type the corrected username themselves
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "bob"));
+    const updated = testBot.service.getTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      taskId,
+    );
+    expect(updated.ok && updated.value.assigneeUsername).toBe("bob");
+  });
+
+  it("a username with no close match gets the plain rejection, no suggestion", async () => {
+    const taskId = await seedTask();
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/edit ${taskId}`));
+    await testBot.bot.handleUpdate(callbackUpdate(higherUpId, higherUpId, "editfield:assignee"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "zephyrxyz"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/isn't a known intern/i);
+    expect(text).not.toMatch(/did you mean/i);
+  });
+
+  it("equally-close matches across two interns falls back to the plain rejection (no ambiguous guess)", async () => {
+    const ambiguousRoster = new Roster([
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { username: "alice", role: "Intern", cohortId: COHORT },
+      { username: "alicf", role: "Intern", cohortId: COHORT },
+    ]);
+    const ambiguousBot = makeTestBot(ambiguousRoster);
+    const higherUpId = nextUserId();
+    await registerCaller(ambiguousBot, higherUpId, "carla");
+    const created = ambiguousBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      {
+        assigneeUsername: "alice",
+        title: "T",
+        description: "d",
+        dueDate: "2026-09-05",
+      },
+    );
+    if (!created.ok) throw new Error("seed failed");
+    const taskId = created.value.id;
+
+    await ambiguousBot.bot.handleUpdate(
+      messageUpdate(higherUpId, higherUpId, `/edit ${taskId}`),
+    );
+    await ambiguousBot.bot.handleUpdate(
+      callbackUpdate(higherUpId, higherUpId, "editfield:assignee"),
+    );
+    await ambiguousBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "alicx")); // distance 1 from both alice/alicf
+
+    const text = lastReplyText(ambiguousBot.calls);
+    expect(text).toMatch(/isn't a known intern/i);
+    expect(text).not.toMatch(/did you mean/i);
+  });
+
   it("/edit on an Approved task is rejected before the menu shows", async () => {
     const taskId = await seedTask();
     const higherUpId = nextUserId();
@@ -341,6 +419,21 @@ describe("/assign full 4-step flow (regression, unaffected by /edit changes)", (
       expect(list.value[0]?.description).toBe("Ship it end to end");
       expect(list.value[0]?.assigneeUsername).toBe("alice");
     }
+  });
+
+  it("suggests a close-typo username during /assign's first step too (issue #8)", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/assign"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "bobb")); // typo of bob
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/isn't a known intern/i);
+    expect(text).toMatch(/did you mean @bob/i);
+    expect(testBot.wizards.has(higherUpId)).toBe(true);
   });
 });
 

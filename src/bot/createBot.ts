@@ -8,6 +8,7 @@ import { parseDueDate } from "../date/parseDueDate.js";
 import { resolveCaller } from "./callerResolution.js";
 import { WizardManager, type WizardState, type EditField } from "./wizard.js";
 import { notifyUser } from "./notify.js";
+import { suggestClosestUsername } from "./usernameSuggest.js";
 import {
   formatAllTasksGrouped,
   formatBacklog,
@@ -615,8 +616,14 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     if (state.step === "awaiting_assignee") {
       const username = text.replace(/^@/, "");
       if (!roster.isIntern(username, caller.cohortId)) {
+        const internUsernames = roster
+          .all()
+          .filter((entry) => entry.role === "Intern" && entry.cohortId === caller.cohortId)
+          .map((entry) => entry.username);
+        const suggestion = suggestClosestUsername(username, internUsernames);
+        const suggestionText = suggestion ? ` Did you mean @${suggestion}?` : "";
         await ctx.reply(
-          `@${username} isn't a known intern in this cohort. Try again, or /cancel.`,
+          `@${username} isn't a known intern in this cohort.${suggestionText} Try again, or /cancel.`,
         );
         return;
       }
