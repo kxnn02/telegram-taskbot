@@ -32,7 +32,15 @@ const NEXT_STEP_HINT: Record<string, string> = {
   NeedsRevision: "Take another look and `/submit <id>` again when ready.",
 };
 
-export function createBot(options: CreateBotOptions): Bot {
+export interface CreatedBot {
+  bot: Bot;
+  db: ReturnType<typeof openDatabase>;
+  service: TaskService;
+  roster: ReturnType<typeof loadRoster>;
+  registrations: RegistrationRepository;
+}
+
+export function createBot(options: CreateBotOptions): CreatedBot {
   const bot = new Bot(options.token);
   const db = openDatabase(options.dbPath);
   const roster = loadRoster(options.rosterPath);
@@ -654,7 +662,7 @@ export function createBot(options: CreateBotOptions): Bot {
     await ctx.reply(`Task ${state.data.taskId} updated.`);
   }
 
-  return bot;
+  return { bot, db, service, roster, registrations };
 }
 
 type CommandMatch = string | RegExpMatchArray | undefined;
