@@ -294,6 +294,36 @@ as a step before the live suite in CI's `contract` job (catches yesterday's cras
 run adds more), and again on its own daily schedule (`.github/workflows/sweep-test-cohorts.yml`)
 so cleanup doesn't depend on how often `main` gets pushed to.
 
+### Caller resolution is bound to one cohort per deployment (Phase 3 review finding)
+
+The dry-run cohort (ADR-0004) intentionally reuses the same real Telegram accounts as the real
+cohort — `kxnn02`/`chiaia_0702` exist as roster entries under both `cohort-5` and
+`cohort5-dryrun`. `Roster.find(username)` (no `cohortId` argument) resolves this ambiguity
+deterministically but arbitrarily: whichever cohort's entry was inserted first. A code-review
+pass on the Phase 3 webhook work caught that `resolveCaller` (`callerResolution.ts`) — used by
+`/start` and every `withCaller`-wrapped bot command, in DM or group chat — called `roster.find`
+with no cohort context at all. Since the seed script inserts the real cohort before the dry-run
+cohort, every dry-run command from either test account would have silently resolved against the
+real `cohort-5`, not the isolated `cohort5-dryrun` — exactly the cross-cohort contamination the
+dry run's cohort-scoping was supposed to prevent, since `TaskService` scopes every read/write off
+the resolved `caller.cohortId`. The same pattern existed in `dashboardServer.ts`'s Telegram-login
+lookup.
+
+Fixed by recognizing that every real deployment only ever serves one cohort — there's a Vercel
+webhook function per branch (real vs. dry-run), and a dashboard process per deployment, never one
+instance serving both. `createBot.ts` and `createDashboardServer` now take a required
+`activeCohortId`, threaded from the existing (previously unused) `ACTIVE_COHORT_ID` env var, and
+every live-request call site (`resolveCaller`, `/start`'s roster lookup, the dashboard's
+Telegram-login lookup) passes it explicitly to `Roster.find(username, cohortId)` rather than
+falling through to the ambiguous no-cohort-arg overload. That overload still exists — it's used
+by call sites that genuinely don't have a resolved cohort in hand yet (none remain reachable from
+a live request as of this fix; it's kept for the rare legitimate case and for tests) — but no
+production request path is allowed to hit it. Regression coverage: `callerResolution.test.ts`
+(unit-level), `dashboardServer.test.ts` (full HTTP-level login + read), and
+`createBot.test.ts`'s "Cohort binding..." describe block (real `bot.handleUpdate` dispatch,
+proving `/start` and a data-read command both stay scoped to the deployment's bound cohort even
+when two separate bot instances share an identical ambiguous roster).
+
 ## Out of scope (deferred to v2)
 
 Mini App UI, file attachments, CSV export, recurring tasks, and standup response-collection were

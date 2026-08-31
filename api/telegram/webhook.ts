@@ -20,6 +20,12 @@ import { handleTelegramWebhook, type WebhookHandlerDeps } from "../../src/webhoo
  * (`src/webhook/webhookHandler.ts`), which is unit-tested directly without
  * needing a live deploy — this wrapper just adapts a real
  * `VercelRequest`/`VercelResponse` to/from that function's plain shape.
+ *
+ * `ACTIVE_COHORT_ID` binds this specific deployment to exactly one cohort
+ * (CONTEXT.md's cohort-binding note): the real cohort and the dry-run
+ * cohort each get their own deployed branch/env, never one instance
+ * serving both, since the dry run reuses real accounts across cohorts and
+ * caller resolution can't safely guess between them.
  */
 
 let depsPromise: Promise<WebhookHandlerDeps> | undefined;
@@ -33,6 +39,10 @@ async function buildDeps(): Promise<WebhookHandlerDeps> {
   if (!secret) {
     throw new Error("TELEGRAM_WEBHOOK_SECRET is not set.");
   }
+  const activeCohortId = process.env.ACTIVE_COHORT_ID;
+  if (!activeCohortId) {
+    throw new Error("ACTIVE_COHORT_ID is not set.");
+  }
 
   const supabase = createSupabaseClient();
   const roster = await loadRosterFromStore(new SupabaseRosterStore(supabase));
@@ -43,6 +53,7 @@ async function buildDeps(): Promise<WebhookHandlerDeps> {
     registrationStore: new SupabaseRegistrationStore(supabase),
     wizardStateStore: new SupabaseWizardStateStore(supabase),
     roster,
+    activeCohortId,
     dashboardUrl:
       process.env.DASHBOARD_URL ?? "https://example.com/dashboard-coming-soon",
   });
