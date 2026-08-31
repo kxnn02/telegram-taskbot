@@ -4,6 +4,23 @@ A running log of what's shipped, for interns, higher-ups, and anyone else follow
 technical changelog — see `git log` or the GitHub issues for that level of detail. See
 `PRD.md` for the full design and `CONTEXT.md` for why things were built the way they were.
 
+## 2026-08-31 — Re-platform planned (nothing shipped yet)
+
+v1 plus the post-v1 bot improvements (#1-#9) are done and closed, but the bot was never deployed
+anywhere permanent. Working through the deployment question surfaced that it had already been
+decided implicitly by library choice (a file-backed SQLite database, Telegram long polling, and
+an in-process job scheduler all require an always-on host) rather than explicitly. Decision: move
+onto the same stack DevCon's other tooling already runs — Next.js, Vercel, and Supabase — so this
+tool can be handed over and run by anyone in the org, not just whoever maintains today's host.
+
+This round was **planning only** — a full spec, database schema, system architecture, dry-run
+strategy, and CI/CD design (there was no CI before this), recorded as [ADR-0001 through
+ADR-0008](./docs/adr/) and filed as GitHub issues
+[#11](https://github.com/kxnn02/telegram-taskbot/issues/11) (spec) through
+[#17](https://github.com/kxnn02/telegram-taskbot/issues/17) (the six implementation phases). No
+code has changed — the bot and dashboard still run exactly as described elsewhere in this file
+until implementation begins.
+
 ## 2026-08-30 — v1 complete: full task lifecycle, notifications, and dashboard
 
 Everything planned for launch is built and working. All four tracked issues are closed:
