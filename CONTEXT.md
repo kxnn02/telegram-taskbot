@@ -257,6 +257,43 @@ this" special-casing was added — the existing status-check-first behavior the 
 requires for `/submit`/`/approve`/`/revise`/`/canceltask` (§4) covers this uniformly, and the
 notification message simply reflects whatever the service says happened (or didn't).
 
+### Contract-test isolation: unique cohorts + cascading delete, not transaction rollback (issue #13)
+
+ADR-0005 proposed running each contract test inside a database transaction rolled back at the
+end, so the shared Supabase project (also used for real cohort data and the future dry-run
+cohort) sees zero permanent footprint from CI. That's not achievable as written: `SupabaseTaskStore`
+talks to Postgres over PostgREST, and every `supabase-js` call is its own independent HTTP
+request/connection — there's no way for a test's setup code to open a transaction on one
+connection and have the adapter's own requests execute inside it, the way an in-process `pg`
+client passed a single connection could.
+
+What's actually implemented instead, in `supabaseTaskStore.live.test.ts`: each test run generates
+a uniquely-prefixed pair of test cohort ids (`__contract_test_<runId>_<n>__`), inserts them into
+`cohorts` in `beforeEach`, and deletes them in `afterEach`. A migration
+(`20260831070000_cascade_deletes.sql`) added `ON DELETE CASCADE` from `cohorts` down through
+`cohort_counters`/`tasks`/`notes`, so deleting the one cohort row wipes everything a test wrote
+under it in a single delete, regardless of what that test did — the same "zero permanent
+footprint on the shared project" property ADR-0005 was actually after, just achieved by scoped
+deletion instead of literal rollback. Verified directly: after a full contract-suite run against
+the real project, a follow-up query for `__contract_test*` cohorts returns nothing.
+
+This also means the contract suite isn't testing genuine cross-invocation isolation (two contract
+tests could in principle interleave against the *same* cohort if run concurrently) — it doesn't
+need to, since each test gets cohort ids nobody else is using. Real concurrent-write safety
+(the row_version check) is exercised directly, deliberately, by the "stale rowVersion" test.
+
+**Residual gap, and the sweep that backstops it**: `afterEach`-based cleanup only runs on the
+happy path — a crashed test process (or a killed CI job) skips it, leaving that one run's test
+cohort (and everything cascaded under it) sitting in the shared project indefinitely. Since this
+is the same shared project real cohort and dry-run data live in, that's a real gap, not a
+theoretical one, even though any single leftover is small and clearly marked by the
+`__contract_test_` prefix. `sweepStaleTestCohorts` (`src/storage/sweepStaleTestCohorts.ts`) closes
+it: it finds any cohort matching that prefix older than an hour — far longer than the live suite
+ever legitimately takes to run — and deletes it, cascading the same way `afterEach` does. It runs
+as a step before the live suite in CI's `contract` job (catches yesterday's crash before today's
+run adds more), and again on its own daily schedule (`.github/workflows/sweep-test-cohorts.yml`)
+so cleanup doesn't depend on how often `main` gets pushed to.
+
 ## Out of scope (deferred to v2)
 
 Mini App UI, file attachments, CSV export, recurring tasks, and standup response-collection were

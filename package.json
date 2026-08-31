@@ -9,6 +9,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:live": "vitest run --config vitest.live.config.ts",
+    "sweep:test-cohorts": "tsx scripts/sweepStaleTestCohorts.ts",
     "dev": "tsx src/bot/index.ts",
     "start": "node dist/bot/index.js",
     "dashboard:dev": "tsx src/web/index.ts",
@@ -16,6 +18,7 @@
     "copy-assets": "node -e \"require('fs').cpSync('src/web/public','dist/web/public',{recursive:true})\""
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.4",
     "chrono-node": "^2.7.7",
     "dotenv": "^16.4.5",
     "express": "^4.22.2",

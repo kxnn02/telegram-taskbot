@@ -9,9 +9,8 @@ vi.mock("node-cron", () => ({
 // Imported after the mock so startScheduler picks up the mocked node-cron.
 const { startScheduler, MANILA_TIMEZONE } = await import("./scheduler.js");
 
-import { openDatabase } from "../db/schema.js";
-import { OverdueNotificationRepository } from "../db/overdueNotificationRepository.js";
-import { RegistrationRepository } from "../db/registrationRepository.js";
+import { InMemoryOverdueNotificationStore } from "../storage/inMemoryOverdueNotificationStore.js";
+import { InMemoryRegistrationStore } from "../storage/inMemoryRegistrationStore.js";
 import { FixedClock } from "../domain/clock.js";
 import { Roster } from "../domain/roster.js";
 import { TaskService } from "../service/taskService.js";
@@ -19,17 +18,16 @@ import { InMemoryTaskStore } from "../storage/inMemoryTaskStore.js";
 import type { SchedulerDeps } from "./scheduler.js";
 
 function makeDeps(): SchedulerDeps {
-  const db = openDatabase(":memory:");
   const roster = new Roster([
     { username: "alice", role: "Intern", cohortId: "cohort-5" },
   ]);
   const service = new TaskService(new InMemoryTaskStore(), roster, new FixedClock(new Date()));
   return {
     bot: { api: { sendMessage: vi.fn() } },
-    registrations: new RegistrationRepository(db),
+    registrations: new InMemoryRegistrationStore(),
     service,
     roster,
-    overdueNotifications: new OverdueNotificationRepository(db),
+    overdueNotifications: new InMemoryOverdueNotificationStore(),
     groupChatId: "-100999",
   };
 }
