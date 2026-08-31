@@ -1,0 +1,42 @@
+name: CI
+
+# ADR-0005: typecheck + the fast in-memory-fake suite run on every push/PR;
+# the contract-test suite against the real Supabase project (needs live
+# network access and credentials) runs additionally on every push to main
+# only.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  fast:
+    name: Typecheck + fast suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.5.0"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  contract:
+    name: Supabase contract tests (main only)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    needs: fast
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.5.0"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run test:live
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
