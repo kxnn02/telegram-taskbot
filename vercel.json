@@ -1,0 +1,4 @@
+{
+  "buildCommand": "echo 'No app build needed for this deployment — only /api serverless functions are deployed here (Phase 3, issue #14). The Next.js app build lands in Phase 6.'",
+  "outputDirectory": "public"
+}

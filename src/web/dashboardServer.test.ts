@@ -46,7 +46,13 @@ function makeApp() {
   const roster = makeRoster();
   const clock = new FixedClock(NOW);
   const service = new TaskService(store, roster, clock);
-  const app = createDashboardServer({ botToken: BOT_TOKEN, roster, service, botUsername: "devcon_cohort5_taskbot" });
+  const app = createDashboardServer({
+    botToken: BOT_TOKEN,
+    roster,
+    service,
+    botUsername: "devcon_cohort5_taskbot",
+    activeCohortId: COHORT,
+  });
   return { app, service };
 }
 
@@ -102,6 +108,38 @@ describe("GET /auth/telegram/callback", () => {
       .get("/auth/telegram/callback")
       .query({ ...payload, username: "carla_but_altered" } as unknown as Record<string, string>);
     expect(res.status).toBe(401);
+  });
+
+  it("logs in against the dashboard's own bound cohort, not whichever cohort happens to be first in roster order, when the same username exists in more than one cohort (ADR-0004's dry-run reused accounts)", async () => {
+    const store = new InMemoryTaskStore();
+    const roster = new Roster([
+      { username: "carla", role: "HigherUp", cohortId: "cohort-5" },
+      { username: "carla", role: "HigherUp", cohortId: "cohort5-dryrun" },
+      { username: "alice", role: "Intern", cohortId: "cohort5-dryrun" },
+    ]);
+    const service = new TaskService(store, roster, new FixedClock(NOW));
+    await service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: "cohort5-dryrun" },
+      { assigneeUsername: "alice", title: "dry-run-only task", description: "d", dueDate: "2026-09-05" },
+    );
+
+    const app = createDashboardServer({
+      botToken: BOT_TOKEN,
+      roster,
+      service,
+      botUsername: "devcon_cohort5_taskbot",
+      activeCohortId: "cohort5-dryrun",
+    });
+
+    const login = await request(app)
+      .get("/auth/telegram/callback")
+      .query(telegramPayloadFor("carla") as unknown as Record<string, string>);
+    expect(login.status).toBe(302);
+    const cookie = sessionCookieFrom(login);
+
+    const res = await request(app).get("/").set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("dry-run-only task");
   });
 });
 

@@ -11,6 +11,7 @@ const { startScheduler, MANILA_TIMEZONE } = await import("./scheduler.js");
 
 import { InMemoryOverdueNotificationStore } from "../storage/inMemoryOverdueNotificationStore.js";
 import { InMemoryRegistrationStore } from "../storage/inMemoryRegistrationStore.js";
+import { InMemoryCohortStore } from "../storage/inMemoryCohortStore.js";
 import { FixedClock } from "../domain/clock.js";
 import { Roster } from "../domain/roster.js";
 import { TaskService } from "../service/taskService.js";
@@ -28,7 +29,7 @@ function makeDeps(): SchedulerDeps {
     service,
     roster,
     overdueNotifications: new InMemoryOverdueNotificationStore(),
-    groupChatId: "-100999",
+    cohorts: new InMemoryCohortStore({ "cohort-5": "-100999" }),
   };
 }
 

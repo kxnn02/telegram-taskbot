@@ -1,6 +1,7 @@
 import cron from "node-cron";
 import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
 import type { OverdueNotificationStorePort } from "../storage/overdueNotificationStorePort.js";
+import type { CohortStorePort } from "../storage/cohortStorePort.js";
 import type { Roster } from "../domain/roster.js";
 import type { Caller } from "../domain/types.js";
 import type { TaskService } from "../service/taskService.js";
@@ -28,10 +29,12 @@ export interface SchedulerDeps {
   service: TaskService;
   roster: Roster;
   overdueNotifications: OverdueNotificationStorePort;
-  /** Telegram chat id of the cohort's group chat, for the daily standup
-   * summary (PRD §8). Digests/reminders still run without it — only the
-   * group-chat post is skipped. */
-  groupChatId?: string;
+  /** Per-cohort Telegram group chat id lookup (ADR-0006), replacing the old
+   * single global `GROUP_CHAT_ID` — the real cohort and the dry-run cohort
+   * each have their own group. Digests/reminders still run without one
+   * configured for a given cohort — only that cohort's group-chat post is
+   * skipped. */
+  cohorts: CohortStorePort;
 }
 
 function cohortIds(roster: Roster): string[] {
@@ -128,11 +131,12 @@ export async function runDailyDigest(
     }
   }
 
-  if (deps.groupChatId) {
+  const groupChatId = await deps.cohorts.getGroupChatId(cohortId);
+  if (groupChatId) {
     const counts = await digestBuilder.groupDailyCounts(cohortId);
     const summary = formatGroupDailySummary(counts);
     try {
-      await deps.bot.api.sendMessage(deps.groupChatId, summary);
+      await deps.bot.api.sendMessage(groupChatId, summary);
     } catch {
       // Best-effort, same as DM delivery.
     }

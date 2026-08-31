@@ -4,6 +4,7 @@ import { SystemClock } from "../domain/clock.js";
 import { TaskService } from "../service/taskService.js";
 import type { TaskStorePort } from "../storage/taskStorePort.js";
 import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
+import type { WizardStateStorePort } from "../storage/wizardStateStorePort.js";
 import { parseDueDate } from "../date/parseDueDate.js";
 import { resolveCaller } from "./callerResolution.js";
 import { WizardManager, type WizardState, type EditField } from "./wizard.js";
@@ -30,6 +31,18 @@ export interface CreateBotOptions {
    * (PRD §7). Production code passes a `SupabaseRegistrationStore`; tests
    * pass an `InMemoryRegistrationStore`. */
   registrationStore: RegistrationStorePort;
+  /** Storage port for in-progress /assign and /edit wizard state
+   * (ADR-0006). Production code passes a `SupabaseWizardStateStore`; tests
+   * pass an `InMemoryWizardStateStore`. */
+  wizardStateStore: WizardStateStorePort;
+  /** The cohort this deployed bot instance serves (ADR-0004/CONTEXT.md's
+   * cohort-binding note). Every real deployment serves exactly one
+   * cohort — the real cohort or the dry-run cohort, never both — so
+   * caller resolution is always bound to this id rather than letting
+   * `roster.find` guess ambiguously among cohorts that happen to share a
+   * username (the dry run intentionally reuses real accounts across
+   * cohorts). */
+  activeCohortId: string;
   rosterPath?: string;
   dashboardUrl: string;
   /** Injected Bot instance — used by tests to avoid a real network `getMe`
@@ -64,10 +77,10 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   // TaskService talks only through the TaskStorePort (ADR-0005) — see
   // bot/index.ts for how production wires this to SupabaseTaskStore.
   const service = new TaskService(options.taskStore, roster, clock);
-  const wizards = new WizardManager();
+  const wizards = new WizardManager(options.wizardStateStore);
 
   function requireCaller(userId: number) {
-    return resolveCaller(userId, registrations, roster);
+    return resolveCaller(userId, registrations, roster, options.activeCohortId);
   }
 
   // ---- /start ---------------------------------------------------------
@@ -85,10 +98,10 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       text &&
       text.startsWith("/") &&
       userId !== undefined &&
-      wizards.has(userId) &&
-      !text.toLowerCase().startsWith("/cancel")
+      !text.toLowerCase().startsWith("/cancel") &&
+      (await wizards.has(userId))
     ) {
-      wizards.cancel(userId);
+      await wizards.cancel(userId);
       await ctx.reply(
         "Cancelled your in-progress form since you sent a new command.",
       );
@@ -106,7 +119,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       );
       return;
     }
-    const entry = roster.find(username);
+    const entry = roster.find(username, options.activeCohortId);
     if (!entry) {
       await ctx.reply(
         "You're not on the roster yet — contact a higher-up to get added.",
@@ -135,7 +148,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   bot.command("cancel", async (ctx) => {
     const userId = ctx.from?.id;
     if (userId === undefined) return;
-    const had = wizards.cancel(userId);
+    const had = await wizards.cancel(userId);
     await ctx.reply(had ? "Cancelled." : "Nothing to cancel.");
   });
 
@@ -487,7 +500,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await ctx.reply("Only higher-ups can assign tasks.");
         return;
       }
-      wizards.start(ctx.from!.id, "assign");
+      await wizards.start(ctx.from!.id, "assign");
       await ctx.reply(
         "Who is this task for? Type @ to pick from Telegram's suggestions, or just send their username.",
       );
@@ -517,7 +530,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         );
         return;
       }
-      wizards.start(ctx.from!.id, "edit", { taskId: id });
+      await wizards.start(ctx.from!.id, "edit", { taskId: id });
       const keyboard = new InlineKeyboard()
         .text("Assignee", "editfield:assignee")
         .text("Title", "editfield:title")
@@ -535,7 +548,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
 
   bot.callbackQuery(/^editfield:(assignee|title|description|duedate)$/, async (ctx) => {
     const userId = ctx.from.id;
-    const state = wizards.get(userId);
+    const state = await wizards.get(userId);
     if (!state || state.step !== "awaiting_field_choice") {
       await ctx.answerCallbackQuery({ text: "That form has expired." });
       return;
@@ -547,7 +560,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }
     const found = await service.getTask(resolved.caller, state.data.taskId!);
     if (!found.ok) {
-      wizards.cancel(userId);
+      await wizards.cancel(userId);
       await ctx.answerCallbackQuery();
       await ctx.editMessageText(found.error);
       return;
@@ -557,7 +570,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     await ctx.answerCallbackQuery();
 
     if (fieldParam === "assignee") {
-      wizards.update(userId, {
+      await wizards.update(userId, {
         step: "awaiting_assignee",
         data: { editField: "assignee" },
       });
@@ -567,7 +580,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       return;
     }
     if (fieldParam === "title") {
-      wizards.update(userId, {
+      await wizards.update(userId, {
         step: "awaiting_title",
         data: { editField: "title" },
       });
@@ -577,7 +590,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       return;
     }
     if (fieldParam === "description") {
-      wizards.update(userId, {
+      await wizards.update(userId, {
         step: "awaiting_description",
         data: { editField: "description" },
       });
@@ -587,7 +600,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       return;
     }
     // duedate
-    wizards.update(userId, {
+    await wizards.update(userId, {
       step: "awaiting_due_date",
       data: { editField: "dueDate" },
     });
@@ -607,7 +620,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       return;
     }
     const userId = ctx.from.id;
-    const state = wizards.get(userId);
+    const state = await wizards.get(userId);
     if (!state) {
       // With privacy mode off, the bot sees every message in a group chat,
       // not just ones meant for it — only DMs can assume every message is
@@ -619,7 +632,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }
     const resolved = await requireCaller(userId);
     if (resolved.status !== "ok") {
-      wizards.cancel(userId);
+      await wizards.cancel(userId);
       await ctx.reply("Send /start first.");
       return;
     }
@@ -653,14 +666,14 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         );
         return;
       }
-      const updated = wizards.update(userId, {
+      const updated = (await wizards.update(userId, {
         data: { assigneeUsername: username },
-      })!;
+      }))!;
       if (state.kind === "edit") {
         await finishWizard(ctx, caller, userId, updated);
         return;
       }
-      wizards.update(userId, { step: "awaiting_title" });
+      await wizards.update(userId, { step: "awaiting_title" });
       await ctx.reply("Title?");
       return;
     }
@@ -670,12 +683,12 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await ctx.reply("Title can't be empty. Try again, or /cancel.");
         return;
       }
-      const updated = wizards.update(userId, { data: { title: text } })!;
+      const updated = (await wizards.update(userId, { data: { title: text } }))!;
       if (state.kind === "edit") {
         await finishWizard(ctx, caller, userId, updated);
         return;
       }
-      wizards.update(userId, { step: "awaiting_description" });
+      await wizards.update(userId, { step: "awaiting_description" });
       await ctx.reply("Description?");
       return;
     }
@@ -685,12 +698,12 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await ctx.reply("Description can't be empty. Try again, or /cancel.");
         return;
       }
-      const updated = wizards.update(userId, { data: { description: text } })!;
+      const updated = (await wizards.update(userId, { data: { description: text } }))!;
       if (state.kind === "edit") {
         await finishWizard(ctx, caller, userId, updated);
         return;
       }
-      wizards.update(userId, { step: "awaiting_due_date" });
+      await wizards.update(userId, { step: "awaiting_due_date" });
       await ctx.reply('Due date? (e.g. "next Friday", "in 3 days", "Sept 5")');
       return;
     }
@@ -703,7 +716,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         );
         return;
       }
-      wizards.update(userId, {
+      await wizards.update(userId, {
         step: "awaiting_due_date_confirm",
         data: { pendingDueDate: parsed },
       });
@@ -720,7 +733,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
 
   bot.callbackQuery(/^duedate:(yes|no)$/, async (ctx) => {
     const userId = ctx.from.id;
-    const state = wizards.get(userId);
+    const state = await wizards.get(userId);
     if (!state || state.step !== "awaiting_due_date_confirm") {
       await ctx.answerCallbackQuery({ text: "That form has expired." });
       return;
@@ -734,16 +747,16 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     await ctx.answerCallbackQuery();
 
     if (decision === "no") {
-      wizards.update(userId, { step: "awaiting_due_date" });
+      await wizards.update(userId, { step: "awaiting_due_date" });
       await ctx.editMessageText(
         'Okay — send the due date again (e.g. "next Friday", "in 3 days", "Sept 5"):',
       );
       return;
     }
 
-    const finalState = wizards.update(userId, {
+    const finalState = (await wizards.update(userId, {
       data: { dueDate: state.data.pendingDueDate!.isoDate },
-    })!;
+    }))!;
     await ctx.editMessageText(`Saved: ${state.data.pendingDueDate!.friendly}`);
     await finishWizard(ctx, resolved.caller, userId, finalState);
   });
@@ -754,7 +767,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     userId: number,
     state: WizardState,
   ) {
-    wizards.cancel(userId);
+    await wizards.cancel(userId);
 
     if (state.kind === "assign") {
       const result = await service.assignTask(caller, {

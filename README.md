@@ -36,8 +36,8 @@ Fill in `.env`:
 | `BOT_TOKEN` | yes | From `@BotFather` |
 | `SUPABASE_URL` | yes | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | Supabase service-role key (bypasses RLS; see ADR-0006) |
-| `ACTIVE_COHORT_ID` | no (defaults to `cohort-5`) | Cohort treated as "current" |
-| `GROUP_CHAT_ID` | no | Cohort group chat id, for daily/weekly digests |
+| `ACTIVE_COHORT_ID` | yes | The single cohort this deployment serves — every live request (bot commands, dashboard login) binds to this id; see CONTEXT.md's cohort-binding note |
+| `GROUP_CHAT_ID` | no, unused | Superseded by the `cohorts` table (ADR-0006) as of Phase 3 — kept only as a historical placeholder |
 | `DASHBOARD_URL` | no | URL shown by the bot's `/dashboard` command |
 | `ROSTER_PATH` | no (defaults to `roster.config.json`) | Path to the roster JSON file |
 | `BOT_USERNAME` | yes, for the dashboard | Must match the bot behind `BOT_TOKEN` |

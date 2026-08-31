@@ -4,6 +4,7 @@ import type { Update, UserFromGetMe } from "grammy/types";
 import { Roster } from "../domain/roster.js";
 import { InMemoryTaskStore } from "../storage/inMemoryTaskStore.js";
 import { InMemoryRegistrationStore } from "../storage/inMemoryRegistrationStore.js";
+import { InMemoryWizardStateStore } from "../storage/inMemoryWizardStateStore.js";
 import { createBot, type CreatedBot } from "./createBot.js";
 
 const COHORT = "cohort-5";
@@ -67,7 +68,7 @@ function nextUserId() {
   return userIdSeq++;
 }
 
-function makeTestBot(roster: Roster) {
+function makeTestBot(roster: Roster, activeCohortId: string = COHORT) {
   const { calls, transformer } = makeFakeTransformer();
   const bot = new Bot("TEST_TOKEN", { botInfo: FAKE_BOT_INFO });
   bot.api.config.use(transformer);
@@ -75,6 +76,8 @@ function makeTestBot(roster: Roster) {
     token: "TEST_TOKEN",
     taskStore: new InMemoryTaskStore(),
     registrationStore: new InMemoryRegistrationStore(),
+    wizardStateStore: new InMemoryWizardStateStore(),
+    activeCohortId,
     dashboardUrl: "http://localhost:1234",
     bot,
     roster,
@@ -290,7 +293,7 @@ describe("/edit wizard field picker", () => {
       taskId,
     );
     expect(result.ok && result.value.assigneeUsername).toBe("alice"); // unchanged (was already alice)
-    expect(testBot.wizards.has(higherUpId)).toBe(true);
+    expect(await testBot.wizards.has(higherUpId)).toBe(true);
 
     // caller must type the corrected username themselves
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "bob"));
@@ -363,7 +366,7 @@ describe("/edit wizard field picker", () => {
     const text = lastReplyText(testBot.calls);
     expect(text).toMatch(/approved/i);
     expect(text).not.toContain("Which field");
-    expect(testBot.wizards.has(higherUpId)).toBe(false);
+    expect(await testBot.wizards.has(higherUpId)).toBe(false);
   });
 
   it("/cancel aborts the wizard at the field-choice stage", async () => {
@@ -372,9 +375,9 @@ describe("/edit wizard field picker", () => {
     await registerCaller(testBot, higherUpId, "carla");
 
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/edit ${taskId}`));
-    expect(testBot.wizards.has(higherUpId)).toBe(true);
+    expect(await testBot.wizards.has(higherUpId)).toBe(true);
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/cancel"));
-    expect(testBot.wizards.has(higherUpId)).toBe(false);
+    expect(await testBot.wizards.has(higherUpId)).toBe(false);
 
     const text = lastReplyText(testBot.calls);
     expect(text).toMatch(/cancelled/i);
@@ -436,7 +439,7 @@ describe("/assign full 4-step flow (regression, unaffected by /edit changes)", (
     const text = lastReplyText(testBot.calls);
     expect(text).toMatch(/isn't a known intern/i);
     expect(text).toMatch(/did you mean @bob/i);
-    expect(testBot.wizards.has(higherUpId)).toBe(true);
+    expect(await testBot.wizards.has(higherUpId)).toBe(true);
   });
 });
 
@@ -737,5 +740,85 @@ describe("/alltasks and /mytasks pagination (issue #7)", () => {
 
     const text = lastReplyText(testBot.calls);
     expect(text).toMatch(/usage/i);
+  });
+});
+
+describe("Cohort binding closes the reused-account ambiguity (dry-run isolation fix)", () => {
+  // ADR-0004: the dry-run cohort reuses the same real Telegram accounts as
+  // the real cohort, so "carla"/"alice" exist under both cohort-5 and
+  // cohort5-dryrun. Before the fix, /start and every withCaller-wrapped
+  // command (resolveCaller -> roster.find(username), no cohort context)
+  // would resolve against whichever cohort happened to be first in roster
+  // order — silently reading/writing the wrong cohort's tasks. This
+  // exercises the actual attack surface: a real bot instance, dispatching
+  // real Telegram updates through bot.handleUpdate, exactly as the webhook
+  // handler does.
+  function ambiguousRoster() {
+    return new Roster([
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { username: "alice", role: "Intern", cohortId: COHORT },
+      { username: "carla", role: "HigherUp", cohortId: "cohort5-dryrun" },
+      { username: "alice", role: "Intern", cohortId: "cohort5-dryrun" },
+    ]);
+  }
+
+  it("/start registers the caller against this deployment's own bound cohort, not the ambiguous first match", async () => {
+    const testBot = makeTestBot(ambiguousRoster(), "cohort5-dryrun");
+    const carlaId = nextUserId();
+    // messageUpdate's synthetic `from` has no username, but /start reads
+    // ctx.from.username directly — build the update by hand here instead
+    // of widening the shared helper's shape for every other test.
+    const startUpdate = {
+      update_id: 900000 + carlaId,
+      message: {
+        message_id: 900000 + carlaId,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: carlaId, type: "private" },
+        from: { id: carlaId, is_bot: false, first_name: "Test", username: "carla" },
+        text: "/start",
+        entities: [{ type: "bot_command", offset: 0, length: 6 }],
+      },
+    } as unknown as Update;
+    await testBot.bot.handleUpdate(startUpdate);
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("cohort5-dryrun");
+    expect(text).not.toContain(`${COHORT}.`); // not "...for cohort-5."
+  });
+
+  it("a /assign'd task and a /mytasks read both stay scoped to this deployment's bound cohort, never leaking into the other cohort sharing the same usernames", async () => {
+    // Two separate deployments (as if one were the real cohort-5 webhook
+    // and the other were the dry-run webhook), sharing nothing but the
+    // same ambiguous roster shape — exactly today's live setup.
+    const dryRunBot = makeTestBot(ambiguousRoster(), "cohort5-dryrun");
+    const realBot = makeTestBot(ambiguousRoster(), COHORT);
+
+    const carlaId = nextUserId();
+    const aliceId = nextUserId();
+    await registerCaller(dryRunBot, carlaId, "carla");
+    await registerCaller(dryRunBot, aliceId, "alice");
+
+    const assignResult = await dryRunBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: "cohort5-dryrun" },
+      {
+        assigneeUsername: "alice",
+        title: "dry-run-only task",
+        description: "d",
+        dueDate: "2026-09-05",
+      },
+    );
+    if (!assignResult.ok) throw new Error("setup failed");
+
+    await dryRunBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/mytasks"));
+    expect(lastReplyText(dryRunBot.calls)).toContain("dry-run-only task");
+
+    // The "real cohort" deployment has its own separate InMemoryTaskStore
+    // (a different createBot() call, mirroring two separate deployed
+    // instances each with their own SupabaseTaskStore call scoped by
+    // cohortId) — same roster, same usernames, zero visibility into the
+    // dry-run deployment's task.
+    await registerCaller(realBot, aliceId, "alice");
+    await realBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/mytasks"));
+    expect(lastReplyText(realBot.calls)).not.toContain("dry-run-only task");
   });
 });
