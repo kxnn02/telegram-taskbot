@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import type { Update } from "grammy/types";
 
 /**
@@ -37,6 +38,21 @@ export interface WebhookHandlerDeps {
 
 const SECRET_HEADER = "x-telegram-bot-api-secret-token";
 
+/**
+ * Timing-safe comparison of the incoming secret-token header against the
+ * expected value. A plain `===` here would leak a timing side-channel on a
+ * secret-token check; `crypto.timingSafeEqual` requires equal-length
+ * buffers, so a length mismatch (including a missing header) is treated as
+ * a non-match up front without ever touching `timingSafeEqual`.
+ */
+function secretMatches(candidate: string | undefined, expected: string): boolean {
+  if (candidate === undefined) return false;
+  const candidateBuf = Buffer.from(candidate);
+  const expectedBuf = Buffer.from(expected);
+  if (candidateBuf.length !== expectedBuf.length) return false;
+  return timingSafeEqual(candidateBuf, expectedBuf);
+}
+
 function headerValue(
   headers: Record<string, string | string[] | undefined>,
   name: string,
@@ -60,7 +76,7 @@ export async function handleTelegramWebhook(
   req: MinimalWebhookRequest,
 ): Promise<MinimalWebhookResponse> {
   const secret = headerValue(req.headers, SECRET_HEADER);
-  if (secret !== deps.expectedSecret) {
+  if (!secretMatches(secret, deps.expectedSecret)) {
     return { status: 401 };
   }
 
