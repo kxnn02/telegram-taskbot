@@ -31,11 +31,15 @@ export class Roster {
    * way it was when only one cohort existed. Pass `cohortId` to
    * disambiguate when it's known. Without it, this returns the first
    * matching entry in the roster's insertion order — deterministic, but
-   * not cohort-aware; callers that don't yet have a resolved cohort in
-   * hand (e.g. `/start`, the dashboard's Telegram-login lookup) inherit
-   * this pre-existing limitation of the one-Telegram-account-to-one-
-   * roster-entry registration model, not something this lookup can fix on
-   * its own.
+   * not cohort-aware.
+   *
+   * Every live-request call site (`/start`, `resolveCaller`, the
+   * dashboard's Telegram-login lookup) now resolves a deployment-bound
+   * `cohortId` and always passes it explicitly — see CONTEXT.md's
+   * "Caller resolution is bound to one cohort per deployment" entry. The
+   * no-arg overload remains only for callers with no cohort in hand at
+   * all (none of which are reachable from a real request as of that fix)
+   * and for tests.
    */
   find(username: string, cohortId?: string): RosterEntry | undefined {
     if (cohortId !== undefined) {
