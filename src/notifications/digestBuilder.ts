@@ -28,9 +28,9 @@ export class DigestBuilder {
 
   /** Daily and weekly individual DM digest for one intern — same shape for
    * both cadences (PRD §8). Returns null when the intern has nothing open. */
-  internDigest(username: string, cohortId: string): string | null {
+  async internDigest(username: string, cohortId: string): Promise<string | null> {
     const caller: Caller = { username, role: "Intern", cohortId };
-    const result = this.deps.service.listMyTasks(caller);
+    const result = await this.deps.service.listMyTasks(caller);
     if (!result.ok || result.value.length === 0) return null;
     return formatMyTasks(result.value);
   }
@@ -39,11 +39,11 @@ export class DigestBuilder {
    * and overdue, cohort-wide (not scoped to tasks they personally assigned —
    * PRD §2's any-higher-up-any-task rule). Returns null when there's
    * nothing to report. */
-  higherUpDailyDigest(username: string, cohortId: string): string | null {
+  async higherUpDailyDigest(username: string, cohortId: string): Promise<string | null> {
     const caller: Caller = { username, role: "HigherUp", cohortId };
-    const pending = this.deps.service.listPending(caller);
-    const blocked = this.deps.service.listBlocked(caller);
-    const overdue = this.deps.service.listBacklog(caller);
+    const pending = await this.deps.service.listPending(caller);
+    const blocked = await this.deps.service.listBlocked(caller);
+    const overdue = await this.deps.service.listBacklog(caller);
 
     const pendingTasks = pending.ok ? pending.value : [];
     const blockedTasks = blocked.ok ? blocked.value : [];
@@ -67,14 +67,14 @@ export class DigestBuilder {
   /** Weekly Monday individual DM digest for one higher-up: pending review
    * plus what was Approved in the past 7 days (PRD §8). Returns null when
    * there's nothing to report. */
-  higherUpWeeklyDigest(
+  async higherUpWeeklyDigest(
     username: string,
     cohortId: string,
     now: Date,
-  ): string | null {
+  ): Promise<string | null> {
     const caller: Caller = { username, role: "HigherUp", cohortId };
-    const pending = this.deps.service.listPending(caller);
-    const all = this.deps.service.listAllTasks(caller);
+    const pending = await this.deps.service.listPending(caller);
+    const all = await this.deps.service.listAllTasks(caller);
 
     const pendingTasks = pending.ok ? pending.value : [];
     const approvedTasks = all.ok ? approvedInPastWeek(all.value, now) : [];
@@ -94,23 +94,25 @@ export class DigestBuilder {
   /** Per-intern counts for the daily group-chat summary (PRD §8) — deliberately
    * counts-only, see `InternDailyCounts`. Includes every intern in the
    * cohort's roster, even ones with zero tasks, for full-cohort visibility. */
-  groupDailyCounts(cohortId: string): InternDailyCounts[] {
+  async groupDailyCounts(cohortId: string): Promise<InternDailyCounts[]> {
     const interns = this.deps.roster
       .all()
       .filter((entry) => entry.role === "Intern" && entry.cohortId === cohortId);
 
-    return interns.map((entry) => {
-      const caller: Caller = {
-        username: entry.username,
-        role: "Intern",
-        cohortId,
-      };
-      const result = this.deps.service.listMyTasks(caller);
-      const tasks = result.ok ? result.value : [];
-      const overdue = tasks.filter((t) => t.overdue).length;
-      const blocked = tasks.filter((t) => t.blocked).length;
-      const onTrack = tasks.filter((t) => !t.overdue && !t.blocked).length;
-      return { username: entry.username, onTrack, overdue, blocked };
-    });
+    return Promise.all(
+      interns.map(async (entry) => {
+        const caller: Caller = {
+          username: entry.username,
+          role: "Intern",
+          cohortId,
+        };
+        const result = await this.deps.service.listMyTasks(caller);
+        const tasks = result.ok ? result.value : [];
+        const overdue = tasks.filter((t) => t.overdue).length;
+        const blocked = tasks.filter((t) => t.blocked).length;
+        const onTrack = tasks.filter((t) => !t.overdue && !t.blocked).length;
+        return { username: entry.username, onTrack, overdue, blocked };
+      }),
+    );
   }
 }

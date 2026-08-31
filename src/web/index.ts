@@ -1,8 +1,8 @@
 import "dotenv/config";
-import { openDatabase } from "../db/schema.js";
 import { loadRoster } from "../config/roster.js";
 import { SystemClock } from "../domain/clock.js";
 import { TaskService } from "../service/taskService.js";
+import { InMemoryTaskStore } from "../storage/inMemoryTaskStore.js";
 import { createDashboardServer } from "./dashboardServer.js";
 
 const token = process.env.BOT_TOKEN;
@@ -14,9 +14,15 @@ if (!botUsername) {
   throw new Error("BOT_USERNAME is not set. Copy .env.example to .env and fill it in.");
 }
 
-const db = openDatabase(process.env.DATABASE_PATH ?? "./data/taskbot.sqlite");
 const roster = loadRoster(process.env.ROSTER_PATH ?? "roster.config.json");
-const service = new TaskService(db, roster, new SystemClock());
+// TaskService talks only through the TaskStorePort (ADR-0005) now. The real
+// Supabase adapter lands in Phase 2 (issue #13); until then this in-memory
+// store is a deliberate, non-persistent placeholder — note it is a
+// *separate* process from the bot's own in-memory store (createBot.ts), so
+// running the bot and the dashboard side by side in this phase will not see
+// each other's tasks. That gap closes once both share the same Supabase
+// project.
+const service = new TaskService(new InMemoryTaskStore(), roster, new SystemClock());
 
 const app = createDashboardServer({ botToken: token, botUsername, roster, service });
 

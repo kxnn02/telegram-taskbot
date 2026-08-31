@@ -111,9 +111,9 @@ export function createDashboardServer(options: CreateDashboardServerOptions): Ex
     res.redirect(302, "/login");
   });
 
-  app.get("/", requireSession, (req, res) => {
+  app.get("/", requireSession, async (req, res) => {
     const caller = (req as Request & { caller: Caller }).caller;
-    const result = options.service.listAllTasks(caller);
+    const result = await options.service.listAllTasks(caller);
     if (!result.ok) {
       res.status(500).type("html").send(renderMessagePage("Error", result.error));
       return;
@@ -181,10 +181,10 @@ export function createDashboardServer(options: CreateDashboardServerOptions): Ex
     res.status(200).type("html").send(renderCreateConfirm(caller, fields, parsed));
   });
 
-  app.post("/tasks/new/confirm", requireSession, (req, res) => {
+  app.post("/tasks/new/confirm", requireSession, async (req, res) => {
     const caller = (req as Request & { caller: Caller }).caller;
     const body = req.body as Record<string, string | undefined>;
-    const result = options.service.assignTask(caller, {
+    const result = await options.service.assignTask(caller, {
       assigneeUsername: body.assigneeUsername ?? "",
       title: body.title ?? "",
       description: body.description ?? "",
@@ -204,10 +204,10 @@ export function createDashboardServer(options: CreateDashboardServerOptions): Ex
   // task's status changed between the form load and the save (PRD §12,
   // last-write-wins concurrency).
 
-  app.get("/tasks/:id/edit", requireSession, (req, res) => {
+  app.get("/tasks/:id/edit", requireSession, async (req, res) => {
     const caller = (req as Request & { caller: Caller }).caller;
     const id = Number(req.params.id);
-    const found = options.service.getTask(caller, id);
+    const found = await options.service.getTask(caller, id);
     if (!found.ok) {
       res.status(404).type("html").send(renderMessagePage("Task not found", found.error, "/"));
       return;
@@ -268,11 +268,11 @@ export function createDashboardServer(options: CreateDashboardServerOptions): Ex
     res.status(200).type("html").send(renderEditConfirm(caller, id, fields, parsed));
   });
 
-  app.post("/tasks/:id/edit/confirm", requireSession, (req, res) => {
+  app.post("/tasks/:id/edit/confirm", requireSession, async (req, res) => {
     const caller = (req as Request & { caller: Caller }).caller;
     const id = Number(req.params.id);
     const body = req.body as Record<string, string | undefined>;
-    const result = options.service.editTask(caller, id, {
+    const result = await options.service.editTask(caller, id, {
       assigneeUsername: body.assigneeUsername ?? "",
       title: body.title ?? "",
       description: body.description ?? "",
@@ -287,9 +287,9 @@ export function createDashboardServer(options: CreateDashboardServerOptions): Ex
 
   // ---- Stats view (issue #4) ------------------------------------------
 
-  app.get("/stats", requireSession, (req, res) => {
+  app.get("/stats", requireSession, async (req, res) => {
     const caller = (req as Request & { caller: Caller }).caller;
-    const result = options.service.getStats(caller);
+    const result = await options.service.getStats(caller);
     if (!result.ok) {
       res.status(500).type("html").send(renderMessagePage("Error", result.error, "/"));
       return;

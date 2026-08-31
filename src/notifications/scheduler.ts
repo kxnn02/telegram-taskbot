@@ -73,7 +73,7 @@ export async function runOverdueCrossingCheck(
   cohortId: string,
   now: Date,
 ): Promise<void> {
-  const result = deps.service.listAllTasks(schedulerCaller(cohortId));
+  const result = await deps.service.listAllTasks(schedulerCaller(cohortId));
   const tasks = result.ok ? result.value : [];
   const crossings = findNewOverdueCrossings(tasks, now, (c, id) =>
     deps.overdueNotifications.hasNotified(c, id),
@@ -92,7 +92,7 @@ export async function runDueSoonReminderCheck(
   cohortId: string,
   now: Date,
 ): Promise<void> {
-  const result = deps.service.listAllTasks(schedulerCaller(cohortId));
+  const result = await deps.service.listAllTasks(schedulerCaller(cohortId));
   const tasks = result.ok ? result.value : [];
   const dueSoon = findDueTomorrow(tasks, now);
   for (const task of dueSoon) {
@@ -116,8 +116,8 @@ export async function runDailyDigest(
   for (const entry of entries) {
     const text =
       entry.role === "Intern"
-        ? digestBuilder.internDigest(entry.username, cohortId)
-        : digestBuilder.higherUpDailyDigest(entry.username, cohortId);
+        ? await digestBuilder.internDigest(entry.username, cohortId)
+        : await digestBuilder.higherUpDailyDigest(entry.username, cohortId);
     if (text) {
       await sendDM(
         deps.bot,
@@ -129,7 +129,7 @@ export async function runDailyDigest(
   }
 
   if (deps.groupChatId) {
-    const counts = digestBuilder.groupDailyCounts(cohortId);
+    const counts = await digestBuilder.groupDailyCounts(cohortId);
     const summary = formatGroupDailySummary(counts);
     try {
       await deps.bot.api.sendMessage(deps.groupChatId, summary);
@@ -153,8 +153,8 @@ export async function runWeeklyDigest(
   for (const entry of entries) {
     const text =
       entry.role === "Intern"
-        ? digestBuilder.internDigest(entry.username, cohortId)
-        : digestBuilder.higherUpWeeklyDigest(entry.username, cohortId, now);
+        ? await digestBuilder.internDigest(entry.username, cohortId)
+        : await digestBuilder.higherUpWeeklyDigest(entry.username, cohortId, now);
     if (text) {
       await sendDM(
         deps.bot,
