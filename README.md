@@ -8,6 +8,13 @@ See [`PRD.md`](./PRD.md) for the full product spec and design decisions, and
 [`CONTEXT.md`](./CONTEXT.md) for the "why" behind the technical choices. For how to actually use
 the bot day-to-day, see [`USER_GUIDE.md`](./USER_GUIDE.md).
 
+> **Re-platform in progress.** This codebase (Express + SQLite + `node-cron` + Telegram long
+> polling) is being re-platformed onto Next.js + Vercel + Supabase — see
+> [`CONTEXT.md`](./CONTEXT.md) and [`docs/adr/`](./docs/adr/) for the full reasoning, and GitHub
+> issues [#11](https://github.com/kxnn02/telegram-taskbot/issues/11)-[#17](https://github.com/kxnn02/telegram-taskbot/issues/17)
+> for the spec and phased implementation plan. Nothing below has changed yet — the setup and
+> running instructions still describe the current, unreplatformed code.
+
 ## Requirements
 
 - Node.js >= 22.5.0

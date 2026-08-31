@@ -4,6 +4,21 @@ Why this project is built the way it is. See `PRD.md` for the full product spec;
 covers technical decisions and the reasoning behind them, for anyone (human or agent) picking
 up the codebase later.
 
+> **In flux — read `docs/adr/` first.** v1 shipped feature-complete but was never deployed. The
+> deployment decision has now been taken and it supersedes several decisions recorded below:
+> the project is being re-platformed onto Vercel + Supabase
+> ([ADR-0001](./docs/adr/0001-replatform-to-vercel-supabase.md),
+> [ADR-0002](./docs/adr/0002-authorization-stays-in-taskservice.md),
+> [ADR-0003](./docs/adr/0003-roster-moves-to-a-supabase-table.md),
+> [ADR-0004](./docs/adr/0004-webhook-transport-and-dry-run-strategy.md) — webhook + dedup + dry
+> run, [ADR-0005](./docs/adr/0005-storage-port-testing-and-cicd.md) — storage port, testing, CI/CD,
+> [ADR-0006](./docs/adr/0006-database-schema-and-concurrency.md) — schema + concurrency,
+> [ADR-0007](./docs/adr/0007-scheduled-jobs-and-operational-tasks.md) — jobs, keep-alive, backups,
+> [ADR-0008](./docs/adr/0008-dashboard-sessions-and-mutations.md) — sessions + mutation style).
+> Superseded sections are marked inline. **None of it is implemented yet** — the code described
+> below is still the code that exists. The full spec and phased implementation plan are tracked as
+> GitHub issues [#11](https://github.com/kxnn02/telegram-taskbot/issues/11)-[#17](https://github.com/kxnn02/telegram-taskbot/issues/17).
+
 ## Glossary
 
 - **Caller** — the identity (username, role, cohortId) of whoever is making a request, resolved
@@ -36,6 +51,12 @@ what a given task's state means. When adding a dashboard read (issue #3) needed 
 exposed, the fix was to add a method to `taskService.ts`, not to query the DB from `src/web/`.
 
 ### node:sqlite instead of better-sqlite3
+
+> **Superseded by [ADR-0001](./docs/adr/0001-replatform-to-vercel-supabase.md).** SQLite is being
+> replaced by Supabase Postgres. The reasoning below stands as the record of why v1 looks the way
+> it does — and note what it missed: choosing a *file*-backed, *synchronous* driver silently
+> decided the hosting question (a persistent disk, an always-on process) years before anyone asked
+> it. That, not the driver, was the error.
 
 The PRD didn't mandate a specific SQLite driver. `better-sqlite3` needs a native compile
 toolchain that wasn't available in the build environment used for the initial implementation, so
@@ -84,14 +105,31 @@ overhead for ~8 people. Authorization is layered on top: a successful Telegram l
 a dashboard session if that username is on the roster with role `HigherUp` — a valid Telegram
 login from an intern, or from someone not on the roster at all, is rejected.
 
-**Known limitation**: sessions are stored in an in-memory `Map` in the one running dashboard
-process (`src/web/sessionStore.ts`), not externally. This is fine for a single always-on process
-but is incompatible with a serverless deploy target (stateless per-request instances don't share
-memory) — moving to serverless would require swapping this for an external store (Redis/KV)
-first. Also: the session cookie is marked `Secure`, so it only persists over real HTTPS, not
-plain `http://localhost` — see the README's local-testing section for the tunnel workaround.
+The Login Widget choice itself is **unaffected** by the re-platform — `telegramAuth.ts`'s HMAC
+verification is pure and carries across, and it stays strictly better than the shared admin
+password Cohort 4's dashboard uses, since it is per-person and roster-authorized.
+
+> **Resolved by [ADR-0008](./docs/adr/0008-dashboard-sessions-and-mutations.md).** Sessions move
+> from the in-memory `Map` below to a signed, stateless cookie reusing this same HMAC pattern —
+> no session table needed. Dashboard mutations in the Next.js rewrite use REST-style API routes,
+> not Server Actions; see ADR-0008 for why.
+
+**Known limitation, now resolved (see above)**: sessions are stored in an in-memory `Map` in the
+one running dashboard process (`src/web/sessionStore.ts`), not externally. This is fine for a
+single always-on process but is incompatible with a serverless deploy target (stateless
+per-request instances don't share memory). Also: the session cookie is marked `Secure`, so it
+only persists over real HTTPS, not plain `http://localhost` — see the README's local-testing
+section for the tunnel workaround.
 
 ### Scheduling: node-cron in-process, not an external job system
+
+> **Superseded by [ADR-0001](./docs/adr/0001-replatform-to-vercel-supabase.md).** Scheduling moves
+> to `pg_cron` + `pg_net` inside Supabase, calling authenticated endpoints. The four job bodies
+> (`runOverdueCrossingCheck`, `runDueSoonReminderCheck`, `runDailyDigest`, `runWeeklyDigest`) are
+> already exported independently of the cron wiring and carry across unchanged — accidentally the
+> most portable code in the repo. See
+> [ADR-0007](./docs/adr/0007-scheduled-jobs-and-operational-tasks.md) for the two new operational
+> jobs (keep-alive, weekly backup) and the digest/webhook idempotency this introduces.
 
 Due-date reminders, overdue-crossing checks, and the daily/weekly digests run as `node-cron` jobs
 inside the same long-lived bot process, all resolved against Asia/Manila time. For an ~8-person
