@@ -26,6 +26,11 @@ async function main() {
     throw new Error("BOT_TOKEN is not set. Copy .env.example to .env and fill it in.");
   }
 
+  const activeCohortId = process.env.ACTIVE_COHORT_ID;
+  if (!activeCohortId) {
+    throw new Error("ACTIVE_COHORT_ID is not set. Copy .env.example to .env and fill it in.");
+  }
+
   const supabase = createSupabaseClient();
   const roster = await loadRosterFromStore(new SupabaseRosterStore(supabase));
 
@@ -35,6 +40,7 @@ async function main() {
     registrationStore: new SupabaseRegistrationStore(supabase),
     wizardStateStore: new SupabaseWizardStateStore(supabase),
     roster,
+    activeCohortId,
     dashboardUrl:
       process.env.DASHBOARD_URL ?? "https://example.com/dashboard-coming-soon",
   });

@@ -35,6 +35,14 @@ export interface CreateBotOptions {
    * (ADR-0006). Production code passes a `SupabaseWizardStateStore`; tests
    * pass an `InMemoryWizardStateStore`. */
   wizardStateStore: WizardStateStorePort;
+  /** The cohort this deployed bot instance serves (ADR-0004/CONTEXT.md's
+   * cohort-binding note). Every real deployment serves exactly one
+   * cohort — the real cohort or the dry-run cohort, never both — so
+   * caller resolution is always bound to this id rather than letting
+   * `roster.find` guess ambiguously among cohorts that happen to share a
+   * username (the dry run intentionally reuses real accounts across
+   * cohorts). */
+  activeCohortId: string;
   rosterPath?: string;
   dashboardUrl: string;
   /** Injected Bot instance — used by tests to avoid a real network `getMe`
@@ -72,7 +80,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   const wizards = new WizardManager(options.wizardStateStore);
 
   function requireCaller(userId: number) {
-    return resolveCaller(userId, registrations, roster);
+    return resolveCaller(userId, registrations, roster, options.activeCohortId);
   }
 
   // ---- /start ---------------------------------------------------------
@@ -111,7 +119,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       );
       return;
     }
-    const entry = roster.find(username);
+    const entry = roster.find(username, options.activeCohortId);
     if (!entry) {
       await ctx.reply(
         "You're not on the roster yet — contact a higher-up to get added.",
