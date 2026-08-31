@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "test:live": "vitest run --config vitest.live.config.ts",
     "sweep:test-cohorts": "tsx scripts/sweepStaleTestCohorts.ts",
+    "seed:roster": "tsx scripts/seedRosterAndCohorts.ts",
     "dev": "tsx src/bot/index.ts",
     "start": "node dist/bot/index.js",
     "dashboard:dev": "tsx src/web/index.ts",
