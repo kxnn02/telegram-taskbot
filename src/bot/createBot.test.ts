@@ -158,7 +158,7 @@ describe("/edit wizard field picker", () => {
   async function seedTask(): Promise<number> {
     const higherUpId = nextUserId();
     await registerCaller(testBot, higherUpId, "carla");
-    const result = testBot.service.assignTask(
+    const result = await testBot.service.assignTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       {
         assigneeUsername: "alice",
@@ -196,7 +196,7 @@ describe("/edit wizard field picker", () => {
     await testBot.bot.handleUpdate(callbackUpdate(higherUpId, higherUpId, "editfield:title"));
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "Brand new title"));
 
-    const result = testBot.service.getTask(
+    const result = await testBot.service.getTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       taskId,
     );
@@ -230,7 +230,7 @@ describe("/edit wizard field picker", () => {
     const dataButtons = lastKeyboardCallbackData(testBot.calls);
     expect(dataButtons.sort()).toEqual(["duedate:no", "duedate:yes"]);
 
-    let result = testBot.service.getTask(
+    let result = await testBot.service.getTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       taskId,
     );
@@ -238,7 +238,7 @@ describe("/edit wizard field picker", () => {
 
     await testBot.bot.handleUpdate(callbackUpdate(higherUpId, higherUpId, "duedate:yes"));
 
-    result = testBot.service.getTask(
+    result = await testBot.service.getTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       taskId,
     );
@@ -261,7 +261,7 @@ describe("/edit wizard field picker", () => {
     const text = lastReplyText(testBot.calls);
     expect(text).toMatch(/isn't a known intern/i);
 
-    const result = testBot.service.getTask(
+    const result = await testBot.service.getTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       taskId,
     );
@@ -282,7 +282,7 @@ describe("/edit wizard field picker", () => {
     expect(text).toMatch(/did you mean @alice/i);
 
     // still waiting for the next message: no auto-accept
-    const result = testBot.service.getTask(
+    const result = await testBot.service.getTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       taskId,
     );
@@ -291,7 +291,7 @@ describe("/edit wizard field picker", () => {
 
     // caller must type the corrected username themselves
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "bob"));
-    const updated = testBot.service.getTask(
+    const updated = await testBot.service.getTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       taskId,
     );
@@ -321,7 +321,7 @@ describe("/edit wizard field picker", () => {
     const ambiguousBot = makeTestBot(ambiguousRoster);
     const higherUpId = nextUserId();
     await registerCaller(ambiguousBot, higherUpId, "carla");
-    const created = ambiguousBot.service.assignTask(
+    const created = await ambiguousBot.service.assignTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       {
         assigneeUsername: "alice",
@@ -352,8 +352,8 @@ describe("/edit wizard field picker", () => {
     await registerCaller(testBot, higherUpId, "carla");
     const alice = { username: "alice", role: "Intern" as const, cohortId: COHORT };
     const carla = { username: "carla", role: "HigherUp" as const, cohortId: COHORT };
-    testBot.service.submitTask(alice, taskId);
-    testBot.service.approveTask(carla, taskId);
+    await testBot.service.submitTask(alice, taskId);
+    await testBot.service.approveTask(carla, taskId);
 
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/edit ${taskId}`));
 
@@ -407,7 +407,7 @@ describe("/assign full 4-step flow (regression, unaffected by /edit changes)", (
 
     await testBot.bot.handleUpdate(callbackUpdate(higherUpId, higherUpId, "duedate:yes"));
 
-    const list = testBot.service.listAllTasks({
+    const list = await testBot.service.listAllTasks({
       username: "carla",
       role: "HigherUp",
       cohortId: COHORT,
@@ -447,7 +447,7 @@ describe("/blocked (no arguments): read-only blocked list, issue #6", () => {
   });
 
   it("a higher-up sees every blocked task in the cohort, with assignee shown", async () => {
-    const aliceTask = testBot.service.assignTask(
+    const aliceTask = await testBot.service.assignTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       {
         assigneeUsername: "alice",
@@ -457,7 +457,7 @@ describe("/blocked (no arguments): read-only blocked list, issue #6", () => {
       },
     );
     if (!aliceTask.ok) throw new Error("setup failed");
-    testBot.service.setBlocked(
+    await testBot.service.setBlocked(
       { username: "alice", role: "Intern", cohortId: COHORT },
       aliceTask.value.id,
       "waiting on API access",
@@ -474,7 +474,7 @@ describe("/blocked (no arguments): read-only blocked list, issue #6", () => {
   });
 
   it("an intern sees only their own blocked tasks, not another intern's", async () => {
-    const aliceTask = testBot.service.assignTask(
+    const aliceTask = await testBot.service.assignTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       {
         assigneeUsername: "alice",
@@ -483,7 +483,7 @@ describe("/blocked (no arguments): read-only blocked list, issue #6", () => {
         dueDate: "2026-09-05",
       },
     );
-    const bobTask = testBot.service.assignTask(
+    const bobTask = await testBot.service.assignTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       {
         assigneeUsername: "bob",
@@ -493,12 +493,12 @@ describe("/blocked (no arguments): read-only blocked list, issue #6", () => {
       },
     );
     if (!aliceTask.ok || !bobTask.ok) throw new Error("setup failed");
-    testBot.service.setBlocked(
+    await testBot.service.setBlocked(
       { username: "alice", role: "Intern", cohortId: COHORT },
       aliceTask.value.id,
       "waiting on API access",
     );
-    testBot.service.setBlocked(
+    await testBot.service.setBlocked(
       { username: "bob", role: "Intern", cohortId: COHORT },
       bobTask.value.id,
       "waiting on design review",
@@ -524,7 +524,7 @@ describe("/blocked (no arguments): read-only blocked list, issue #6", () => {
   });
 
   it("/blocked <id> <reason> still flags a task as blocked (regression: shared command name)", async () => {
-    const aliceTask = testBot.service.assignTask(
+    const aliceTask = await testBot.service.assignTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       {
         assigneeUsername: "alice",
@@ -544,7 +544,7 @@ describe("/blocked (no arguments): read-only blocked list, issue #6", () => {
     const text = lastReplyText(testBot.calls);
     expect(text).toMatch(/flagged as blocked/i);
 
-    const result = testBot.service.getTask(
+    const result = await testBot.service.getTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       aliceTask.value.id,
     );
@@ -564,7 +564,7 @@ describe("Mark unblocked button on blocked notifications (issue #9)", () => {
   async function seedBlockedTask(): Promise<{ taskId: number; higherUpId: number; aliceId: number }> {
     const higherUpId = nextUserId();
     await registerCaller(testBot, higherUpId, "carla");
-    const task = testBot.service.assignTask(
+    const task = await testBot.service.assignTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       {
         assigneeUsername: "alice",
@@ -596,7 +596,7 @@ describe("Mark unblocked button on blocked notifications (issue #9)", () => {
 
     await testBot.bot.handleUpdate(callbackUpdate(higherUpId, higherUpId, `unblock:${taskId}`));
 
-    const result = testBot.service.getTask(
+    const result = await testBot.service.getTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       taskId,
     );
@@ -611,7 +611,7 @@ describe("Mark unblocked button on blocked notifications (issue #9)", () => {
 
     await testBot.bot.handleUpdate(callbackUpdate(aliceId, aliceId, `unblock:${taskId}`));
 
-    const result = testBot.service.getTask(
+    const result = await testBot.service.getTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       taskId,
     );
@@ -622,7 +622,7 @@ describe("Mark unblocked button on blocked notifications (issue #9)", () => {
     const { taskId, higherUpId } = await seedBlockedTask();
 
     // Cleared first via the typed command, simulating a race or a different device.
-    testBot.service.clearBlocked(
+    await testBot.service.clearBlocked(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       taskId,
     );
@@ -638,7 +638,7 @@ describe("Mark unblocked button on blocked notifications (issue #9)", () => {
 
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/unblocked ${taskId}`));
 
-    const result = testBot.service.getTask(
+    const result = await testBot.service.getTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       taskId,
     );
@@ -656,9 +656,9 @@ describe("/alltasks and /mytasks pagination (issue #7)", () => {
     testBot = makeTestBot(roster);
   });
 
-  function assignEleven() {
+  async function assignEleven() {
     for (let i = 1; i <= 11; i++) {
-      const result = testBot.service.assignTask(
+      const result = await testBot.service.assignTask(
         { username: "carla", role: "HigherUp", cohortId: COHORT },
         {
           assigneeUsername: "alice",
@@ -672,7 +672,7 @@ describe("/alltasks and /mytasks pagination (issue #7)", () => {
   }
 
   it("/mytasks with 11 tasks shows page 1 of 2 and hints at the next page", async () => {
-    assignEleven();
+    await assignEleven();
     const aliceId = nextUserId();
     await registerCaller(testBot, aliceId, "alice");
     await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/mytasks"));
@@ -685,7 +685,7 @@ describe("/alltasks and /mytasks pagination (issue #7)", () => {
   });
 
   it("/mytasks 2 shows the second page", async () => {
-    assignEleven();
+    await assignEleven();
     const aliceId = nextUserId();
     await registerCaller(testBot, aliceId, "alice");
     await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/mytasks 2"));
@@ -696,7 +696,7 @@ describe("/alltasks and /mytasks pagination (issue #7)", () => {
   });
 
   it("/alltasks with a small result set shows no pagination footer", async () => {
-    const result = testBot.service.assignTask(
+    const result = await testBot.service.assignTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       {
         assigneeUsername: "alice",
@@ -716,7 +716,7 @@ describe("/alltasks and /mytasks pagination (issue #7)", () => {
   });
 
   it("/alltasks paginates and preserves grouping by assignee within a page", async () => {
-    assignEleven();
+    await assignEleven();
     const higherUpId = nextUserId();
     await registerCaller(testBot, higherUpId, "carla");
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/alltasks 2"));

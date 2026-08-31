@@ -6,6 +6,7 @@ import { FixedClock } from "../domain/clock.js";
 import { Roster } from "../domain/roster.js";
 import type { Caller } from "../domain/types.js";
 import { TaskService } from "../service/taskService.js";
+import { InMemoryTaskStore } from "../storage/inMemoryTaskStore.js";
 import { DigestBuilder } from "./digestBuilder.js";
 import {
   runDailyDigest,
@@ -53,7 +54,7 @@ function makeDeps(now: Date = NOW) {
   const db = openDatabase(":memory:");
   const roster = makeRoster();
   const clock = new FixedClock(now);
-  const service = new TaskService(db, roster, clock);
+  const service = new TaskService(new InMemoryTaskStore(), roster, clock);
   const registrations = new RegistrationRepository(db);
   const overdueNotifications = new OverdueNotificationRepository(db);
   const bot = makeFakeBot();
@@ -97,7 +98,7 @@ describe("runOverdueCrossingCheck", () => {
   it("notifies both the intern and the assigning higher-up exactly once", async () => {
     const past = new Date("2026-09-20T02:00:00.000Z"); // after 2026-09-10 due date
     const { deps, service, bot, overdueNotifications } = makeDeps(past);
-    const created = assign(service);
+    const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
 
     await runOverdueCrossingCheck(deps, COHORT, past);
@@ -114,7 +115,7 @@ describe("runOverdueCrossingCheck", () => {
 
   it("doesn't notify for a task that isn't overdue yet", async () => {
     const { deps, service, bot } = makeDeps();
-    assign(service); // due 2026-09-10, NOW is 2026-09-04
+    await assign(service); // due 2026-09-10, NOW is 2026-09-04
     await runOverdueCrossingCheck(deps, COHORT, NOW);
     expect(bot.sent).toHaveLength(0);
   });
@@ -123,7 +124,7 @@ describe("runOverdueCrossingCheck", () => {
 describe("runDueSoonReminderCheck", () => {
   it("reminds the assignee of a task due tomorrow", async () => {
     const { deps, service, bot } = makeDeps();
-    assign(service, { dueDate: "2026-09-05" }); // tomorrow relative to NOW
+    await assign(service, { dueDate: "2026-09-05" }); // tomorrow relative to NOW
     await runDueSoonReminderCheck(deps, COHORT, NOW);
     expect(bot.sent).toHaveLength(1);
     expect(bot.sent[0]?.text).toContain("Task");
@@ -131,7 +132,7 @@ describe("runDueSoonReminderCheck", () => {
 
   it("doesn't remind for a task due further out", async () => {
     const { deps, service, bot } = makeDeps();
-    assign(service, { dueDate: "2026-09-20" });
+    await assign(service, { dueDate: "2026-09-20" });
     await runDueSoonReminderCheck(deps, COHORT, NOW);
     expect(bot.sent).toHaveLength(0);
   });
@@ -140,9 +141,9 @@ describe("runDueSoonReminderCheck", () => {
 describe("runDailyDigest", () => {
   it("DMs interns and higher-ups with something to report, and posts a counts-only group summary", async () => {
     const { deps, service, bot } = makeDeps();
-    const created = assign(service);
+    const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
-    service.submitTask(alice, created.value.id);
+    await service.submitTask(alice, created.value.id);
 
     const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
     await runDailyDigest(deps, digestBuilder, COHORT);
@@ -161,7 +162,7 @@ describe("runDailyDigest", () => {
 describe("runWeeklyDigest", () => {
   it("suppresses higher-ups with nothing pending and nothing approved recently", async () => {
     const { deps, service, bot } = makeDeps();
-    assign(service); // Assigned only, not submitted/approved -> nothing for higher-ups
+    await assign(service); // Assigned only, not submitted/approved -> nothing for higher-ups
     const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
     await runWeeklyDigest(deps, digestBuilder, COHORT, NOW);
 

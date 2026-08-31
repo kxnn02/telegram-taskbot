@@ -4,6 +4,7 @@ import { RegistrationRepository } from "../db/registrationRepository.js";
 import { loadRoster } from "../config/roster.js";
 import { SystemClock } from "../domain/clock.js";
 import { TaskService } from "../service/taskService.js";
+import { InMemoryTaskStore } from "../storage/inMemoryTaskStore.js";
 import { parseDueDate } from "../date/parseDueDate.js";
 import { resolveCaller } from "./callerResolution.js";
 import { WizardManager, type WizardState, type EditField } from "./wizard.js";
@@ -57,7 +58,12 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   const roster = options.roster ?? loadRoster(options.rosterPath);
   const registrations = new RegistrationRepository(db);
   const clock = new SystemClock();
-  const service = new TaskService(db, roster, clock);
+  // TaskService now talks only through the TaskStorePort (ADR-0005) and no
+  // longer touches SQLite. The real Supabase adapter lands in Phase 2
+  // (issue #13); until then this in-memory store is a deliberate,
+  // non-persistent placeholder — `db`/SQLite stays wired up above only for
+  // registrations, which are out of this phase's scope.
+  const service = new TaskService(new InMemoryTaskStore(), roster, clock);
   const wizards = new WizardManager();
 
   function requireCaller(userId: number) {
@@ -172,7 +178,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await ctx.reply("Usage: /alltasks [page]");
         return;
       }
-      const result = service.listAllTasks(caller);
+      const result = await service.listAllTasks(caller);
       await ctx.reply(result.ok ? formatAllTasksGrouped(result.value, page) : result.error);
     }),
   );
@@ -185,7 +191,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await ctx.reply("Usage: /mytasks [page]");
         return;
       }
-      const result = service.listMyTasks(caller);
+      const result = await service.listMyTasks(caller);
       await ctx.reply(result.ok ? formatMyTasks(result.value, page) : result.error);
     }),
   );
@@ -193,7 +199,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   bot.command(
     "backlog",
     withCaller(async (ctx, caller) => {
-      const result = service.listBacklog(caller);
+      const result = await service.listBacklog(caller);
       await ctx.reply(result.ok ? formatBacklog(result.value) : result.error);
     }),
   );
@@ -201,7 +207,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   bot.command(
     "pending",
     withCaller(async (ctx, caller) => {
-      const result = service.listPending(caller);
+      const result = await service.listPending(caller);
       await ctx.reply(result.ok ? formatPending(result.value) : result.error);
     }),
   );
@@ -214,7 +220,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await ctx.reply("Usage: /task <task_id>");
         return;
       }
-      const result = service.getTask(caller, id);
+      const result = await service.getTask(caller, id);
       await ctx.reply(result.ok ? formatTaskDetail(result.value) : result.error);
     }),
   );
@@ -229,7 +235,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await ctx.reply("Usage: /submit <task_id>");
         return;
       }
-      const result = service.submitTask(caller, id);
+      const result = await service.submitTask(caller, id);
       if (!result.ok) {
         await ctx.reply(result.error);
         return;
@@ -256,7 +262,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     "blocked",
     withCaller(async (ctx, caller) => {
       if (matchToString(ctx.match).trim().length === 0) {
-        const result = service.listBlocked(caller);
+        const result = await service.listBlocked(caller);
         await ctx.reply(result.ok ? formatBlocked(result.value) : result.error);
         return;
       }
@@ -265,7 +271,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await ctx.reply("Usage: /blocked <task_id> <reason>, or /blocked with no arguments to list blocked tasks");
         return;
       }
-      const result = service.setBlocked(caller, id, rest);
+      const result = await service.setBlocked(caller, id, rest);
       if (!result.ok) {
         await ctx.reply(result.error);
         return;
@@ -290,7 +296,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await ctx.reply("Usage: /unblocked <task_id>");
         return;
       }
-      const result = service.clearBlocked(caller, id);
+      const result = await service.clearBlocked(caller, id);
       await ctx.reply(result.ok ? `Task ${id} is no longer blocked.` : result.error);
     }),
   );
@@ -305,7 +311,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await ctx.reply("Usage: /note <task_id> <text>");
         return;
       }
-      const result = service.addNote(caller, id, rest);
+      const result = await service.addNote(caller, id, rest);
       if (!result.ok) {
         await ctx.reply(result.error);
         return;
@@ -352,8 +358,8 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   ) {
     const result =
       decision === "approve"
-        ? service.approveTask(caller, id)
-        : service.reviseTask(caller, id);
+        ? await service.approveTask(caller, id)
+        : await service.reviseTask(caller, id);
     if (!result.ok) {
       await ctx.reply(result.error);
       return;
@@ -383,7 +389,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await ctx.reply("Usage: /canceltask <task_id>");
         return;
       }
-      const found = service.getTask(caller, id);
+      const found = await service.getTask(caller, id);
       if (!found.ok) {
         await ctx.reply(found.error);
         return;
@@ -412,7 +418,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       await ctx.editMessageText(`Kept Task ${id} as-is.`);
       return;
     }
-    const result = service.cancelTask(resolved.caller, id);
+    const result = await service.cancelTask(resolved.caller, id);
     await ctx.answerCallbackQuery();
     await ctx.editMessageText(
       result.ok ? `Task ${id} cancelled.` : result.error,
@@ -432,8 +438,8 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     const id = Number(idStr);
     const result =
       decision === "approve"
-        ? service.approveTask(resolved.caller, id)
-        : service.reviseTask(resolved.caller, id);
+        ? await service.approveTask(resolved.caller, id)
+        : await service.reviseTask(resolved.caller, id);
     await ctx.answerCallbackQuery();
     if (!result.ok) {
       await ctx.editMessageText(result.error);
@@ -465,7 +471,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }
     const [, idStr] = ctx.match as unknown as [string, string];
     const id = Number(idStr);
-    const result = service.clearBlocked(resolved.caller, id);
+    const result = await service.clearBlocked(resolved.caller, id);
     await ctx.answerCallbackQuery();
     await ctx.editMessageText(
       result.ok ? `Task ${id} is no longer blocked.` : result.error,
@@ -500,7 +506,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await ctx.reply("Usage: /edit <task_id>");
         return;
       }
-      const found = service.getTask(caller, id);
+      const found = await service.getTask(caller, id);
       if (!found.ok) {
         await ctx.reply(found.error);
         return;
@@ -539,7 +545,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       await ctx.answerCallbackQuery({ text: "Send /start first." });
       return;
     }
-    const found = service.getTask(resolved.caller, state.data.taskId!);
+    const found = await service.getTask(resolved.caller, state.data.taskId!);
     if (!found.ok) {
       wizards.cancel(userId);
       await ctx.answerCallbackQuery();
@@ -751,7 +757,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     wizards.cancel(userId);
 
     if (state.kind === "assign") {
-      const result = service.assignTask(caller, {
+      const result = await service.assignTask(caller, {
         assigneeUsername: state.data.assigneeUsername!,
         title: state.data.title!,
         description: state.data.description!,
@@ -778,7 +784,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     if (state.data.description) patch.description = state.data.description;
     if (state.data.dueDate) patch.dueDate = state.data.dueDate;
 
-    const result = service.editTask(caller, state.data.taskId!, patch);
+    const result = await service.editTask(caller, state.data.taskId!, patch);
     if (!result.ok) {
       await ctx.reply(`Couldn't save the edit: ${result.error}`);
       return;

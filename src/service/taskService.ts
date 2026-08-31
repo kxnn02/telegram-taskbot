@@ -1,5 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
-import { TaskRepository } from "../db/taskRepository.js";
+import type { TaskRecord, TaskStorePort } from "../storage/taskStorePort.js";
 import type { Clock } from "../domain/clock.js";
 import { isOverdue, daysOverdue } from "../domain/overdue.js";
 import { normalizeUsername, Roster } from "../domain/roster.js";
@@ -74,26 +73,39 @@ function displayName(username: string): string {
   return `@${username}`;
 }
 
+/** Strips the storage port's optimistic-concurrency bookkeeping off a
+ * `TaskRecord` before it's handed back to callers outside this service —
+ * `rowVersion` is an implementation detail of the storage seam (ADR-0006),
+ * not part of the domain `Task` shape the bot/dashboard/scheduler layers
+ * know about. */
+function stripVersion(record: TaskRecord): Task {
+  const { rowVersion: _rowVersion, ...task } = record;
+  return task;
+}
+
 /**
  * The task-service layer: every business rule in the system lives here as a
  * plain function, independent of Telegram/HTTP. Both the bot layer and the
  * (future) dashboard call into this same layer. See PRD §12 and issue #1's
  * "Implementation Decisions".
+ *
+ * Talks to the database only through the `TaskStorePort` seam (ADR-0005) —
+ * never to SQLite or Supabase directly — so every method here is async and
+ * every write goes through `persist`, which surfaces the port's row_version
+ * conflict (ADR-0006) as an ordinary `ServiceResult` failure instead of a
+ * thrown exception, matching how every other business-rule violation in
+ * this file is reported.
  */
 export class TaskService {
-  private readonly repo: TaskRepository;
-
   constructor(
-    db: DatabaseSync,
+    private readonly store: TaskStorePort,
     private readonly roster: Roster,
     private readonly clock: Clock,
-  ) {
-    this.repo = new TaskRepository(db);
-  }
+  ) {}
 
   // ---- Mutations -----------------------------------------------------
 
-  assignTask(caller: Caller, input: AssignTaskInput): ServiceResult<Task> {
+  async assignTask(caller: Caller, input: AssignTaskInput): Promise<ServiceResult<Task>> {
     if (caller.role !== "HigherUp") {
       return fail("Only higher-ups can assign tasks.");
     }
@@ -113,7 +125,7 @@ export class TaskService {
     if (dueDateError) return fail(dueDateError);
 
     const now = this.clock.now().toISOString();
-    const id = this.repo.nextId(caller.cohortId);
+    const id = await this.store.nextId(caller.cohortId);
     const task: Task = {
       id,
       cohortId: caller.cohortId,
@@ -129,20 +141,20 @@ export class TaskService {
       createdAt: now,
       updatedAt: now,
     };
-    this.repo.insert(task);
-    return ok(task);
+    const inserted = await this.store.insertTask(task);
+    return ok(stripVersion(inserted));
   }
 
-  editTask(
+  async editTask(
     caller: Caller,
     taskId: number,
     patch: EditTaskInput,
-  ): ServiceResult<Task> {
+  ): Promise<ServiceResult<Task>> {
     if (caller.role !== "HigherUp") {
       return fail("Only higher-ups can edit tasks.");
     }
 
-    const found = this.mustFindInCallerCohort(caller, taskId);
+    const found = await this.mustFindInCallerCohort(caller, taskId);
     if (!found.ok) return fail(found.error);
     const task = found.value;
 
@@ -181,15 +193,14 @@ export class TaskService {
     }
 
     task.updatedAt = this.clock.now().toISOString();
-    this.repo.update(task);
-    return ok(task);
+    return this.persist(task);
   }
 
-  submitTask(caller: Caller, taskId: number): ServiceResult<Task> {
+  async submitTask(caller: Caller, taskId: number): Promise<ServiceResult<Task>> {
     if (caller.role !== "Intern") {
       return fail("Only the assigned intern can submit a task.");
     }
-    const found = this.mustFindInCallerCohort(caller, taskId);
+    const found = await this.mustFindInCallerCohort(caller, taskId);
     if (!found.ok) return fail(found.error);
     const task = found.value;
 
@@ -212,15 +223,14 @@ export class TaskService {
 
     task.status = "Submitted";
     task.updatedAt = this.clock.now().toISOString();
-    this.repo.update(task);
-    return ok(task);
+    return this.persist(task);
   }
 
-  approveTask(caller: Caller, taskId: number): ServiceResult<Task> {
+  async approveTask(caller: Caller, taskId: number): Promise<ServiceResult<Task>> {
     if (caller.role !== "HigherUp") {
       return fail("Only higher-ups can approve tasks.");
     }
-    const found = this.mustFindInCallerCohort(caller, taskId);
+    const found = await this.mustFindInCallerCohort(caller, taskId);
     if (!found.ok) return fail(found.error);
     const task = found.value;
 
@@ -237,15 +247,14 @@ export class TaskService {
 
     task.status = "Approved";
     task.updatedAt = this.clock.now().toISOString();
-    this.repo.update(task);
-    return ok(task);
+    return this.persist(task);
   }
 
-  reviseTask(caller: Caller, taskId: number): ServiceResult<Task> {
+  async reviseTask(caller: Caller, taskId: number): Promise<ServiceResult<Task>> {
     if (caller.role !== "HigherUp") {
       return fail("Only higher-ups can send tasks back for revision.");
     }
-    const found = this.mustFindInCallerCohort(caller, taskId);
+    const found = await this.mustFindInCallerCohort(caller, taskId);
     if (!found.ok) return fail(found.error);
     const task = found.value;
 
@@ -260,15 +269,14 @@ export class TaskService {
 
     task.status = "NeedsRevision";
     task.updatedAt = this.clock.now().toISOString();
-    this.repo.update(task);
-    return ok(task);
+    return this.persist(task);
   }
 
-  cancelTask(caller: Caller, taskId: number): ServiceResult<Task> {
+  async cancelTask(caller: Caller, taskId: number): Promise<ServiceResult<Task>> {
     if (caller.role !== "HigherUp") {
       return fail("Only higher-ups can cancel tasks.");
     }
-    const found = this.mustFindInCallerCohort(caller, taskId);
+    const found = await this.mustFindInCallerCohort(caller, taskId);
     if (!found.ok) return fail(found.error);
     const task = found.value;
 
@@ -281,15 +289,14 @@ export class TaskService {
 
     task.status = "Cancelled";
     task.updatedAt = this.clock.now().toISOString();
-    this.repo.update(task);
-    return ok(task);
+    return this.persist(task);
   }
 
-  addNote(caller: Caller, taskId: number, text: string): ServiceResult<Task> {
+  async addNote(caller: Caller, taskId: number, text: string): Promise<ServiceResult<Task>> {
     if (caller.role !== "HigherUp") {
       return fail("Only higher-ups can add notes.");
     }
-    const found = this.mustFindInCallerCohort(caller, taskId);
+    const found = await this.mustFindInCallerCohort(caller, taskId);
     if (!found.ok) return fail(found.error);
     const task = found.value;
 
@@ -302,19 +309,18 @@ export class TaskService {
       authorUsername: normalizeUsername(caller.username),
       createdAt: now,
     };
-    this.repo.insertNote(task.cohortId, task.id, note);
-    task.notes.push(note);
+    await this.store.insertNote(task.cohortId, task.id, note);
+    task.notes = [...task.notes, note];
     task.updatedAt = now;
-    this.repo.update(task);
-    return ok(task);
+    return this.persist(task);
   }
 
-  setBlocked(
+  async setBlocked(
     caller: Caller,
     taskId: number,
     reason: string,
-  ): ServiceResult<Task> {
-    const found = this.mustFindInCallerCohort(caller, taskId);
+  ): Promise<ServiceResult<Task>> {
+    const found = await this.mustFindInCallerCohort(caller, taskId);
     if (!found.ok) return fail(found.error);
     const task = found.value;
 
@@ -333,12 +339,11 @@ export class TaskService {
     task.blocked = true;
     task.blockedReason = reason.trim();
     task.updatedAt = this.clock.now().toISOString();
-    this.repo.update(task);
-    return ok(task);
+    return this.persist(task);
   }
 
-  clearBlocked(caller: Caller, taskId: number): ServiceResult<Task> {
-    const found = this.mustFindInCallerCohort(caller, taskId);
+  async clearBlocked(caller: Caller, taskId: number): Promise<ServiceResult<Task>> {
+    const found = await this.mustFindInCallerCohort(caller, taskId);
     if (!found.ok) return fail(found.error);
     const task = found.value;
 
@@ -352,8 +357,7 @@ export class TaskService {
     task.blocked = false;
     task.blockedReason = null;
     task.updatedAt = this.clock.now().toISOString();
-    this.repo.update(task);
-    return ok(task);
+    return this.persist(task);
   }
 
   private requireCanTouchBlockedFlag(
@@ -372,10 +376,10 @@ export class TaskService {
   /** Full detail view. Auto-transitions Assigned -> InProgress the first
    * time the assigned intern views it (PRD §4). Interns other than the
    * assignee cannot view another intern's task detail (PRD §5). */
-  getTask(caller: Caller, taskId: number): ServiceResult<TaskWithFlags> {
-    const found = this.mustFindInCallerCohort(caller, taskId);
+  async getTask(caller: Caller, taskId: number): Promise<ServiceResult<TaskWithFlags>> {
+    const found = await this.mustFindInCallerCohort(caller, taskId);
     if (!found.ok) return fail(found.error);
-    let task = found.value;
+    const task = found.value;
 
     if (
       caller.role === "Intern" &&
@@ -393,38 +397,38 @@ export class TaskService {
     ) {
       task.status = "InProgress";
       task.updatedAt = this.clock.now().toISOString();
-      this.repo.update(task);
+      const persisted = await this.persist(task);
+      if (!persisted.ok) return fail(persisted.error);
+      return ok(this.withFlags(persisted.value));
     }
 
     return ok(this.withFlags(task));
   }
 
-  listMyTasks(caller: Caller): ServiceResult<TaskWithFlags[]> {
+  async listMyTasks(caller: Caller): Promise<ServiceResult<TaskWithFlags[]>> {
     if (caller.role !== "Intern") {
       return fail("Only interns have a personal /mytasks list.");
     }
-    const mine = this.repo
-      .listByCohort(caller.cohortId)
-      .filter(
-        (t) =>
-          t.assigneeUsername === normalizeUsername(caller.username) &&
-          OPEN_STATUSES.includes(t.status),
-      );
+    const all = await this.store.listTasksByCohort(caller.cohortId);
+    const mine = all.filter(
+      (t) =>
+        t.assigneeUsername === normalizeUsername(caller.username) &&
+        OPEN_STATUSES.includes(t.status),
+    );
     return ok(mine.map((t) => this.withFlags(t)));
   }
 
-  listAllTasks(caller: Caller): ServiceResult<TaskWithFlags[]> {
-    const all = this.repo.listByCohort(caller.cohortId);
+  async listAllTasks(caller: Caller): Promise<ServiceResult<TaskWithFlags[]>> {
+    const all = await this.store.listTasksByCohort(caller.cohortId);
     return ok(all.map((t) => this.withFlags(t)));
   }
 
-  listPending(caller: Caller): ServiceResult<TaskWithFlags[]> {
+  async listPending(caller: Caller): Promise<ServiceResult<TaskWithFlags[]>> {
     if (caller.role !== "HigherUp") {
       return fail("Only higher-ups have a review queue.");
     }
-    const pending = this.repo
-      .listByCohort(caller.cohortId)
-      .filter((t) => t.status === "Submitted");
+    const all = await this.store.listTasksByCohort(caller.cohortId);
+    const pending = all.filter((t) => t.status === "Submitted");
     return ok(pending.map((t) => this.withFlags(t)));
   }
 
@@ -432,8 +436,8 @@ export class TaskService {
    * digests, issue #2, and the on-demand /blocked command, issue #6), scoped
    * to just the caller's own tasks for interns — the same
    * scope-by-role-not-reject-interns shape as listBacklog. */
-  listBlocked(caller: Caller): ServiceResult<TaskWithFlags[]> {
-    const all = this.repo.listByCohort(caller.cohortId);
+  async listBlocked(caller: Caller): Promise<ServiceResult<TaskWithFlags[]>> {
+    const all = await this.store.listTasksByCohort(caller.cohortId);
     const scoped =
       caller.role === "Intern"
         ? all.filter(
@@ -447,12 +451,12 @@ export class TaskService {
   /** Cohort-wide stats for the dashboard's stats view (issue #4). Higher-up
    * only, same audience gate as the dashboard itself. See `CohortStats` for
    * exact field definitions and the judgment calls behind them. */
-  getStats(caller: Caller): ServiceResult<CohortStats> {
+  async getStats(caller: Caller): Promise<ServiceResult<CohortStats>> {
     if (caller.role !== "HigherUp") {
       return fail("Only higher-ups can view cohort stats.");
     }
 
-    const all = this.repo.listByCohort(caller.cohortId);
+    const all = await this.store.listTasksByCohort(caller.cohortId);
     const countable = all.filter((t) => t.status !== "Cancelled");
     const approved = countable.filter((t) => t.status === "Approved");
 
@@ -497,8 +501,8 @@ export class TaskService {
     });
   }
 
-  listBacklog(caller: Caller): ServiceResult<TaskWithFlags[]> {
-    const all = this.repo.listByCohort(caller.cohortId);
+  async listBacklog(caller: Caller): Promise<ServiceResult<TaskWithFlags[]>> {
+    const all = await this.store.listTasksByCohort(caller.cohortId);
     const scoped =
       caller.role === "Intern"
         ? all.filter(
@@ -522,15 +526,29 @@ export class TaskService {
     };
   }
 
+  /** Persists a mutated `TaskRecord` through the storage port, translating
+   * the port's row_version conflict outcome (ADR-0006) into the same
+   * `ServiceResult` failure shape every other business-rule rejection in
+   * this file uses — callers never see the port's conflict type directly. */
+  private async persist(task: TaskRecord): Promise<ServiceResult<Task>> {
+    const result = await this.store.updateTask(task);
+    if (result.outcome === "conflict") {
+      return fail(
+        `Task ${task.id} was just changed by someone else — reload it and try again.`,
+      );
+    }
+    return ok(stripVersion(result.task));
+  }
+
   /** Looks a task up scoped to the caller's cohort, distinguishing
    * "doesn't exist at all" from "exists in a different cohort" only
    * internally — both surface as the same not-found message to the caller,
    * so no cross-cohort information ever leaks out. */
-  private mustFindInCallerCohort(
+  private async mustFindInCallerCohort(
     caller: Caller,
     taskId: number,
-  ): ServiceResult<Task> {
-    const task = this.repo.findById(caller.cohortId, taskId);
+  ): Promise<ServiceResult<TaskRecord>> {
+    const task = await this.store.findTaskById(caller.cohortId, taskId);
     if (!task) {
       return fail(`Task ${taskId} doesn't exist.`);
     }
