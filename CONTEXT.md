@@ -282,6 +282,18 @@ tests could in principle interleave against the *same* cohort if run concurrentl
 need to, since each test gets cohort ids nobody else is using. Real concurrent-write safety
 (the row_version check) is exercised directly, deliberately, by the "stale rowVersion" test.
 
+**Residual gap, and the sweep that backstops it**: `afterEach`-based cleanup only runs on the
+happy path — a crashed test process (or a killed CI job) skips it, leaving that one run's test
+cohort (and everything cascaded under it) sitting in the shared project indefinitely. Since this
+is the same shared project real cohort and dry-run data live in, that's a real gap, not a
+theoretical one, even though any single leftover is small and clearly marked by the
+`__contract_test_` prefix. `sweepStaleTestCohorts` (`src/storage/sweepStaleTestCohorts.ts`) closes
+it: it finds any cohort matching that prefix older than an hour — far longer than the live suite
+ever legitimately takes to run — and deletes it, cascading the same way `afterEach` does. It runs
+as a step before the live suite in CI's `contract` job (catches yesterday's crash before today's
+run adds more), and again on its own daily schedule (`.github/workflows/sweep-test-cohorts.yml`)
+so cleanup doesn't depend on how often `main` gets pushed to.
+
 ## Out of scope (deferred to v2)
 
 Mini App UI, file attachments, CSV export, recurring tasks, and standup response-collection were

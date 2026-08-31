@@ -1,0 +1,28 @@
+name: Sweep stale test cohorts
+
+# Belt-and-suspenders cleanup for the contract-test isolation strategy (see
+# CONTEXT.md's "Contract-test isolation" note): the CI contract job already
+# sweeps before it runs, but that only happens on a push to main. This
+# scheduled run is the backstop for the case that doesn't happen often —
+# a crashed contract-test run whose leftover cohort would otherwise sit in
+# the shared project until the next push to main.
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # daily, 03:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.5.0"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run sweep:test-cohorts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

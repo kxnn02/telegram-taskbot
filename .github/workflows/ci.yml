@@ -36,6 +36,10 @@ jobs:
           node-version: "22.5.0"
           cache: "npm"
       - run: npm ci
+      - run: npm run sweep:test-cohorts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       - run: npm run test:live
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
