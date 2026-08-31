@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:live": "vitest run --config vitest.live.config.ts",
     "dev": "tsx src/bot/index.ts",
     "start": "node dist/bot/index.js",
     "dashboard:dev": "tsx src/web/index.ts",
