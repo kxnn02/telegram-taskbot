@@ -4,6 +4,7 @@ import { createSupabaseClient } from "../storage/supabaseClient.js";
 import { SupabaseTaskStore } from "../storage/supabaseTaskStore.js";
 import { SupabaseRegistrationStore } from "../storage/supabaseRegistrationStore.js";
 import { SupabaseOverdueNotificationStore } from "../storage/supabaseOverdueNotificationStore.js";
+import { SupabaseCohortStore } from "../storage/supabaseCohortStore.js";
 import { startScheduler } from "../notifications/scheduler.js";
 
 const token = process.env.BOT_TOKEN;
@@ -30,7 +31,7 @@ const scheduler = startScheduler({
   service,
   roster,
   overdueNotifications: new SupabaseOverdueNotificationStore(supabase),
-  groupChatId: process.env.GROUP_CHAT_ID || undefined,
+  cohorts: new SupabaseCohortStore(supabase),
 });
 
 process.on("SIGINT", () => {

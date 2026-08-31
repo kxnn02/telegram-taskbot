@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { InMemoryOverdueNotificationStore } from "../storage/inMemoryOverdueNotificationStore.js";
 import { InMemoryRegistrationStore } from "../storage/inMemoryRegistrationStore.js";
+import { InMemoryCohortStore } from "../storage/inMemoryCohortStore.js";
 import { FixedClock } from "../domain/clock.js";
 import { Roster } from "../domain/roster.js";
 import type { Caller } from "../domain/types.js";
@@ -69,7 +70,7 @@ async function makeDeps(now: Date = NOW) {
     service,
     roster,
     overdueNotifications,
-    groupChatId: "-100999",
+    cohorts: new InMemoryCohortStore({ [COHORT]: "-100999" }),
   };
   return { deps, service, roster, bot, overdueNotifications, registrations };
 }
