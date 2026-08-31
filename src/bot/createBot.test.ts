@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { Bot, InlineKeyboard, type Transformer } from "grammy";
 import type { Update, UserFromGetMe } from "grammy/types";
 import { Roster } from "../domain/roster.js";
+import { InMemoryTaskStore } from "../storage/inMemoryTaskStore.js";
+import { InMemoryRegistrationStore } from "../storage/inMemoryRegistrationStore.js";
 import { createBot, type CreatedBot } from "./createBot.js";
 
 const COHORT = "cohort-5";
@@ -71,7 +73,8 @@ function makeTestBot(roster: Roster) {
   bot.api.config.use(transformer);
   const created = createBot({
     token: "TEST_TOKEN",
-    dbPath: ":memory:",
+    taskStore: new InMemoryTaskStore(),
+    registrationStore: new InMemoryRegistrationStore(),
     dashboardUrl: "http://localhost:1234",
     bot,
     roster,
@@ -143,7 +146,7 @@ async function registerCaller(
   userId: number,
   username: string,
 ) {
-  created.registrations.register(userId, username);
+  await created.registrations.register(userId, username);
 }
 
 describe("/edit wizard field picker", () => {

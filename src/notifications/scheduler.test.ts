@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { openDatabase } from "../db/schema.js";
-import { OverdueNotificationRepository } from "../db/overdueNotificationRepository.js";
-import { RegistrationRepository } from "../db/registrationRepository.js";
+import { InMemoryOverdueNotificationStore } from "../storage/inMemoryOverdueNotificationStore.js";
+import { InMemoryRegistrationStore } from "../storage/inMemoryRegistrationStore.js";
 import { FixedClock } from "../domain/clock.js";
 import { Roster } from "../domain/roster.js";
 import type { Caller } from "../domain/types.js";
@@ -50,19 +49,18 @@ function makeFakeBot(): NotifierBot & { sent: Array<{ chatId: number | string; t
   };
 }
 
-function makeDeps(now: Date = NOW) {
-  const db = openDatabase(":memory:");
+async function makeDeps(now: Date = NOW) {
   const roster = makeRoster();
   const clock = new FixedClock(now);
   const service = new TaskService(new InMemoryTaskStore(), roster, clock);
-  const registrations = new RegistrationRepository(db);
-  const overdueNotifications = new OverdueNotificationRepository(db);
+  const registrations = new InMemoryRegistrationStore();
+  const overdueNotifications = new InMemoryOverdueNotificationStore();
   const bot = makeFakeBot();
 
   // Register everyone so DMs can be delivered (mirrors /start, PRD §7).
   let nextTelegramId = 1000;
   for (const entry of roster.all()) {
-    registrations.register(nextTelegramId++, entry.username);
+    await registrations.register(nextTelegramId++, entry.username);
   }
 
   const deps: SchedulerDeps = {
@@ -97,7 +95,7 @@ function assign(
 describe("runOverdueCrossingCheck", () => {
   it("notifies both the intern and the assigning higher-up exactly once", async () => {
     const past = new Date("2026-09-20T02:00:00.000Z"); // after 2026-09-10 due date
-    const { deps, service, bot, overdueNotifications } = makeDeps(past);
+    const { deps, service, bot, overdueNotifications } = await makeDeps(past);
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
 
@@ -105,7 +103,7 @@ describe("runOverdueCrossingCheck", () => {
 
     const recipients = bot.sent.map((m) => m.text);
     expect(recipients).toHaveLength(2);
-    expect(overdueNotifications.hasNotified(COHORT, created.value.id)).toBe(true);
+    expect(await overdueNotifications.hasNotified(COHORT, created.value.id)).toBe(true);
 
     // Running it again must not re-notify (PRD §8: exactly once per task).
     bot.sent.length = 0;
@@ -114,7 +112,7 @@ describe("runOverdueCrossingCheck", () => {
   });
 
   it("doesn't notify for a task that isn't overdue yet", async () => {
-    const { deps, service, bot } = makeDeps();
+    const { deps, service, bot } = await makeDeps();
     await assign(service); // due 2026-09-10, NOW is 2026-09-04
     await runOverdueCrossingCheck(deps, COHORT, NOW);
     expect(bot.sent).toHaveLength(0);
@@ -123,7 +121,7 @@ describe("runOverdueCrossingCheck", () => {
 
 describe("runDueSoonReminderCheck", () => {
   it("reminds the assignee of a task due tomorrow", async () => {
-    const { deps, service, bot } = makeDeps();
+    const { deps, service, bot } = await makeDeps();
     await assign(service, { dueDate: "2026-09-05" }); // tomorrow relative to NOW
     await runDueSoonReminderCheck(deps, COHORT, NOW);
     expect(bot.sent).toHaveLength(1);
@@ -131,7 +129,7 @@ describe("runDueSoonReminderCheck", () => {
   });
 
   it("doesn't remind for a task due further out", async () => {
-    const { deps, service, bot } = makeDeps();
+    const { deps, service, bot } = await makeDeps();
     await assign(service, { dueDate: "2026-09-20" });
     await runDueSoonReminderCheck(deps, COHORT, NOW);
     expect(bot.sent).toHaveLength(0);
@@ -140,7 +138,7 @@ describe("runDueSoonReminderCheck", () => {
 
 describe("runDailyDigest", () => {
   it("DMs interns and higher-ups with something to report, and posts a counts-only group summary", async () => {
-    const { deps, service, bot } = makeDeps();
+    const { deps, service, bot } = await makeDeps();
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
     await service.submitTask(alice, created.value.id);
@@ -161,7 +159,7 @@ describe("runDailyDigest", () => {
 
 describe("runWeeklyDigest", () => {
   it("suppresses higher-ups with nothing pending and nothing approved recently", async () => {
-    const { deps, service, bot } = makeDeps();
+    const { deps, service, bot } = await makeDeps();
     await assign(service); // Assigned only, not submitted/approved -> nothing for higher-ups
     const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
     await runWeeklyDigest(deps, digestBuilder, COHORT, NOW);

@@ -8,12 +8,14 @@ See [`PRD.md`](./PRD.md) for the full product spec and design decisions, and
 [`CONTEXT.md`](./CONTEXT.md) for the "why" behind the technical choices. For how to actually use
 the bot day-to-day, see [`USER_GUIDE.md`](./USER_GUIDE.md).
 
-> **Re-platform in progress.** This codebase (Express + SQLite + `node-cron` + Telegram long
-> polling) is being re-platformed onto Next.js + Vercel + Supabase — see
-> [`CONTEXT.md`](./CONTEXT.md) and [`docs/adr/`](./docs/adr/) for the full reasoning, and GitHub
-> issues [#11](https://github.com/kxnn02/telegram-taskbot/issues/11)-[#17](https://github.com/kxnn02/telegram-taskbot/issues/17)
-> for the spec and phased implementation plan. Nothing below has changed yet — the setup and
-> running instructions still describe the current, unreplatformed code.
+> **Re-platform in progress.** This codebase is being re-platformed onto Next.js + Vercel +
+> Supabase — see [`CONTEXT.md`](./CONTEXT.md) and [`docs/adr/`](./docs/adr/) for the full
+> reasoning, and GitHub issues
+> [#11](https://github.com/kxnn02/telegram-taskbot/issues/11)-[#17](https://github.com/kxnn02/telegram-taskbot/issues/17)
+> for the spec and phased implementation plan. As of Phase 2 (#13), storage is Supabase Postgres
+> (SQLite has been removed) but the bot still runs as an Express + `node-cron` + Telegram
+> long-polling process, not yet the webhook/Vercel/Next.js target — the setup and running
+> instructions below describe that current in-between state.
 
 ## Requirements
 
@@ -32,7 +34,8 @@ Fill in `.env`:
 | Variable | Required | Purpose |
 |---|---|---|
 | `BOT_TOKEN` | yes | From `@BotFather` |
-| `DATABASE_PATH` | no (defaults to `./data/taskbot.sqlite`) | SQLite file location |
+| `SUPABASE_URL` | yes | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | yes | Supabase service-role key (bypasses RLS; see ADR-0006) |
 | `ACTIVE_COHORT_ID` | no (defaults to `cohort-5`) | Cohort treated as "current" |
 | `GROUP_CHAT_ID` | no | Cohort group chat id, for daily/weekly digests |
 | `DASHBOARD_URL` | no | URL shown by the bot's `/dashboard` command |
@@ -68,9 +71,11 @@ dashboard has a permanent deployed domain.
 ## Testing
 
 ```bash
-npm test          # run the full suite once
+npm test          # run the fast suite once (in-memory fakes only, no network)
 npm run test:watch
 npm run typecheck  # tsc --noEmit
+npm run test:live  # contract tests against the real Supabase project — needs
+                    # SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY; see ADR-0005
 ```
 
 ## Project structure
@@ -81,7 +86,8 @@ src/
 ├── service/        taskService.ts — THE seam: all business rules live here.
 │                    Both the bot and the dashboard call into this, never the
 │                    repositories directly.
-├── db/             SQLite (node:sqlite) schema + repositories
+├── storage/        TaskStorePort + Supabase/in-memory implementations
+│                    (see supabase/migrations/ for schema)
 ├── config/         Roster loading
 ├── date/           chrono-node due-date parsing (Asia/Manila)
 ├── notifications/  Scheduled jobs: overdue-crossing, due-date reminders,

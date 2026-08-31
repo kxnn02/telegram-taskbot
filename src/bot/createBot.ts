@@ -1,10 +1,9 @@
 import { Bot, InlineKeyboard } from "grammy";
-import { openDatabase } from "../db/schema.js";
-import { RegistrationRepository } from "../db/registrationRepository.js";
 import { loadRoster } from "../config/roster.js";
 import { SystemClock } from "../domain/clock.js";
 import { TaskService } from "../service/taskService.js";
-import { InMemoryTaskStore } from "../storage/inMemoryTaskStore.js";
+import type { TaskStorePort } from "../storage/taskStorePort.js";
+import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
 import { parseDueDate } from "../date/parseDueDate.js";
 import { resolveCaller } from "./callerResolution.js";
 import { WizardManager, type WizardState, type EditField } from "./wizard.js";
@@ -24,7 +23,13 @@ import type { Roster } from "../domain/roster.js";
 
 export interface CreateBotOptions {
   token: string;
-  dbPath: string;
+  /** Storage port TaskService talks to (ADR-0005). Production code passes a
+   * `SupabaseTaskStore`; tests pass an `InMemoryTaskStore`. */
+  taskStore: TaskStorePort;
+  /** Storage port for the Telegram-user-id <-> roster-username link
+   * (PRD §7). Production code passes a `SupabaseRegistrationStore`; tests
+   * pass an `InMemoryRegistrationStore`. */
+  registrationStore: RegistrationStorePort;
   rosterPath?: string;
   dashboardUrl: string;
   /** Injected Bot instance — used by tests to avoid a real network `getMe`
@@ -45,25 +50,20 @@ const NEXT_STEP_HINT: Record<string, string> = {
 
 export interface CreatedBot {
   bot: Bot;
-  db: ReturnType<typeof openDatabase>;
   service: TaskService;
   roster: Roster;
-  registrations: RegistrationRepository;
+  registrations: RegistrationStorePort;
   wizards: WizardManager;
 }
 
 export function createBot(options: CreateBotOptions): CreatedBot {
   const bot = options.bot ?? new Bot(options.token);
-  const db = openDatabase(options.dbPath);
   const roster = options.roster ?? loadRoster(options.rosterPath);
-  const registrations = new RegistrationRepository(db);
+  const registrations = options.registrationStore;
   const clock = new SystemClock();
-  // TaskService now talks only through the TaskStorePort (ADR-0005) and no
-  // longer touches SQLite. The real Supabase adapter lands in Phase 2
-  // (issue #13); until then this in-memory store is a deliberate,
-  // non-persistent placeholder — `db`/SQLite stays wired up above only for
-  // registrations, which are out of this phase's scope.
-  const service = new TaskService(new InMemoryTaskStore(), roster, clock);
+  // TaskService talks only through the TaskStorePort (ADR-0005) — see
+  // bot/index.ts for how production wires this to SupabaseTaskStore.
+  const service = new TaskService(options.taskStore, roster, clock);
   const wizards = new WizardManager();
 
   function requireCaller(userId: number) {
@@ -113,7 +113,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       );
       return;
     }
-    registrations.register(from.id, username);
+    await registrations.register(from.id, username);
     await ctx.reply(
       `Welcome, @${entry.username}! You're registered as ${entry.role === "HigherUp" ? "a higher-up" : "an intern"} for ${entry.cohortId}. Send /help to see what you can do.`,
     );
@@ -124,7 +124,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   bot.command("help", async (ctx) => {
     const userId = ctx.from?.id;
     if (userId === undefined) return;
-    const resolved = requireCaller(userId);
+    const resolved = await requireCaller(userId);
     await ctx.reply(
       formatHelp(resolved.status === "ok" ? resolved.caller.role : undefined),
     );
@@ -153,7 +153,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     return async (ctx: import("grammy").Context) => {
       const userId = ctx.from?.id;
       if (userId === undefined) return;
-      const resolved = requireCaller(userId);
+      const resolved = await requireCaller(userId);
       if (resolved.status === "not_started") {
         await ctx.reply("Send /start first so I know who you are.");
         return;
@@ -406,7 +406,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
 
   bot.callbackQuery(/^canceltask:(yes|no):(\d+)$/, async (ctx) => {
     const userId = ctx.from.id;
-    const resolved = requireCaller(userId);
+    const resolved = await requireCaller(userId);
     if (resolved.status !== "ok") {
       await ctx.answerCallbackQuery({ text: "Send /start first." });
       return;
@@ -429,7 +429,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
 
   bot.callbackQuery(/^decision:(approve|revise):(\d+)$/, async (ctx) => {
     const userId = ctx.from.id;
-    const resolved = requireCaller(userId);
+    const resolved = await requireCaller(userId);
     if (resolved.status !== "ok" || resolved.caller.role !== "HigherUp") {
       await ctx.answerCallbackQuery({ text: "Only higher-ups can do that." });
       return;
@@ -464,7 +464,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
 
   bot.callbackQuery(/^unblock:(\d+)$/, async (ctx) => {
     const userId = ctx.from.id;
-    const resolved = requireCaller(userId);
+    const resolved = await requireCaller(userId);
     if (resolved.status !== "ok" || resolved.caller.role !== "HigherUp") {
       await ctx.answerCallbackQuery({ text: "Only higher-ups can do that." });
       return;
@@ -540,7 +540,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       await ctx.answerCallbackQuery({ text: "That form has expired." });
       return;
     }
-    const resolved = requireCaller(userId);
+    const resolved = await requireCaller(userId);
     if (resolved.status !== "ok") {
       await ctx.answerCallbackQuery({ text: "Send /start first." });
       return;
@@ -617,7 +617,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       }
       return;
     }
-    const resolved = requireCaller(userId);
+    const resolved = await requireCaller(userId);
     if (resolved.status !== "ok") {
       wizards.cancel(userId);
       await ctx.reply("Send /start first.");
@@ -725,7 +725,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       await ctx.answerCallbackQuery({ text: "That form has expired." });
       return;
     }
-    const resolved = requireCaller(userId);
+    const resolved = await requireCaller(userId);
     if (resolved.status !== "ok") {
       await ctx.answerCallbackQuery({ text: "Send /start first." });
       return;
@@ -799,7 +799,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     await ctx.reply(`Task ${state.data.taskId} updated — ${label} changed.`);
   }
 
-  return { bot, db, service, roster, registrations, wizards };
+  return { bot, service, roster, registrations, wizards };
 }
 
 type CommandMatch = string | RegExpMatchArray | undefined;

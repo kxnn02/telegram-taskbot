@@ -1,5 +1,5 @@
 import type { Bot, InlineKeyboard } from "grammy";
-import type { RegistrationRepository } from "../db/registrationRepository.js";
+import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
 
 /**
  * Sends a proactive DM to a roster username, per PRD §8. Silently no-ops if
@@ -10,12 +10,12 @@ import type { RegistrationRepository } from "../db/registrationRepository.js";
  */
 export async function notifyUser(
   bot: Bot,
-  registrations: RegistrationRepository,
+  registrations: RegistrationStorePort,
   username: string,
   text: string,
   keyboard?: InlineKeyboard,
 ): Promise<void> {
-  const telegramId = registrations.findTelegramId(username);
+  const telegramId = await registrations.findTelegramId(username);
   if (!telegramId) return;
   try {
     await bot.api.sendMessage(telegramId, text, {

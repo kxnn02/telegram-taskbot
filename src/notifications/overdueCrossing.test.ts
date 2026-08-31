@@ -24,18 +24,18 @@ function task(overrides: Partial<Task> = {}): Task {
 }
 
 describe("findNewOverdueCrossings", () => {
-  it("includes an overdue task that hasn't been notified yet", () => {
-    const result = findNewOverdueCrossings([task()], NOW, () => false);
+  it("includes an overdue task that hasn't been notified yet", async () => {
+    const result = await findNewOverdueCrossings([task()], NOW, () => false);
     expect(result).toHaveLength(1);
   });
 
-  it("excludes a task that was already notified", () => {
-    const result = findNewOverdueCrossings([task({ id: 2 })], NOW, () => true);
+  it("excludes a task that was already notified", async () => {
+    const result = await findNewOverdueCrossings([task({ id: 2 })], NOW, () => true);
     expect(result).toHaveLength(0);
   });
 
-  it("excludes a task that isn't overdue yet", () => {
-    const result = findNewOverdueCrossings(
+  it("excludes a task that isn't overdue yet", async () => {
+    const result = await findNewOverdueCrossings(
       [task({ id: 3, dueDate: "2026-09-30" })],
       NOW,
       () => false,
@@ -43,8 +43,8 @@ describe("findNewOverdueCrossings", () => {
     expect(result).toHaveLength(0);
   });
 
-  it("excludes an overdue-by-date task that's already Approved", () => {
-    const result = findNewOverdueCrossings(
+  it("excludes an overdue-by-date task that's already Approved", async () => {
+    const result = await findNewOverdueCrossings(
       [task({ id: 4, status: "Approved" })],
       NOW,
       () => false,
@@ -52,9 +52,9 @@ describe("findNewOverdueCrossings", () => {
     expect(result).toHaveLength(0);
   });
 
-  it("checks notified state per-task, scoped by cohort id", () => {
+  it("checks notified state per-task, scoped by cohort id", async () => {
     let queried: Array<[string, number]> = [];
-    findNewOverdueCrossings([task({ id: 5, cohortId: "cohort-9" })], NOW, (cohortId, taskId) => {
+    await findNewOverdueCrossings([task({ id: 5, cohortId: "cohort-9" })], NOW, (cohortId, taskId) => {
       queried.push([cohortId, taskId]);
       return false;
     });

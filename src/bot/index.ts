@@ -1,6 +1,9 @@
 import "dotenv/config";
 import { createBot } from "./createBot.js";
-import { OverdueNotificationRepository } from "../db/overdueNotificationRepository.js";
+import { createSupabaseClient } from "../storage/supabaseClient.js";
+import { SupabaseTaskStore } from "../storage/supabaseTaskStore.js";
+import { SupabaseRegistrationStore } from "../storage/supabaseRegistrationStore.js";
+import { SupabaseOverdueNotificationStore } from "../storage/supabaseOverdueNotificationStore.js";
 import { startScheduler } from "../notifications/scheduler.js";
 
 const token = process.env.BOT_TOKEN;
@@ -8,9 +11,12 @@ if (!token) {
   throw new Error("BOT_TOKEN is not set. Copy .env.example to .env and fill it in.");
 }
 
-const { bot, db, service, roster, registrations } = createBot({
+const supabase = createSupabaseClient();
+
+const { bot, service, roster, registrations } = createBot({
   token,
-  dbPath: process.env.DATABASE_PATH ?? "./data/taskbot.sqlite",
+  taskStore: new SupabaseTaskStore(supabase),
+  registrationStore: new SupabaseRegistrationStore(supabase),
   rosterPath: process.env.ROSTER_PATH ?? "roster.config.json",
   dashboardUrl:
     process.env.DASHBOARD_URL ?? "https://example.com/dashboard-coming-soon",
@@ -23,7 +29,7 @@ const scheduler = startScheduler({
   registrations,
   service,
   roster,
-  overdueNotifications: new OverdueNotificationRepository(db),
+  overdueNotifications: new SupabaseOverdueNotificationStore(supabase),
   groupChatId: process.env.GROUP_CHAT_ID || undefined,
 });
 

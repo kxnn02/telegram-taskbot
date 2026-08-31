@@ -1,6 +1,6 @@
 import cron from "node-cron";
-import type { RegistrationRepository } from "../db/registrationRepository.js";
-import type { OverdueNotificationRepository } from "../db/overdueNotificationRepository.js";
+import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
+import type { OverdueNotificationStorePort } from "../storage/overdueNotificationStorePort.js";
 import type { Roster } from "../domain/roster.js";
 import type { Caller } from "../domain/types.js";
 import type { TaskService } from "../service/taskService.js";
@@ -24,10 +24,10 @@ export interface NotifierBot {
 
 export interface SchedulerDeps {
   bot: NotifierBot;
-  registrations: RegistrationRepository;
+  registrations: RegistrationStorePort;
   service: TaskService;
   roster: Roster;
-  overdueNotifications: OverdueNotificationRepository;
+  overdueNotifications: OverdueNotificationStorePort;
   /** Telegram chat id of the cohort's group chat, for the daily standup
    * summary (PRD §8). Digests/reminders still run without it — only the
    * group-chat post is skipped. */
@@ -51,11 +51,11 @@ function schedulerCaller(cohortId: string): Caller {
  * failure (e.g. the user blocked the bot). */
 async function sendDM(
   bot: NotifierBot,
-  registrations: RegistrationRepository,
+  registrations: RegistrationStorePort,
   username: string,
   text: string,
 ): Promise<void> {
-  const telegramId = registrations.findTelegramId(username);
+  const telegramId = await registrations.findTelegramId(username);
   if (!telegramId) return;
   try {
     await bot.api.sendMessage(telegramId, text);
@@ -75,14 +75,14 @@ export async function runOverdueCrossingCheck(
 ): Promise<void> {
   const result = await deps.service.listAllTasks(schedulerCaller(cohortId));
   const tasks = result.ok ? result.value : [];
-  const crossings = findNewOverdueCrossings(tasks, now, (c, id) =>
+  const crossings = await findNewOverdueCrossings(tasks, now, (c, id) =>
     deps.overdueNotifications.hasNotified(c, id),
   );
   for (const task of crossings) {
     const text = `Task ${task.id} ("${task.title}") is now overdue — it was due ${task.dueDate} and hasn't been submitted.`;
     await sendDM(deps.bot, deps.registrations, task.assigneeUsername, text);
     await sendDM(deps.bot, deps.registrations, task.assignedByUsername, text);
-    deps.overdueNotifications.markNotified(task.cohortId, task.id);
+    await deps.overdueNotifications.markNotified(task.cohortId, task.id);
   }
 }
 
