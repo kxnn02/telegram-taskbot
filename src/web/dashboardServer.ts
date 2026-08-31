@@ -32,6 +32,13 @@ export interface CreateDashboardServerOptions {
   botUsername: string;
   roster: Roster;
   service: TaskService;
+  /** The cohort this deployed dashboard instance serves (ADR-0004/
+   * CONTEXT.md's cohort-binding note) — every real deployment serves
+   * exactly one cohort, so the Telegram-login lookup below is always bound
+   * to this id rather than letting `roster.find` guess ambiguously among
+   * cohorts that happen to share a username (the dry run intentionally
+   * reuses real accounts across cohorts). */
+  activeCohortId: string;
   sessionStore?: SessionStore;
 }
 
@@ -79,7 +86,7 @@ export function createDashboardServer(options: CreateDashboardServerOptions): Ex
       return;
     }
 
-    const entry = options.roster.find(verified.username);
+    const entry = options.roster.find(verified.username, options.activeCohortId);
     if (!entry || entry.role !== "HigherUp") {
       res
         .status(403)

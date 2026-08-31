@@ -14,6 +14,10 @@ const botUsername = process.env.BOT_USERNAME;
 if (!botUsername) {
   throw new Error("BOT_USERNAME is not set. Copy .env.example to .env and fill it in.");
 }
+const activeCohortId = process.env.ACTIVE_COHORT_ID;
+if (!activeCohortId) {
+  throw new Error("ACTIVE_COHORT_ID is not set. Copy .env.example to .env and fill it in.");
+}
 
 const roster = loadRoster(process.env.ROSTER_PATH ?? "roster.config.json");
 // TaskService talks only through the TaskStorePort (ADR-0005), now backed
@@ -25,7 +29,7 @@ const service = new TaskService(
   new SystemClock(),
 );
 
-const app = createDashboardServer({ botToken: token, botUsername, roster, service });
+const app = createDashboardServer({ botToken: token, botUsername, roster, service, activeCohortId });
 
 const port = Number(process.env.DASHBOARD_PORT ?? 3000);
 app.listen(port, () => {
