@@ -6,7 +6,7 @@
   "description": "DevCon PH Cohort 5 Telegram task-management bot",
   "scripts": {
     "build": "tsc -p tsconfig.json && npm run copy-assets",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.api.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:live": "vitest run --config vitest.live.config.ts",
@@ -31,6 +31,7 @@
     "@types/luxon": "^3.4.2",
     "@types/node": "^22.9.0",
     "@types/supertest": "^6.0.3",
+    "@vercel/node": "^10.0.0",
     "supertest": "^7.2.2",
     "tsx": "^4.19.1",
     "typescript": "^5.6.2",
