@@ -1,3 +1,5 @@
+import type { WizardStateStorePort } from "../storage/wizardStateStorePort.js";
+
 export type WizardKind = "assign" | "edit";
 
 export type WizardStep =
@@ -33,18 +35,18 @@ export interface WizardState {
 export const WIZARD_EXPIRY_MS = 20 * 60 * 1000; // ~20 minutes, PRD §6
 
 /** Per-user (DM chat === user, so keyed by Telegram user id) in-progress
- * wizard state for the assignment and edit flows. Deliberately a plain
- * in-memory map, not persisted — a restart losing an in-progress wizard is
- * an acceptable v1 tradeoff given cohort scale and the auto-expiry design
- * already treating abandonment as normal. */
+ * wizard state for the assignment and edit flows. Backed by a
+ * `WizardStateStorePort` (ADR-0006) — a real Vercel serverless deployment
+ * has no long-lived process memory to hold this in, since a different
+ * disposable Lambda invocation can handle each message mid-wizard. */
 export class WizardManager {
-  private readonly states = new Map<number, WizardState>();
+  constructor(private readonly store: WizardStateStorePort) {}
 
-  get(userId: number): WizardState | undefined {
-    const state = this.states.get(userId);
+  async get(userId: number): Promise<WizardState | undefined> {
+    const state = await this.store.get(userId);
     if (!state) return undefined;
     if (this.isExpired(state)) {
-      this.states.delete(userId);
+      await this.store.delete(userId);
       return undefined;
     }
     return state;
@@ -54,7 +56,7 @@ export class WizardManager {
     return Date.now() - state.lastActivity > WIZARD_EXPIRY_MS;
   }
 
-  start(userId: number, kind: WizardKind, initial: WizardData = {}): WizardState {
+  async start(userId: number, kind: WizardKind, initial: WizardData = {}): Promise<WizardState> {
     const step: WizardStep =
       kind === "assign" ? "awaiting_assignee" : "awaiting_field_choice";
     const state: WizardState = {
@@ -63,12 +65,12 @@ export class WizardManager {
       data: initial,
       lastActivity: Date.now(),
     };
-    this.states.set(userId, state);
+    await this.store.set(userId, state);
     return state;
   }
 
-  update(userId: number, patch: Partial<WizardState>): WizardState | undefined {
-    const state = this.get(userId);
+  async update(userId: number, patch: Partial<WizardState>): Promise<WizardState | undefined> {
+    const state = await this.get(userId);
     if (!state) return undefined;
     const next: WizardState = {
       ...state,
@@ -76,15 +78,15 @@ export class WizardManager {
       data: { ...state.data, ...patch.data },
       lastActivity: Date.now(),
     };
-    this.states.set(userId, next);
+    await this.store.set(userId, next);
     return next;
   }
 
-  cancel(userId: number): boolean {
-    return this.states.delete(userId);
+  async cancel(userId: number): Promise<boolean> {
+    return this.store.delete(userId);
   }
 
-  has(userId: number): boolean {
-    return this.get(userId) !== undefined;
+  async has(userId: number): Promise<boolean> {
+    return (await this.get(userId)) !== undefined;
   }
 }

@@ -4,6 +4,7 @@ import type { Update, UserFromGetMe } from "grammy/types";
 import { Roster } from "../domain/roster.js";
 import { InMemoryTaskStore } from "../storage/inMemoryTaskStore.js";
 import { InMemoryRegistrationStore } from "../storage/inMemoryRegistrationStore.js";
+import { InMemoryWizardStateStore } from "../storage/inMemoryWizardStateStore.js";
 import { createBot, type CreatedBot } from "./createBot.js";
 
 const COHORT = "cohort-5";
@@ -75,6 +76,7 @@ function makeTestBot(roster: Roster) {
     token: "TEST_TOKEN",
     taskStore: new InMemoryTaskStore(),
     registrationStore: new InMemoryRegistrationStore(),
+    wizardStateStore: new InMemoryWizardStateStore(),
     dashboardUrl: "http://localhost:1234",
     bot,
     roster,
@@ -290,7 +292,7 @@ describe("/edit wizard field picker", () => {
       taskId,
     );
     expect(result.ok && result.value.assigneeUsername).toBe("alice"); // unchanged (was already alice)
-    expect(testBot.wizards.has(higherUpId)).toBe(true);
+    expect(await testBot.wizards.has(higherUpId)).toBe(true);
 
     // caller must type the corrected username themselves
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "bob"));
@@ -363,7 +365,7 @@ describe("/edit wizard field picker", () => {
     const text = lastReplyText(testBot.calls);
     expect(text).toMatch(/approved/i);
     expect(text).not.toContain("Which field");
-    expect(testBot.wizards.has(higherUpId)).toBe(false);
+    expect(await testBot.wizards.has(higherUpId)).toBe(false);
   });
 
   it("/cancel aborts the wizard at the field-choice stage", async () => {
@@ -372,9 +374,9 @@ describe("/edit wizard field picker", () => {
     await registerCaller(testBot, higherUpId, "carla");
 
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/edit ${taskId}`));
-    expect(testBot.wizards.has(higherUpId)).toBe(true);
+    expect(await testBot.wizards.has(higherUpId)).toBe(true);
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/cancel"));
-    expect(testBot.wizards.has(higherUpId)).toBe(false);
+    expect(await testBot.wizards.has(higherUpId)).toBe(false);
 
     const text = lastReplyText(testBot.calls);
     expect(text).toMatch(/cancelled/i);
@@ -436,7 +438,7 @@ describe("/assign full 4-step flow (regression, unaffected by /edit changes)", (
     const text = lastReplyText(testBot.calls);
     expect(text).toMatch(/isn't a known intern/i);
     expect(text).toMatch(/did you mean @bob/i);
-    expect(testBot.wizards.has(higherUpId)).toBe(true);
+    expect(await testBot.wizards.has(higherUpId)).toBe(true);
   });
 });
 
