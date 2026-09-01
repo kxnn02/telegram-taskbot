@@ -1,5 +1,20 @@
 ﻿# PRD: DevCon PH Cohort 5 Task Bot
 
+> **Partly superseded — read [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md)
+> alongside this document.** The bot's commands are becoming direct one-liners, and its six gated
+> statuses are being replaced by six free-set ones matching **Devie**, another DevCon bot this
+> cohort's higher-ups already use. That deletes the submit → review → approve workflow this PRD is
+> built around. Specifically superseded: **§4 Task Lifecycle**, **§5 Telegram Bot — Commands**, the
+> role split in **§2 Users & Roles**, and the notification triggers in **§8**. The `status` field in
+> **§3** changes values. §6, §7, §9-§12 are unaffected.
+>
+> **Not implemented yet** — the behaviour described below is still the behaviour that exists. The
+> full rewrite of these sections is tracked as
+> [#35](https://github.com/kxnn02/telegram-taskbot/issues/35), under spec
+> [#27](https://github.com/kxnn02/telegram-taskbot/issues/27). See also the re-platform ADRs
+> (0001-0008) and `CONTEXT.md`, which cover a separate pending change to the stack rather than the
+> product.
+
 ## 1. Overview
 
 A Telegram-native task management system for DevCon PH's internship program, starting with
