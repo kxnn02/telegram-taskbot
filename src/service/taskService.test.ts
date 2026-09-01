@@ -124,6 +124,33 @@ describe("assignTask", () => {
     expect(first.ok && first.value.id).toBe(1);
     expect(second.ok && second.value.id).toBe(2);
   });
+
+  it("collapses newlines in the title so list views can't break (issue #59/H13)", async () => {
+    const { service } = makeService();
+    const result = await assign(service, { title: "first line\nsecond line" });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.title).toBe("first line second line");
+  });
+
+  it("collapses tabs and runs of spaces in the title to single spaces (issue #59/H13)", async () => {
+    const { service } = makeService();
+    const result = await assign(service, { title: "first\t\tline   second" });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.title).toBe("first line second");
+  });
+
+  it("still rejects a whitespace-only title rather than collapsing it to empty (issue #59/H13)", async () => {
+    const { service } = makeService();
+    const result = await assign(service, { title: "  \n " });
+    expect(result.ok).toBe(false);
+  });
+
+  it("preserves newlines in a multi-line description (issue #59/H13)", async () => {
+    const { service } = makeService();
+    const result = await assign(service, { description: "line one\nline two" });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.description).toBe("line one\nline two");
+  });
 });
 
 describe("setStatus — the free-set status model", () => {
@@ -260,6 +287,17 @@ describe("editTask", () => {
     if (!created.ok) throw new Error("setup failed");
     const result = await service.editTask(carla, created.value.id, { assigneeUsername: "dave" });
     expect(result.ok).toBe(true);
+  });
+
+  it("collapses newlines in an edited title (issue #59/H13)", async () => {
+    const { service } = makeService();
+    const created = await assign(service);
+    if (!created.ok) throw new Error("setup failed");
+    const result = await service.editTask(carla, created.value.id, {
+      title: "first line\nsecond line",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.title).toBe("first line second line");
   });
 });
 

@@ -160,7 +160,7 @@ export class TaskService {
     const task: Task = {
       id,
       cohortId: caller.cohortId,
-      title: input.title.trim(),
+      title: input.title.replace(/\s+/g, " ").trim(),
       description: input.description?.trim() ? input.description.trim() : undefined,
       assigneeUsername: assignee,
       assignedByUsername: normalizeUsername(caller.username),
@@ -197,7 +197,7 @@ export class TaskService {
     if (patch.title !== undefined) {
       const err = requireNonEmpty(patch.title, "Title");
       if (err) return fail(err);
-      task.title = patch.title.trim();
+      task.title = patch.title.replace(/\s+/g, " ").trim();
     }
     if (patch.description !== undefined) {
       task.description = patch.description.trim() ? patch.description.trim() : undefined;
