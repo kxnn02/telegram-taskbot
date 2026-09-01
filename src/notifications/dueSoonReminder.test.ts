@@ -40,9 +40,9 @@ describe("findDueTomorrow", () => {
     expect(result).toHaveLength(0);
   });
 
-  it("excludes a task that's already in_review", () => {
+  it("includes a task that's already in_review — only done is excluded now", () => {
     const result = findDueTomorrow([task({ id: 4, status: "in_review" })], NOW);
-    expect(result).toHaveLength(0);
+    expect(result).toHaveLength(1);
   });
 
   it("excludes a task that's already done", () => {
@@ -50,18 +50,26 @@ describe("findDueTomorrow", () => {
     expect(result).toHaveLength(0);
   });
 
-  it("excludes a backlog task", () => {
+  it("includes a backlog task due tomorrow", () => {
     const result = findDueTomorrow([task({ id: 6, status: "backlog" })], NOW);
-    expect(result).toHaveLength(0);
+    expect(result).toHaveLength(1);
   });
 
-  it("excludes a blocked task — nothing left to remind about while it's blocked", () => {
+  it("includes a blocked task due tomorrow", () => {
     const result = findDueTomorrow([task({ id: 7, status: "blocked" })], NOW);
-    expect(result).toHaveLength(0);
+    expect(result).toHaveLength(1);
   });
 
   it("includes a todo task due tomorrow", () => {
     const result = findDueTomorrow([task({ id: 8, status: "todo" })], NOW);
+    expect(result).toHaveLength(1);
+  });
+
+  it("includes a task assigned to a HigherUp — eligibility isn't role-scoped", () => {
+    const result = findDueTomorrow(
+      [task({ id: 9, assigneeUsername: "dave", status: "todo" })],
+      NOW,
+    );
     expect(result).toHaveLength(1);
   });
 });

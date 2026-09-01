@@ -103,6 +103,23 @@ export async function runDueSoonReminderCheck(
   }
 }
 
+/** Combines a HigherUp's own open-task digest (same shape an Intern gets)
+ * with their oversight digest, since assignment is no longer intern-only
+ * (issue #27/#29) — without this, a HigherUp holding an assigned task would
+ * never see it, only ever the cohort-wide oversight view. `null` only when
+ * both halves have nothing to report. */
+async function higherUpCombinedDigest(
+  digestBuilder: DigestBuilder,
+  username: string,
+  cohortId: string,
+  oversight: () => Promise<string | null>,
+): Promise<string | null> {
+  const own = await digestBuilder.internDigest(username, cohortId);
+  const oversightText = await oversight();
+  const parts = [own, oversightText].filter((p): p is string => p !== null);
+  return parts.length === 0 ? null : parts.join("\n\n");
+}
+
 /** Daily 10am standup (PRD §8): individual DMs (suppressed when nothing to
  * report) plus one counts-only group-chat summary. */
 export async function runDailyDigest(
@@ -115,7 +132,9 @@ export async function runDailyDigest(
     const text =
       entry.role === "Intern"
         ? await digestBuilder.internDigest(entry.username, cohortId)
-        : await digestBuilder.higherUpDailyDigest(entry.username, cohortId);
+        : await higherUpCombinedDigest(digestBuilder, entry.username, cohortId, () =>
+            digestBuilder.higherUpDailyDigest(entry.username, cohortId),
+          );
     if (text) {
       await sendDM(
         deps.bot,
@@ -153,7 +172,9 @@ export async function runWeeklyDigest(
     const text =
       entry.role === "Intern"
         ? await digestBuilder.internDigest(entry.username, cohortId)
-        : await digestBuilder.higherUpWeeklyDigest(entry.username, cohortId, now);
+        : await higherUpCombinedDigest(digestBuilder, entry.username, cohortId, () =>
+            digestBuilder.higherUpWeeklyDigest(entry.username, cohortId, now),
+          );
     if (text) {
       await sendDM(
         deps.bot,
