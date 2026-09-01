@@ -340,8 +340,8 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   bot.command(
     "standup",
     withCaller(async (ctx, caller) => {
-      const entries = await buildStandup(service, roster, caller);
-      await ctx.reply(formatStandup(entries));
+      const report = await buildStandup(service, caller, clock.now());
+      await ctx.reply(formatStandup(report));
     }),
   );
 

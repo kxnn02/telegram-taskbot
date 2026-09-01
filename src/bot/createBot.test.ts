@@ -1560,13 +1560,28 @@ describe("/standup (issue #33)", () => {
     expect(text).toContain("Write the onboarding doc");
   });
 
-  it("covers every roster member, even one with no tasks", async () => {
+  it("renders a status-count overview, even with an empty cohort", async () => {
     const aliceId = nextUserId();
     await registerCaller(testBot, aliceId, "alice");
     await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/standup"));
 
     const text = lastReplyText(testBot.calls);
-    expect(text).toContain("@bob: no open tasks");
+    expect(text).toContain("Overview");
+    expect(text).toMatch(/To do: 0/);
+    expect(text).toMatch(/no tasks completed this week/i);
+  });
+
+  it("does not list a member who has nothing in a given status", async () => {
+    await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Write the onboarding doc", dueDate: "2026-09-05" },
+    );
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/standup"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).not.toContain("@bob");
   });
 });
 
