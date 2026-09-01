@@ -13,9 +13,9 @@ function task(overrides: Partial<Task> = {}): Task {
     assigneeUsername: "alice",
     assignedByUsername: "carla",
     dueDate: "2026-09-01",
-    status: "Approved",
+    status: "done",
     notes: [],
-    blocked: false,
+    previousStatus: null,
     blockedReason: null,
     createdAt: "2026-08-25T00:00:00.000Z",
     updatedAt: "2026-09-05T00:00:00.000Z", // 3 days before NOW
@@ -37,9 +37,9 @@ describe("approvedInPastWeek", () => {
     expect(result).toHaveLength(0);
   });
 
-  it("excludes a task that isn't Approved, regardless of updatedAt", () => {
+  it("excludes a task that isn't done, regardless of updatedAt", () => {
     const result = approvedInPastWeek(
-      [task({ id: 3, status: "Submitted" })],
+      [task({ id: 3, status: "in_review" })],
       NOW,
     );
     expect(result).toHaveLength(0);

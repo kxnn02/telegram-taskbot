@@ -23,7 +23,7 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ ok: false, error: "Not authenticated." }, { status: 401 });
   }
 
-  const result = await deps.service.approveTask(caller, taskId);
+  const result = await deps.service.setStatus(caller, taskId, "done");
   if (!result.ok) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
   }

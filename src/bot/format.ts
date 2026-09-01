@@ -37,7 +37,7 @@ function paginationFooter(commandName: string, page: number, totalPages: number)
 export function formatTaskLine(task: TaskWithFlags): string {
   const flags: string[] = [];
   if (task.overdue) flags.push(`OVERDUE ${task.daysOverdue}d`);
-  if (task.blocked) flags.push("BLOCKED");
+  if (task.status === "blocked") flags.push("BLOCKED");
   const flagText = flags.length > 0 ? ` [${flags.join(", ")}]` : "";
   return `#${task.id} ${task.title} — ${task.status} (due ${task.dueDate})${flagText}`;
 }
@@ -130,7 +130,7 @@ export function formatApproved(tasks: TaskWithFlags[]): string {
 export function formatTaskDetail(task: TaskWithFlags): string {
   const flags: string[] = [];
   if (task.overdue) flags.push(`OVERDUE (${task.daysOverdue} day(s))`);
-  if (task.blocked) flags.push(`BLOCKED: ${task.blockedReason}`);
+  if (task.status === "blocked") flags.push(`BLOCKED: ${task.blockedReason}`);
   const flagLine = flags.length > 0 ? `\nFlags: ${flags.join(" | ")}` : "";
 
   const notesText =
@@ -147,7 +147,7 @@ export function formatTaskDetail(task: TaskWithFlags): string {
     `Assigned by: @${task.assignedByUsername}`,
     `Due: ${task.dueDate}`,
     "",
-    `Description: ${task.description}`,
+    `Description: ${task.description ?? "(none)"}`,
     "",
     "Notes:",
     notesText,

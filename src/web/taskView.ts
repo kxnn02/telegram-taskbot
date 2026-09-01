@@ -56,13 +56,13 @@ export function groupByAction(tasks: TaskWithFlags[]): Map<ActionGroup, TaskWith
 }
 
 function classify(task: TaskWithFlags): ActionGroup {
-  if (task.status === "Submitted") return "needs-review";
-  // Approved/Cancelled always land in Done, even if `overdue` were somehow
-  // still true (in practice it never is once a task is closed — see
-  // isOverdue — but this keeps the pure function's own invariant explicit
-  // rather than relying on that upstream guarantee).
-  if (task.status === "Approved" || task.status === "Cancelled") return "done";
-  if (task.blocked) return "blocked";
+  if (task.status === "in_review") return "needs-review";
+  // `done` always lands in Done, even if `overdue` were somehow still true
+  // (in practice it never is once a task is closed — see isOverdue — but
+  // this keeps the pure function's own invariant explicit rather than
+  // relying on that upstream guarantee).
+  if (task.status === "done") return "done";
+  if (task.status === "blocked") return "blocked";
   if (task.overdue) return "overdue";
   return "open";
 }
@@ -73,11 +73,11 @@ export function filterByStatusGroup(
 ): TaskWithFlags[] {
   switch (group) {
     case "done":
-      return tasks.filter((t) => t.status === "Approved");
+      return tasks.filter((t) => t.status === "done");
     case "to-be-reviewed":
-      return tasks.filter((t) => t.status === "Submitted");
+      return tasks.filter((t) => t.status === "in_review");
     case "blocked":
-      return tasks.filter((t) => t.blocked);
+      return tasks.filter((t) => t.status === "blocked");
     case "overdue-backlog":
       return tasks.filter((t) => t.overdue);
     case undefined:

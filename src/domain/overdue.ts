@@ -3,12 +3,13 @@ import type { Task } from "./types.js";
 
 export const MANILA_ZONE = "Asia/Manila";
 
-const NOT_OVERDUE_STATUSES = new Set(["Approved", "Cancelled"]);
+const NOT_OVERDUE_STATUSES = new Set(["done"]);
 
 /**
  * A task is overdue when today (Asia/Manila) is past its due date and it
- * hasn't reached a terminal Approved/Cancelled status. This is a derived
- * flag, never stored (PRD §4).
+ * isn't `done` (issue #27/#28 — `Cancelled` no longer exists, and `backlog`
+ * is deliberately still eligible: a parked task past its due date is still
+ * overdue). This is a derived flag, never stored (PRD §4).
  */
 export function isOverdue(task: Task, now: Date): boolean {
   if (NOT_OVERDUE_STATUSES.has(task.status)) return false;

@@ -59,29 +59,29 @@ describe("assignTask", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.id).toBe(1);
-      expect(result.value.status).toBe("Assigned");
+      expect(result.value.status).toBe("todo");
       expect(result.value.assigneeUsername).toBe("alice");
       expect(result.value.assignedByUsername).toBe("carla");
-      expect(result.value.blocked).toBe(false);
+      expect(result.value.previousStatus).toBeNull();
     }
   });
 
-  it("rejects assignment from an intern caller", async () => {
+  it("lets an intern assign a task too — task creation is open to any roster member", async () => {
     const { service } = makeService();
     const result = await service.assignTask(alice, {
       assigneeUsername: "bob",
-      title: "x",
-      description: "y",
+      title: "help bob",
+      description: "d",
       dueDate: "2026-09-05",
     });
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
   });
 
-  it("rejects assigning to another higher-up", async () => {
+  it("lets a task be assigned to a higher-up — assignable is no longer intern-only", async () => {
     const { service } = makeService();
     const result = await assign(service, { assigneeUsername: "dave" });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toMatch(/intern/i);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.assigneeUsername).toBe("dave");
   });
 
   it("rejects assigning to someone not on the roster", async () => {
@@ -90,10 +90,26 @@ describe("assignTask", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("rejects an empty title or description", async () => {
+  it("rejects assigning across cohorts, even to a real roster member of another cohort", async () => {
+    const { service } = makeService();
+    const result = await assign(service, { assigneeUsername: "erin" }); // erin is cohort-4
+    expect(result.ok).toBe(false);
+  });
+
+  it("allows an empty/omitted description — description is optional", async () => {
+    const { service } = makeService();
+    const result = await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "one-liner task",
+      dueDate: "2026-09-05",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.description).toBeUndefined();
+  });
+
+  it("rejects an empty title", async () => {
     const { service } = makeService();
     expect((await assign(service, { title: "  " })).ok).toBe(false);
-    expect((await assign(service, { description: "" })).ok).toBe(false);
   });
 
   it("rejects an invalid due date", async () => {
@@ -110,286 +126,155 @@ describe("assignTask", () => {
   });
 });
 
-describe("full lifecycle", () => {
-  it("Assigned -> InProgress (via first /task view) -> Submitted -> Approved", async () => {
-    const { service } = makeService();
-    const created = await assign(service);
-    if (!created.ok) throw new Error("setup failed");
-    const id = created.value.id;
-
-    const viewed = await service.getTask(alice, id);
-    expect(viewed.ok).toBe(true);
-    if (viewed.ok) expect(viewed.value.status).toBe("InProgress");
-
-    const submitted = await service.submitTask(alice, id);
-    expect(submitted.ok).toBe(true);
-    if (submitted.ok) expect(submitted.value.status).toBe("Submitted");
-
-    const approved = await service.approveTask(carla, id);
-    expect(approved.ok).toBe(true);
-    if (approved.ok) expect(approved.value.status).toBe("Approved");
-  });
-
-  it("Submitted -> NeedsRevision loops back to editable InProgress-equivalent, then resubmits", async () => {
-    const { service } = makeService();
-    const created = await assign(service);
-    if (!created.ok) throw new Error("setup failed");
-    const id = created.value.id;
-
-    await service.submitTask(alice, id);
-    const revised = await service.reviseTask(dave, id);
-    expect(revised.ok).toBe(true);
-    if (revised.ok) expect(revised.value.status).toBe("NeedsRevision");
-
-    const resubmit = await service.submitTask(alice, id);
-    expect(resubmit.ok).toBe(true);
-    if (resubmit.ok) expect(resubmit.value.status).toBe("Submitted");
-  });
-
-  it("second view of an already-InProgress task does not error or regress status", async () => {
-    const { service } = makeService();
-    const created = await assign(service);
-    if (!created.ok) throw new Error("setup failed");
-    const id = created.value.id;
-
-    await service.getTask(alice, id);
-    const secondView = await service.getTask(alice, id);
-    expect(secondView.ok).toBe(true);
-    if (secondView.ok) expect(secondView.value.status).toBe("InProgress");
-  });
-});
-
-describe("submitTask", () => {
-  it("rejects a non-assignee intern", async () => {
+describe("setStatus — the free-set status model", () => {
+  it("an intern can set their own task to done without a higher-up — this is intended behaviour, not a permission bug", async () => {
     const { service } = makeService();
     const created = await assign(service); // assigned to alice
     if (!created.ok) throw new Error("setup failed");
-    const result = await service.submitTask(bob, created.value.id);
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toMatch(/isn't assigned to you/i);
+    const result = await service.setStatus(alice, created.value.id, "done");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.status).toBe("done");
   });
 
-  it("rejects a higher-up caller", async () => {
+  it("any roster member can set any status on a task that isn't theirs", async () => {
     const { service } = makeService();
-    const created = await assign(service);
+    const created = await assign(service); // alice's task
     if (!created.ok) throw new Error("setup failed");
-    const result = await service.submitTask(carla, created.value.id);
-    expect(result.ok).toBe(false);
+    const result = await service.setStatus(bob, created.value.id, "in_progress");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.status).toBe("in_progress");
   });
 
-  it("rejects submitting an already-Submitted task with a specific message", async () => {
+  it("a caller still cannot touch a task in another cohort", async () => {
     const { service } = makeService();
-    const created = await assign(service);
+    const created = await assign(service); // cohort-5
     if (!created.ok) throw new Error("setup failed");
-    const id = created.value.id;
-    await service.submitTask(alice, id);
-    const again = await service.submitTask(alice, id);
-    expect(again.ok).toBe(false);
-    if (!again.ok) expect(again.error).toMatch(/already been submitted/i);
-  });
-
-  it("rejects submitting a Cancelled task", async () => {
-    const { service } = makeService();
-    const created = await assign(service);
-    if (!created.ok) throw new Error("setup failed");
-    const id = created.value.id;
-    await service.cancelTask(carla, id);
-    const result = await service.submitTask(alice, id);
-    expect(result.ok).toBe(false);
-  });
-
-  it("rejects submitting a nonexistent task id", async () => {
-    const { service } = makeService();
-    const result = await service.submitTask(alice, 999);
+    const otherCaller = caller("frank", "HigherUp", OTHER_COHORT);
+    const result = await service.setStatus(otherCaller, created.value.id, "done");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/doesn't exist/i);
   });
-});
 
-describe("approveTask / reviseTask", () => {
-  it("rejects approving a task that is still Assigned, with a specific message", async () => {
+  it("rejects a nonexistent task id", async () => {
     const { service } = makeService();
-    const created = await assign(service);
-    if (!created.ok) throw new Error("setup failed");
-    const result = await service.approveTask(carla, created.value.id);
+    const result = await service.setStatus(alice, 999, "done");
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toMatch(/still Assigned, not yet submitted/i);
+    if (!result.ok) expect(result.error).toMatch(/doesn't exist/i);
   });
 
-  it("rejects an intern caller", async () => {
-    const { service } = makeService();
-    const created = await assign(service);
-    if (!created.ok) throw new Error("setup failed");
-    await service.submitTask(alice, created.value.id);
-    const result = await service.approveTask(alice, created.value.id);
-    expect(result.ok).toBe(false);
-  });
-
-  it("any higher-up (not just the assigner) can approve", async () => {
-    const { service } = makeService();
-    const created = await assign(service); // assigned by carla
-    if (!created.ok) throw new Error("setup failed");
-    await service.submitTask(alice, created.value.id);
-    const result = await service.approveTask(dave, created.value.id); // dave, not carla
-    expect(result.ok).toBe(true);
-  });
-
-  it("second approveTask call fails gracefully naming who approved it first", async () => {
+  it("moves freely through every status with no legality checks", async () => {
     const { service } = makeService();
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
     const id = created.value.id;
-    await service.submitTask(alice, id);
-    const first = await service.approveTask(carla, id);
-    const second = await service.approveTask(dave, id);
-    expect(first.ok).toBe(true);
-    expect(second.ok).toBe(false);
-    if (!second.ok) expect(second.error).toMatch(/already approved/i);
-  });
 
-  it("revise then re-approve after resubmission works", async () => {
-    const { service } = makeService();
-    const created = await assign(service);
-    if (!created.ok) throw new Error("setup failed");
-    const id = created.value.id;
-    await service.submitTask(alice, id);
-    await service.reviseTask(carla, id);
-    await service.submitTask(alice, id);
-    const approved = await service.approveTask(carla, id);
-    expect(approved.ok).toBe(true);
-  });
-
-  it("rejects revising a task that isn't Submitted", async () => {
-    const { service } = makeService();
-    const created = await assign(service);
-    if (!created.ok) throw new Error("setup failed");
-    const result = await service.reviseTask(carla, created.value.id);
-    expect(result.ok).toBe(false);
+    for (const status of ["done", "backlog", "in_review", "todo", "in_progress"] as const) {
+      const result = await service.setStatus(alice, id, status);
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.value.status).toBe(status);
+    }
   });
 });
 
-describe("cancelTask", () => {
-  it("any higher-up can cancel a task at any point before Approved", async () => {
-    const { service } = makeService();
+describe("getTask", () => {
+  it("performs no write — an intern viewing their own todo task leaves it todo, and row_version is unchanged", async () => {
+    const { service, store } = makeService();
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
-    const result = await service.cancelTask(dave, created.value.id);
+    const id = created.value.id;
+
+    const before = await store.findTaskById(COHORT, id);
+    const result = await service.getTask(alice, id);
+    const after = await store.findTaskById(COHORT, id);
+
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value.status).toBe("Cancelled");
+    if (result.ok) expect(result.value.status).toBe("todo");
+    expect(after?.rowVersion).toBe(before?.rowVersion);
+    expect(after?.updatedAt).toBe(before?.updatedAt);
   });
 
-  it("rejects cancelling an already-Approved task", async () => {
+  it("an intern can read a task assigned to a different intern in the same cohort", async () => {
+    const { service } = makeService();
+    const created = await assign(service); // alice's task
+    if (!created.ok) throw new Error("setup failed");
+    const result = await service.getTask(bob, created.value.id);
+    expect(result.ok).toBe(true);
+  });
+
+  it("any higher-up can view any task's detail", async () => {
     const { service } = makeService();
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
-    const id = created.value.id;
-    await service.submitTask(alice, id);
-    await service.approveTask(carla, id);
-    const result = await service.cancelTask(dave, id);
+    const result = await service.getTask(dave, created.value.id);
+    expect(result.ok).toBe(true);
+  });
+
+  it("returns a specific not-found message for a nonexistent id", async () => {
+    const { service } = makeService();
+    const result = await service.getTask(carla, 42);
     expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("Task 42 doesn't exist.");
   });
 
-  it("rejects double-cancelling with a specific message", async () => {
+  it("still refuses to leak a task from another cohort", async () => {
     const { service } = makeService();
-    const created = await assign(service);
+    const created = await assign(service); // cohort-5
     if (!created.ok) throw new Error("setup failed");
-    const id = created.value.id;
-    await service.cancelTask(carla, id);
-    const second = await service.cancelTask(dave, id);
-    expect(second.ok).toBe(false);
-    if (!second.ok) expect(second.error).toMatch(/already cancelled/i);
-  });
-
-  it("rejects an intern caller", async () => {
-    const { service } = makeService();
-    const created = await assign(service);
-    if (!created.ok) throw new Error("setup failed");
-    const result = await service.cancelTask(alice, created.value.id);
+    const otherCaller = caller("frank", "HigherUp", OTHER_COHORT);
+    const result = await service.getTask(otherCaller, created.value.id);
     expect(result.ok).toBe(false);
-  });
-
-  it("cancelled tasks are excluded from listMyTasks and listPending but remain in listAllTasks", async () => {
-    const { service } = makeService();
-    const created = await assign(service);
-    if (!created.ok) throw new Error("setup failed");
-    await service.cancelTask(carla, created.value.id);
-
-    const mine = await service.listMyTasks(alice);
-    expect(mine.ok && mine.value.find((t) => t.id === created.value.id)).toBeUndefined();
-
-    const all = await service.listAllTasks(alice);
-    expect(all.ok && all.value.find((t) => t.id === created.value.id)).toBeDefined();
   });
 });
 
 describe("editTask", () => {
-  it("lets any higher-up edit a task at Assigned/InProgress/Submitted stages", async () => {
+  it("lets any roster member edit a task, no role check", async () => {
     const { service } = makeService();
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
-    const result = await service.editTask(dave, created.value.id, { title: "New title" });
+    const result = await service.editTask(alice, created.value.id, { title: "New title" });
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value.title).toBe("New title");
   });
 
-  it("rejects editing once a task is Approved", async () => {
+  it("done tasks remain editable — the Approved edit-lock is gone", async () => {
     const { service } = makeService();
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
     const id = created.value.id;
-    await service.submitTask(alice, id);
-    await service.approveTask(carla, id);
-    const result = await service.editTask(carla, id, { title: "sneaky" });
-    expect(result.ok).toBe(false);
-  });
-
-  it("still allows editing while Submitted", async () => {
-    const { service } = makeService();
-    const created = await assign(service);
-    if (!created.ok) throw new Error("setup failed");
-    const id = created.value.id;
-    await service.submitTask(alice, id);
-    const result = await service.editTask(carla, id, { description: "clarified scope" });
+    await service.setStatus(alice, id, "done");
+    const result = await service.editTask(carla, id, { title: "reopened and edited" });
     expect(result.ok).toBe(true);
   });
 
-  it("rejects reassigning to a non-intern", async () => {
+  it("rejects reassigning to someone off the roster", async () => {
+    const { service } = makeService();
+    const created = await assign(service);
+    if (!created.ok) throw new Error("setup failed");
+    const result = await service.editTask(carla, created.value.id, { assigneeUsername: "ghost" });
+    expect(result.ok).toBe(false);
+  });
+
+  it("allows reassigning to a higher-up", async () => {
     const { service } = makeService();
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
     const result = await service.editTask(carla, created.value.id, { assigneeUsername: "dave" });
-    expect(result.ok).toBe(false);
-  });
-
-  it("rejects an intern caller", async () => {
-    const { service } = makeService();
-    const created = await assign(service);
-    if (!created.ok) throw new Error("setup failed");
-    const result = await service.editTask(alice, created.value.id, { title: "x" });
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
   });
 });
 
 describe("addNote", () => {
-  it("appends a note and it shows up on the task", async () => {
+  it("appends a note and it shows up on the task, from any roster member", async () => {
     const { service } = makeService();
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
-    const result = await service.addNote(carla, created.value.id, "Nice progress so far");
+    const result = await service.addNote(alice, created.value.id, "Nice progress so far");
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.notes).toHaveLength(1);
       expect(result.value.notes[0]?.text).toBe("Nice progress so far");
-      expect(result.value.notes[0]?.authorUsername).toBe("carla");
+      expect(result.value.notes[0]?.authorUsername).toBe("alice");
     }
-  });
-
-  it("rejects an intern caller", async () => {
-    const { service } = makeService();
-    const created = await assign(service);
-    if (!created.ok) throw new Error("setup failed");
-    const result = await service.addNote(alice, created.value.id, "hi");
-    expect(result.ok).toBe(false);
   });
 
   it("rejects empty note text", async () => {
@@ -401,48 +286,107 @@ describe("addNote", () => {
   });
 });
 
-describe("blocked flag", () => {
-  it("intern can block their own task independent of status", async () => {
-    const { service } = makeService();
-    const created = await assign(service);
-    if (!created.ok) throw new Error("setup failed");
-    const result = await service.setBlocked(alice, created.value.id, "waiting on API access");
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value.blocked).toBe(true);
-      expect(result.value.blockedReason).toBe("waiting on API access");
-      expect(result.value.status).toBe("Assigned"); // status unaffected
-    }
-  });
-
-  it("a higher-up can block on an intern's behalf", async () => {
-    const { service } = makeService();
-    const created = await assign(service);
-    if (!created.ok) throw new Error("setup failed");
-    const result = await service.setBlocked(carla, created.value.id, "reported in standup");
-    expect(result.ok).toBe(true);
-  });
-
-  it("rejects a different intern blocking someone else's task", async () => {
+describe("blocked status", () => {
+  it("an intern can block a task that isn't theirs", async () => {
     const { service } = makeService();
     const created = await assign(service); // alice's task
     if (!created.ok) throw new Error("setup failed");
-    const result = await service.setBlocked(bob, created.value.id, "nope");
-    expect(result.ok).toBe(false);
+    const result = await service.setBlocked(bob, created.value.id, "waiting on API access");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.status).toBe("blocked");
+      expect(result.value.blockedReason).toBe("waiting on API access");
+    }
   });
 
-  it("clearBlocked unsets the flag", async () => {
+  it("an intern can unblock a task that isn't theirs", async () => {
+    const { service } = makeService();
+    const created = await assign(service); // alice's task
+    if (!created.ok) throw new Error("setup failed");
+    await service.setBlocked(carla, created.value.id, "reported in standup");
+    const result = await service.clearBlocked(bob, created.value.id);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.status).not.toBe("blocked");
+  });
+
+  it("setting blocked with no reason (the /update path) works alongside setting it with one", async () => {
+    const { service } = makeService();
+    const withReason = await assign(service, { assigneeUsername: "alice" });
+    const withoutReason = await assign(service, { assigneeUsername: "bob" });
+    if (!withReason.ok || !withoutReason.ok) throw new Error("setup failed");
+
+    const blockedWithReason = await service.setBlocked(alice, withReason.value.id, "stuck on API");
+    expect(blockedWithReason.ok).toBe(true);
+    if (blockedWithReason.ok) expect(blockedWithReason.value.blockedReason).toBe("stuck on API");
+
+    // The /update <ref> blocked path goes through setStatus, which has no
+    // reason parameter at all, so it must not reject for lack of one.
+    const blockedNoReason = await service.setStatus(bob, withoutReason.value.id, "blocked");
+    expect(blockedNoReason.ok).toBe(true);
+    if (blockedNoReason.ok) expect(blockedNoReason.value.blockedReason).toBeNull();
+  });
+
+  it("block -> unblock restores the pre-block status", async () => {
     const { service } = makeService();
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
     const id = created.value.id;
+    await service.setStatus(alice, id, "in_progress");
     await service.setBlocked(alice, id, "stuck");
     const cleared = await service.clearBlocked(alice, id);
     expect(cleared.ok).toBe(true);
     if (cleared.ok) {
-      expect(cleared.value.blocked).toBe(false);
+      expect(cleared.value.status).toBe("in_progress");
+      expect(cleared.value.previousStatus).toBeNull();
       expect(cleared.value.blockedReason).toBeNull();
     }
+  });
+
+  it("unblocking a task with a null previous_status lands on todo", async () => {
+    const { service, store } = makeService();
+    const created = await assign(service);
+    if (!created.ok) throw new Error("setup failed");
+    const id = created.value.id;
+    // Force the task into blocked with no recorded previous_status, as if
+    // it were blocked before this column existed.
+    const record = await store.findTaskById(COHORT, id);
+    if (!record) throw new Error("setup failed");
+    await store.updateTask({ ...record, status: "blocked", previousStatus: null });
+
+    const cleared = await service.clearBlocked(alice, id);
+    expect(cleared.ok).toBe(true);
+    if (cleared.ok) expect(cleared.value.status).toBe("todo");
+  });
+
+  it("the stale-previous_status trap: block from in_progress, exit via a plain setStatus to done, block again from done, then unblock — must land on done, not in_progress", async () => {
+    const { service } = makeService();
+    const created = await assign(service);
+    if (!created.ok) throw new Error("setup failed");
+    const id = created.value.id;
+
+    await service.setStatus(alice, id, "in_progress");
+    await service.setBlocked(alice, id, "first block");
+    // Exit via a plain setStatus, not clearBlocked — must still clear
+    // previous_status so it isn't stale for the next block.
+    await service.setStatus(alice, id, "done");
+    await service.setBlocked(alice, id, "second block");
+    const cleared = await service.clearBlocked(alice, id);
+    expect(cleared.ok).toBe(true);
+    if (cleared.ok) expect(cleared.value.status).toBe("done");
+  });
+
+  it("re-blocking an already-blocked task does not overwrite the stashed previous_status", async () => {
+    const { service } = makeService();
+    const created = await assign(service);
+    if (!created.ok) throw new Error("setup failed");
+    const id = created.value.id;
+
+    await service.setStatus(alice, id, "in_progress");
+    await service.setBlocked(alice, id, "first reason");
+    await service.setBlocked(alice, id, "second reason"); // already blocked
+    const cleared = await service.clearBlocked(alice, id);
+    expect(cleared.ok).toBe(true);
+    if (cleared.ok) expect(cleared.value.status).toBe("in_progress");
   });
 
   it("rejects clearing a flag that isn't set", async () => {
@@ -452,31 +396,10 @@ describe("blocked flag", () => {
     const result = await service.clearBlocked(alice, created.value.id);
     expect(result.ok).toBe(false);
   });
-
-  it("rejects blocking a Cancelled task", async () => {
-    const { service } = makeService();
-    const created = await assign(service);
-    if (!created.ok) throw new Error("setup failed");
-    const id = created.value.id;
-    await service.cancelTask(carla, id);
-    const result = await service.setBlocked(alice, id, "too late");
-    expect(result.ok).toBe(false);
-  });
-
-  it("rejects blocking an Approved task", async () => {
-    const { service } = makeService();
-    const created = await assign(service);
-    if (!created.ok) throw new Error("setup failed");
-    const id = created.value.id;
-    await service.submitTask(alice, id);
-    await service.approveTask(carla, id);
-    const result = await service.setBlocked(alice, id, "too late");
-    expect(result.ok).toBe(false);
-  });
 });
 
 describe("overdue flag", () => {
-  it("marks a task overdue when past due date and not Approved/Cancelled", async () => {
+  it("marks a task overdue when past due date and not done", async () => {
     const past = new Date("2026-09-10T02:00:00.000Z"); // well after 2026-09-05 due date
     const { service } = makeService(past);
     const created = await assign(service);
@@ -497,41 +420,37 @@ describe("overdue flag", () => {
     expect(result.ok && result.value.overdue).toBe(false);
   });
 
-  it("an Approved task is never overdue even past its due date", async () => {
+  it("a done task is never overdue even past its due date", async () => {
     const past = new Date("2026-09-10T02:00:00.000Z");
     const { service } = makeService(past);
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
     const id = created.value.id;
-    await service.submitTask(alice, id);
-    await service.approveTask(carla, id);
+    await service.setStatus(alice, id, "done");
     const list = await service.listAllTasks(alice);
     const task = list.ok ? list.value.find((t) => t.id === id) : undefined;
     expect(task?.overdue).toBe(false);
   });
 
-  it("a Cancelled task is never overdue even past its due date", async () => {
+  it("a backlog task past its due date is still overdue — backlog isn't a terminal status", async () => {
     const past = new Date("2026-09-10T02:00:00.000Z");
     const { service } = makeService(past);
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
-    await service.cancelTask(carla, created.value.id);
+    await service.setStatus(alice, created.value.id, "backlog");
     const list = await service.listAllTasks(alice);
     const task = list.ok ? list.value.find((t) => t.id === created.value.id) : undefined;
-    expect(task?.overdue).toBe(false);
+    expect(task?.overdue).toBe(true);
   });
 
-  it("/backlog scopes to own tasks for an intern and cohort-wide for a higher-up", async () => {
+  it("listBacklog is cohort-wide for an intern caller, not just their own tasks", async () => {
     const past = new Date("2026-09-10T02:00:00.000Z");
     const { service } = makeService(past);
     await assign(service, { assigneeUsername: "alice" });
     await assign(service, { assigneeUsername: "bob" });
 
     const aliceBacklog = await service.listBacklog(alice);
-    expect(aliceBacklog.ok && aliceBacklog.value).toHaveLength(1);
-
-    const carlaBacklog = await service.listBacklog(carla);
-    expect(carlaBacklog.ok && carlaBacklog.value).toHaveLength(2);
+    expect(aliceBacklog.ok && aliceBacklog.value).toHaveLength(2);
   });
 });
 
@@ -567,134 +486,116 @@ describe("cohort scoping", () => {
     expect(c5task.ok && c5task.value.id).toBe(1);
     expect(c4task.ok && c4task.value.id).toBe(1);
   });
-
-  it("a caller from one cohort cannot act on a task from another cohort", async () => {
-    const { service } = makeService();
-    const created = await assign(service); // cohort-5
-    if (!created.ok) throw new Error("setup failed");
-    const otherCaller = caller("frank", "HigherUp", OTHER_COHORT);
-    const result = await service.approveTask(otherCaller, created.value.id);
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toMatch(/doesn't exist/i);
-  });
 });
 
-describe("getTask permissions", () => {
-  it("the assigned intern can view full detail", async () => {
+describe("listMyTasks", () => {
+  it("a HigherUp who holds an assigned task gets it back from listMyTasks rather than a refusal", async () => {
     const { service } = makeService();
-    const created = await assign(service);
+    const created = await assign(service, { assigneeUsername: "dave" });
     if (!created.ok) throw new Error("setup failed");
-    const result = await service.getTask(alice, created.value.id);
+    const result = await service.listMyTasks(dave);
     expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.find((t) => t.id === created.value.id)).toBeDefined();
+    }
   });
 
-  it("a different intern cannot view someone else's task detail", async () => {
+  it("an intern's own list is unchanged", async () => {
     const { service } = makeService();
     const created = await assign(service); // alice's task
     if (!created.ok) throw new Error("setup failed");
-    const result = await service.getTask(bob, created.value.id);
-    expect(result.ok).toBe(false);
+    const result = await service.listMyTasks(alice);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.find((t) => t.id === created.value.id)).toBeDefined();
+    }
   });
 
-  it("any higher-up can view any task's detail", async () => {
+  it("excludes done tasks", async () => {
     const { service } = makeService();
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
-    const result = await service.getTask(dave, created.value.id);
-    expect(result.ok).toBe(true);
+    await service.setStatus(alice, created.value.id, "done");
+    const result = await service.listMyTasks(alice);
+    expect(result.ok && result.value.find((t) => t.id === created.value.id)).toBeUndefined();
   });
 
-  it("returns a specific not-found message for a nonexistent id", async () => {
+  it("includes a backlog task — backlog is still open", async () => {
     const { service } = makeService();
-    const result = await service.getTask(carla, 42);
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toBe("Task 42 doesn't exist.");
+    const created = await assign(service);
+    if (!created.ok) throw new Error("setup failed");
+    await service.setStatus(alice, created.value.id, "backlog");
+    const result = await service.listMyTasks(alice);
+    expect(result.ok && result.value.find((t) => t.id === created.value.id)).toBeDefined();
   });
 });
 
 describe("listPending", () => {
-  it("only higher-ups can view the review queue", async () => {
-    const { service } = makeService();
-    const result = await service.listPending(alice);
-    expect(result.ok).toBe(false);
-  });
-
-  it("lists Submitted tasks across all interns, not just ones the caller assigned", async () => {
+  it("is open to any roster member, not just higher-ups", async () => {
     const { service } = makeService();
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
-    await service.submitTask(alice, created.value.id);
+    await service.setStatus(alice, created.value.id, "in_review");
+    const result = await service.listPending(alice);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toHaveLength(1);
+  });
+
+  it("lists in_review tasks across the cohort, not just ones the caller assigned", async () => {
+    const { service } = makeService();
+    const created = await assign(service);
+    if (!created.ok) throw new Error("setup failed");
+    await service.setStatus(alice, created.value.id, "in_review");
     const pending = await service.listPending(dave); // dave didn't assign it
     expect(pending.ok && pending.value).toHaveLength(1);
   });
 });
 
 describe("listBlocked", () => {
-  it("lists blocked tasks across all interns for a higher-up, not just ones the caller assigned", async () => {
+  it("returns cohort-wide rows for an intern caller, not just their own", async () => {
     const { service } = makeService();
-    const created = await assign(service, { assigneeUsername: "alice" });
-    if (!created.ok) throw new Error("setup failed");
-    await service.setBlocked(alice, created.value.id, "waiting on API access");
-    const notBlocked = await assign(service, { assigneeUsername: "bob" });
-    if (!notBlocked.ok) throw new Error("setup failed");
+    const aliceTask = await assign(service, { assigneeUsername: "alice" });
+    const bobTask = await assign(service, { assigneeUsername: "bob" });
+    if (!aliceTask.ok || !bobTask.ok) throw new Error("setup failed");
+    await service.setBlocked(carla, aliceTask.value.id, "waiting on API access");
+    await service.setBlocked(carla, bobTask.value.id, "waiting on design review");
 
-    const blocked = await service.listBlocked(dave); // dave didn't assign it
-    expect(blocked.ok).toBe(true);
-    if (blocked.ok) {
-      expect(blocked.value).toHaveLength(1);
-      expect(blocked.value[0]?.id).toBe(created.value.id);
-    }
+    const aliceView = await service.listBlocked(alice);
+    expect(aliceView.ok).toBe(true);
+    if (aliceView.ok) expect(aliceView.value).toHaveLength(2);
   });
 
-  it("excludes tasks that aren't currently flagged blocked", async () => {
+  it("excludes tasks that aren't currently blocked", async () => {
     const { service } = makeService();
     await assign(service, { assigneeUsername: "alice" });
     const result = await service.listBlocked(carla);
     expect(result.ok && result.value).toHaveLength(0);
   });
 
-  it("scopes an intern's blocked list to only their own tasks", async () => {
-    const { service } = makeService();
-    const aliceTask = await assign(service, { assigneeUsername: "alice" });
-    if (!aliceTask.ok) throw new Error("setup failed");
-    await service.setBlocked(alice, aliceTask.value.id, "waiting on API access");
-
-    const bobTask = await assign(service, { assigneeUsername: "bob" });
-    if (!bobTask.ok) throw new Error("setup failed");
-    await service.setBlocked(bob, bobTask.value.id, "waiting on design review");
-
-    const aliceBlocked = await service.listBlocked(alice);
-    expect(aliceBlocked.ok).toBe(true);
-    if (aliceBlocked.ok) {
-      expect(aliceBlocked.value).toHaveLength(1);
-      expect(aliceBlocked.value[0]?.id).toBe(aliceTask.value.id);
-    }
-  });
-
-  it("an intern with no blocked tasks gets an empty list, not an error", async () => {
-    const { service } = makeService();
+  it("returns cohort-wide rows for listBacklog too, with an intern caller", async () => {
+    const past = new Date("2026-09-10T02:00:00.000Z");
+    const { service } = makeService(past);
     await assign(service, { assigneeUsername: "alice" });
-    const result = await service.listBlocked(alice);
-    expect(result.ok && result.value).toHaveLength(0);
+    await assign(service, { assigneeUsername: "bob" });
+    const result = await service.listBacklog(alice);
+    expect(result.ok && result.value).toHaveLength(2);
   });
 });
 
 describe("getStats", () => {
-  it("only higher-ups can view cohort stats", async () => {
+  it("only higher-ups can view cohort stats — the dashboard's audience gate, unrelated to the workflow gates", async () => {
     const { service } = makeService();
     const result = await service.getStats(alice);
     expect(result.ok).toBe(false);
   });
 
-  it("counts tasks completed (Approved) per intern, including interns with zero", async () => {
+  it("counts tasks completed (done) per roster member, including members with zero", async () => {
     const { service } = makeService();
     const t1 = await assign(service, { assigneeUsername: "alice" });
     const t2 = await assign(service, { assigneeUsername: "alice" });
     if (!t1.ok || !t2.ok) throw new Error("setup failed");
-    await service.submitTask(alice, t1.value.id);
-    await service.approveTask(carla, t1.value.id);
-    await service.submitTask(alice, t2.value.id);
-    // t2 stays Submitted, not Approved -> shouldn't count as completed.
+    await service.setStatus(alice, t1.value.id, "done");
+    // t2 stays todo -> shouldn't count as completed.
 
     const result = await service.getStats(carla);
     expect(result.ok).toBe(true);
@@ -707,29 +608,39 @@ describe("getStats", () => {
     );
   });
 
-  it("excludes Cancelled tasks from the completion-rate denominator", async () => {
+  it("a task assigned to a HigherUp comes back from getStats", async () => {
     const { service } = makeService();
-    const t1 = await assign(service, { assigneeUsername: "alice" });
-    const t2 = await assign(service, { assigneeUsername: "bob" });
-    const t3 = await assign(service, { assigneeUsername: "bob" });
-    if (!t1.ok || !t2.ok || !t3.ok) throw new Error("setup failed");
-    await service.submitTask(alice, t1.value.id);
-    await service.approveTask(carla, t1.value.id);
-    await service.cancelTask(carla, t2.value.id);
-    // t3 stays Assigned (not completed, not cancelled).
+    const created = await assign(service, { assigneeUsername: "dave" });
+    if (!created.ok) throw new Error("setup failed");
+    await service.setStatus(dave, created.value.id, "done");
 
     const result = await service.getStats(carla);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // 1 Approved out of 2 countable (t1, t3) — t2 (Cancelled) excluded entirely.
+    expect(result.value.completedPerIntern).toEqual(
+      expect.arrayContaining([{ username: "dave", completed: 1 }]),
+    );
+  });
+
+  it("computes completion rate over every task — there's no more Cancelled status to exclude", async () => {
+    const { service } = makeService();
+    const t1 = await assign(service, { assigneeUsername: "alice" });
+    const t2 = await assign(service, { assigneeUsername: "bob" });
+    if (!t1.ok || !t2.ok) throw new Error("setup failed");
+    await service.setStatus(alice, t1.value.id, "done");
+    // t2 stays todo.
+
+    const result = await service.getStats(carla);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
     expect(result.value.completionRate).toBeCloseTo(0.5);
   });
 
-  it("computes average time-to-submit (hours) from currently-Submitted tasks' createdAt/updatedAt", async () => {
+  it("computes average time-to-submit (hours) from currently-in_review tasks' createdAt/updatedAt", async () => {
     const store_ = new InMemoryTaskStore();
     const roster = makeRoster();
     const clock = { now: () => new Date("2026-08-20T00:00:00.000Z") };
-    let service = new TaskService(store_, roster, clock as unknown as import("../domain/clock.js").Clock);
+    const service = new TaskService(store_, roster, clock as unknown as import("../domain/clock.js").Clock);
     const created = await service.assignTask(carla, {
       assigneeUsername: "alice",
       title: "Task A",
@@ -740,7 +651,7 @@ describe("getStats", () => {
 
     // Move the clock forward 5 hours before submitting.
     clock.now = () => new Date("2026-08-20T05:00:00.000Z");
-    await service.submitTask(alice, created.value.id);
+    await service.setStatus(alice, created.value.id, "in_review");
 
     const result = await service.getStats(carla);
     expect(result.ok).toBe(true);
@@ -748,7 +659,7 @@ describe("getStats", () => {
     expect(result.value.averageTimeToSubmitHours).toBeCloseTo(5, 1);
   });
 
-  it("reports null average time-to-submit when there is no Submitted-status data", async () => {
+  it("reports null average time-to-submit when there is no in_review-status data", async () => {
     const { service } = makeService();
     await assign(service, { assigneeUsername: "alice" });
     const result = await service.getStats(carla);
@@ -757,12 +668,11 @@ describe("getStats", () => {
     expect(result.value.averageTimeToSubmitHours).toBeNull();
   });
 
-  it("counts tasks approved within the last 7 days as completed this week", async () => {
+  it("counts tasks marked done within the last 7 days as completed this week", async () => {
     const { service } = makeService(new Date("2026-08-31T00:00:00.000Z"));
     const t1 = await assign(service, { assigneeUsername: "alice" });
     if (!t1.ok) throw new Error("setup failed");
-    await service.submitTask(alice, t1.value.id);
-    await service.approveTask(carla, t1.value.id); // approved "now" -> within the last 7 days
+    await service.setStatus(alice, t1.value.id, "done"); // "now" -> within the last 7 days
 
     const result = await service.getStats(carla);
     expect(result.ok).toBe(true);
@@ -776,8 +686,31 @@ describe("getStats", () => {
     const result = await service.getStats(caller("frank", "HigherUp", OTHER_COHORT));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.completedPerIntern).toEqual([{ username: "erin", completed: 0 }]);
+    expect(result.value.completedPerIntern).toEqual(
+      expect.arrayContaining([{ username: "erin", completed: 0 }]),
+    );
     expect(result.value.completionRate).toBe(0);
+  });
+});
+
+describe("dashboard higher-up login gate — must NOT be removed alongside the workflow gates", () => {
+  it("stays rejecting an intern outside of TaskService entirely (pinning the check still exists)", async () => {
+    // This isn't a workflow gate exercised through TaskService — it's
+    // dashboardServer.ts:93 / telegramLoginHandler.ts:48's audience gate.
+    // Pinned here as a plain role check so a future edit that deletes it
+    // is caught by a grep-able assertion rather than relying on an e2e
+    // dashboard test in this stage.
+    const fs = await import("node:fs");
+    const dashboardSrc = fs.readFileSync(
+      new URL("../web/dashboardServer.ts", import.meta.url),
+      "utf8",
+    );
+    expect(dashboardSrc).toMatch(/entry\.role !== "HigherUp"/);
+    const loginHandlerSrc = fs.readFileSync(
+      new URL("../web/telegramLoginHandler.ts", import.meta.url),
+      "utf8",
+    );
+    expect(loginHandlerSrc).toMatch(/HigherUp/);
   });
 });
 

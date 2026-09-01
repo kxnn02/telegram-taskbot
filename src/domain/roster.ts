@@ -59,6 +59,14 @@ export class Roster {
     return entry?.role === "HigherUp" && entry.cohortId === cohortId;
   }
 
+  /** Any known roster member in this cohort, regardless of role — used
+   * where assignment/read access is open to the whole roster rather than
+   * restricted to interns (issue #27/#28). */
+  isMember(username: string, cohortId: string): boolean {
+    const entry = this.find(username, cohortId);
+    return entry !== undefined && entry.cohortId === cohortId;
+  }
+
   roleOf(username: string): Role | undefined {
     return this.find(username)?.role;
   }

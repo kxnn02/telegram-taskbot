@@ -352,21 +352,18 @@ describe("/edit wizard field picker", () => {
     expect(text).not.toMatch(/did you mean/i);
   });
 
-  it("/edit on an Approved task is rejected before the menu shows", async () => {
+  it("/edit on a done task still shows the field menu — the Approved edit-lock is gone (issue #27/#28)", async () => {
     const taskId = await seedTask();
     const higherUpId = nextUserId();
     await registerCaller(testBot, higherUpId, "carla");
     const alice = { username: "alice", role: "Intern" as const, cohortId: COHORT };
-    const carla = { username: "carla", role: "HigherUp" as const, cohortId: COHORT };
-    await testBot.service.submitTask(alice, taskId);
-    await testBot.service.approveTask(carla, taskId);
+    await testBot.service.setStatus(alice, taskId, "done");
 
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/edit ${taskId}`));
 
     const text = lastReplyText(testBot.calls);
-    expect(text).toMatch(/approved/i);
-    expect(text).not.toContain("Which field");
-    expect(await testBot.wizards.has(higherUpId)).toBe(false);
+    expect(text).toContain("Which field");
+    expect(await testBot.wizards.has(higherUpId)).toBe(true);
   });
 
   it("/cancel aborts the wizard at the field-choice stage", async () => {
@@ -381,6 +378,76 @@ describe("/edit wizard field picker", () => {
 
     const text = lastReplyText(testBot.calls);
     expect(text).toMatch(/cancelled/i);
+  });
+});
+
+describe("/canceltask confirm callback retargets to the free-set status model (#28)", () => {
+  it("confirming cancellation sets the task's status to backlog, not a removed Cancelled status", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const assignResult = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      {
+        assigneeUsername: "alice",
+        title: "Task to cancel",
+        description: "Some description",
+        dueDate: "2026-09-05",
+      },
+    );
+    if (!assignResult.ok) throw new Error("setup failed: " + assignResult.error);
+    const taskId = assignResult.value.id;
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(higherUpId, higherUpId, `/canceltask ${taskId}`),
+    );
+    await testBot.bot.handleUpdate(
+      callbackUpdate(higherUpId, higherUpId, `canceltask:yes:${taskId}`),
+    );
+
+    const getResult = await testBot.service.getTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      taskId,
+    );
+    expect(getResult.ok).toBe(true);
+    if (getResult.ok) {
+      expect(getResult.value.status).toBe("backlog");
+    }
+  });
+
+  it("declining the confirmation ('No') leaves the task's status unchanged", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const assignResult = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      {
+        assigneeUsername: "alice",
+        title: "Task to keep",
+        description: "Some description",
+        dueDate: "2026-09-05",
+      },
+    );
+    if (!assignResult.ok) throw new Error("setup failed: " + assignResult.error);
+    const taskId = assignResult.value.id;
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(higherUpId, higherUpId, `/canceltask ${taskId}`),
+    );
+    await testBot.bot.handleUpdate(
+      callbackUpdate(higherUpId, higherUpId, `canceltask:no:${taskId}`),
+    );
+
+    const getResult = await testBot.service.getTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      taskId,
+    );
+    expect(getResult.ok).toBe(true);
+    if (getResult.ok) {
+      expect(getResult.value.status).toBe("todo");
+    }
   });
 });
 
@@ -479,7 +546,7 @@ describe("/blocked (no arguments): read-only blocked list, issue #6", () => {
     expect(text).toContain("waiting on API access");
   });
 
-  it("an intern sees only their own blocked tasks, not another intern's", async () => {
+  it("an intern sees the whole cohort's blocked tasks, not just their own (issue #27/#28 — read access is cohort-wide)", async () => {
     const aliceTask = await testBot.service.assignTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       {
@@ -516,8 +583,8 @@ describe("/blocked (no arguments): read-only blocked list, issue #6", () => {
 
     const text = lastReplyText(testBot.calls);
     expect(text).toContain(`#${aliceTask.value.id}`);
-    expect(text).not.toContain(`#${bobTask.value.id}`);
-    expect(text).not.toContain("design review");
+    expect(text).toContain(`#${bobTask.value.id}`);
+    expect(text).toContain("design review");
   });
 
   it("a caller with zero blocked tasks gets a clear 'nothing blocked' message", async () => {
@@ -554,7 +621,7 @@ describe("/blocked (no arguments): read-only blocked list, issue #6", () => {
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       aliceTask.value.id,
     );
-    expect(result.ok && result.value.blocked).toBe(true);
+    expect(result.ok && result.value.status).toBe("blocked");
   });
 });
 
@@ -606,7 +673,7 @@ describe("Mark unblocked button on blocked notifications (issue #9)", () => {
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       taskId,
     );
-    expect(result.ok && result.value.blocked).toBe(false);
+    expect(result.ok && result.value.status).not.toBe("blocked");
 
     const text = lastReplyText(testBot.calls);
     expect(text).toMatch(/no longer blocked/i);
@@ -621,7 +688,7 @@ describe("Mark unblocked button on blocked notifications (issue #9)", () => {
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       taskId,
     );
-    expect(result.ok && result.value.blocked).toBe(true);
+    expect(result.ok && result.value.status).toBe("blocked");
   });
 
   it("tapping the button after the task was already unblocked (e.g. via the typed command) fails gracefully", async () => {
@@ -648,7 +715,7 @@ describe("Mark unblocked button on blocked notifications (issue #9)", () => {
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       taskId,
     );
-    expect(result.ok && result.value.blocked).toBe(false);
+    expect(result.ok && result.value.status).not.toBe("blocked");
     expect(lastReplyText(testBot.calls)).toMatch(/no longer blocked/i);
   });
 });
