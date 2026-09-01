@@ -25,15 +25,16 @@ export default async function NewTaskPage() {
   }
   const typedCaller: Caller = caller;
 
-  const interns = deps.roster
+  // Assignable to any roster member, not just interns (issue #27/#29).
+  const assignees = deps.roster
     .all()
-    .filter((e) => e.role === "Intern" && e.cohortId === typedCaller.cohortId)
+    .filter((e) => e.cohortId === typedCaller.cohortId)
     .map((e) => e.username)
     .sort();
 
   return (
     <DashboardShell active="tasks" title="New task" caller={typedCaller}>
-      <TaskForm mode="create" interns={interns} />
+      <TaskForm mode="create" interns={assignees} />
     </DashboardShell>
   );
 }

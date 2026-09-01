@@ -1,11 +1,12 @@
 import type { TaskRecord, TaskStorePort } from "../storage/taskStorePort.js";
 import type { Clock } from "../domain/clock.js";
-import { isOverdue, daysOverdue } from "../domain/overdue.js";
+import { isOverdue, daysOverdue, isDueWithinDays } from "../domain/overdue.js";
 import { normalizeUsername, Roster } from "../domain/roster.js";
 import {
   fail,
   ok,
   type Caller,
+  type Role,
   type ServiceResult,
   type Task,
   type TaskStatus,
@@ -61,6 +62,9 @@ export interface CohortStats {
 
 const MS_PER_HOUR = 60 * 60 * 1000;
 const MS_PER_WEEK = 7 * 24 * MS_PER_HOUR;
+
+/** Window size for `listDeadlines` (issue #33's `/deadlines`). */
+const DEADLINE_WINDOW_DAYS = 7;
 
 /** Every status except `done` — drives `/mytasks` (issue #28's redefinition
  * of the old OPEN_STATUSES, which enumerated the gate-era open statuses). */
@@ -395,6 +399,54 @@ export class TaskService {
     const all = await this.store.listTasksByCohort(caller.cohortId);
     const overdue = all.map((t) => this.withFlags(t)).filter((t) => t.overdue);
     return ok(overdue);
+  }
+
+  /** One member's tasks, cohort-wide (issue #33's `/tasks @username`).
+   * Rejects a username that isn't a roster member of the caller's own
+   * cohort — the same message `assignTask`/`editTask` use for an unknown
+   * assignee — rather than silently returning an empty list. */
+  async listTasksForMember(
+    caller: Caller,
+    username: string,
+  ): Promise<ServiceResult<TaskWithFlags[]>> {
+    const normalized = normalizeUsername(username);
+    if (!this.roster.isMember(normalized, caller.cohortId)) {
+      return fail(
+        `${displayName(normalized)} isn't a known roster member in this cohort.`,
+      );
+    }
+    const all = await this.store.listTasksByCohort(caller.cohortId);
+    const mine = all.filter((t) => t.assigneeUsername === normalized);
+    return ok(mine.map((t) => this.withFlags(t)));
+  }
+
+  /** Tasks assigned to any roster member of the given role, cohort-wide
+   * (issue #33's `/tasks intern|higherup` — the meaningful filter axis for
+   * a single-cohort-per-group deployment, in place of Devie's cohort
+   * filter). Role is resolved against the caller's own cohort so a
+   * username shared across cohorts (the dry-run reuse, ADR-0004) can't
+   * leak the wrong cohort's role assignment into the filter. */
+  async listTasksForRole(
+    caller: Caller,
+    role: Role,
+  ): Promise<ServiceResult<TaskWithFlags[]>> {
+    const all = await this.store.listTasksByCohort(caller.cohortId);
+    const filtered = all.filter(
+      (t) => this.roster.find(t.assigneeUsername, caller.cohortId)?.role === role,
+    );
+    return ok(filtered.map((t) => this.withFlags(t)));
+  }
+
+  /** Open (non-`done`) tasks due within the next 7 days, cohort-wide,
+   * soonest due date first (issue #33's `/deadlines`). Already-overdue
+   * tasks are excluded — that's `/overdue`'s job (see `isDueWithinDays`). */
+  async listDeadlines(caller: Caller): Promise<ServiceResult<TaskWithFlags[]>> {
+    const all = await this.store.listTasksByCohort(caller.cohortId);
+    const now = this.clock.now();
+    const upcoming = all
+      .filter((t) => isDueWithinDays(t, now, DEADLINE_WINDOW_DAYS))
+      .sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.id - b.id);
+    return ok(upcoming.map((t) => this.withFlags(t)));
   }
 
   // ---- Internal helpers ---------------------------------------------

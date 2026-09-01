@@ -115,4 +115,27 @@ describe("parseEditTaskRequest", () => {
     expect(parseEditTaskRequest(null).ok).toBe(false);
     expect(parseEditTaskRequest("nope").ok).toBe(false);
   });
+
+  it("accepts an optional status field alongside the other fields (issue #27/#29)", () => {
+    const result = parseEditTaskRequest({ status: "in_review" });
+    expect(result).toEqual({ ok: true, value: { status: "in_review" } });
+  });
+
+  it("accepts every one of the six statuses", () => {
+    for (const status of ["backlog", "todo", "in_progress", "in_review", "blocked", "done"]) {
+      expect(parseEditTaskRequest({ status })).toEqual({ ok: true, value: { status } });
+    }
+  });
+
+  it("rejects a status that isn't one of the six", () => {
+    const result = parseEditTaskRequest({ status: "Approved" });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected failure");
+    expect(result.error).toContain("status");
+  });
+
+  it("combines a status change with other field edits in one patch", () => {
+    const result = parseEditTaskRequest({ title: "New title", status: "done" });
+    expect(result).toEqual({ ok: true, value: { title: "New title", status: "done" } });
+  });
 });

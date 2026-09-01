@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { createBot } from "./createBot.js";
+import { createBot, registerBotCommands } from "./createBot.js";
 import { createSupabaseClient } from "../storage/supabaseClient.js";
 import { SupabaseTaskStore } from "../storage/supabaseTaskStore.js";
 import { SupabaseRegistrationStore } from "../storage/supabaseRegistrationStore.js";
@@ -48,6 +48,7 @@ async function main() {
       process.env.DASHBOARD_URL ?? "https://example.com/dashboard-coming-soon",
   });
 
+  await registerBotCommands(bot);
   await bot.start();
   // eslint-disable-next-line no-console
   console.log("Bot started (local dev, long polling).");

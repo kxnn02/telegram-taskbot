@@ -67,8 +67,8 @@ describe("filterByStatusGroup", () => {
     expect(filterByStatusGroup(tasks, "blocked").map((t) => t.id)).toEqual([3]);
   });
 
-  it('"overdue-backlog" matches tasks with the overdue flag set', () => {
-    expect(filterByStatusGroup(tasks, "overdue-backlog").map((t) => t.id)).toEqual([4]);
+  it('"overdue" matches tasks with the overdue flag set', () => {
+    expect(filterByStatusGroup(tasks, "overdue").map((t) => t.id)).toEqual([4]);
   });
 
   it("returns all tasks unfiltered when no group is given", () => {
@@ -76,7 +76,7 @@ describe("filterByStatusGroup", () => {
   });
 
   it("exposes the canonical set of status groups the dashboard filters by", () => {
-    expect(STATUS_GROUPS).toEqual(["done", "to-be-reviewed", "blocked", "overdue-backlog"]);
+    expect(STATUS_GROUPS).toEqual(["done", "to-be-reviewed", "blocked", "overdue"]);
   });
 });
 

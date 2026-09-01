@@ -49,9 +49,10 @@ export default async function EditTaskPage({ params }: { params: Promise<{ id: s
     );
   }
 
-  const interns = deps.roster
+  // Assignable to any roster member, not just interns (issue #27/#29).
+  const assignees = deps.roster
     .all()
-    .filter((e) => e.role === "Intern" && e.cohortId === typedCaller.cohortId)
+    .filter((e) => e.cohortId === typedCaller.cohortId)
     .map((e) => e.username)
     .sort();
 
@@ -60,7 +61,7 @@ export default async function EditTaskPage({ params }: { params: Promise<{ id: s
       <TaskForm
         mode="edit"
         taskId={taskId}
-        interns={interns}
+        interns={assignees}
         initial={{
           assigneeUsername: found.value.assigneeUsername,
           title: found.value.title,

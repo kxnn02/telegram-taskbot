@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { TaskWithFlags } from "../service/taskService.js";
+import type { TaskStatus } from "../domain/types.js";
 import {
   formatAllTasksGrouped,
   formatApproved,
   formatBlocked,
+  formatDeadlines,
   formatMyTasks,
+  formatTaskLine,
+  formatTaskDetail,
+  formatHelp,
+  statusLabel,
 } from "./format.js";
 
 function task(overrides: Partial<TaskWithFlags> = {}): TaskWithFlags {
@@ -99,6 +105,31 @@ describe("formatAllTasksGrouped pagination", () => {
     expect(page2).toContain("#11");
     expect(page2).toContain("#12");
   });
+
+  it("hints at /tasks (not /alltasks) for the next page, with a filter prefix when given", () => {
+    const text = formatAllTasksGrouped(tasks(11), 1, "@alice");
+    expect(text).toContain("/tasks @alice 2");
+  });
+
+  it("hints at plain /tasks when no filter prefix is given (issue #33 renames /alltasks)", () => {
+    const text = formatAllTasksGrouped(tasks(11), 1);
+    expect(text).toContain("/tasks 2");
+  });
+});
+
+describe("formatDeadlines", () => {
+  it("says nothing is due when the list is empty", () => {
+    expect(formatDeadlines([])).toBe("Nothing due in the next 7 days.");
+  });
+
+  it("lists upcoming tasks with assignee, soonest first as given", () => {
+    const text = formatDeadlines([
+      task({ id: 1, title: "sooner", dueDate: "2026-09-01", status: "todo", previousStatus: null, blockedReason: null }),
+      task({ id: 2, title: "later", dueDate: "2026-09-05", status: "todo", previousStatus: null, blockedReason: null }),
+    ]);
+    expect(text.indexOf("#1")).toBeLessThan(text.indexOf("#2"));
+    expect(text).toContain("@alice");
+  });
 });
 
 describe("formatApproved", () => {
@@ -110,5 +141,102 @@ describe("formatApproved", () => {
     const text = formatApproved([task({ status: "done", previousStatus: null, blockedReason: null })]);
     expect(text).toContain("#1");
     expect(text).toContain("@alice");
+  });
+});
+
+describe("statusLabel", () => {
+  it("maps every stored status to #27's display label", () => {
+    const expected: Record<TaskStatus, string> = {
+      backlog: "Backlog",
+      todo: "To do",
+      in_progress: "In progress",
+      in_review: "In review",
+      blocked: "Blocked",
+      done: "Done",
+    };
+    for (const [status, label] of Object.entries(expected)) {
+      expect(statusLabel(status as TaskStatus)).toBe(label);
+    }
+  });
+});
+
+describe("formatTaskLine", () => {
+  it("renders the display label, not the raw snake_case status", () => {
+    const text = formatTaskLine(task({ status: "in_progress", previousStatus: null, blockedReason: null }));
+    expect(text).toContain("In progress");
+    expect(text).not.toContain("in_progress");
+  });
+});
+
+describe("formatTaskDetail", () => {
+  it("renders the display label in the Status line", () => {
+    const text = formatTaskDetail(task({ status: "in_review", previousStatus: null, blockedReason: null }));
+    expect(text).toContain("Status: In review");
+  });
+});
+
+describe("formatHelp", () => {
+  it("says nothing has changed for an unregistered caller", () => {
+    expect(formatHelp(undefined)).toContain("/start");
+  });
+
+  it("doesn't reference the deleted review gate for interns", () => {
+    const text = formatHelp("Intern");
+    expect(text.toLowerCase()).not.toContain("only higher-ups");
+  });
+
+  it("doesn't reference the deleted review gate for higher-ups", () => {
+    const text = formatHelp("HigherUp");
+    expect(text.toLowerCase()).not.toContain("decide on a submitted task");
+  });
+
+  it("lists /addtask, not the removed /assign, for everyone (issue #30)", () => {
+    const internText = formatHelp("Intern");
+    expect(internText).toContain("/addtask");
+    expect(internText).not.toContain("/assign");
+
+    const higherUpText = formatHelp("HigherUp");
+    expect(higherUpText).toContain("/addtask");
+    expect(higherUpText).not.toContain("/assign");
+  });
+
+  it("describes direct /edit usage (issue #30/#31)", () => {
+    const text = formatHelp("HigherUp");
+    expect(text).toMatch(/\/edit <ref> <field> <value>/);
+  });
+
+  it("lists /update, /done, /complete, /overdue, /unblock — not the removed review-gate commands (issue #27/#31)", () => {
+    const text = formatHelp("Intern");
+    expect(text).toContain("/update");
+    expect(text).toContain("/done");
+    expect(text).toContain("/complete");
+    expect(text).toContain("/overdue");
+    expect(text).toContain("/unblock");
+    expect(text).not.toMatch(/\/submit\b/);
+    expect(text).not.toMatch(/\/approve\b/);
+    expect(text).not.toMatch(/\/revise\b/);
+    expect(text).not.toMatch(/\/canceltask\b/);
+    expect(text).not.toContain("/unblocked");
+    expect(text).not.toMatch(/\/backlog\b/);
+  });
+
+  it("/pending and /dashboard are listed for everyone, not split into a higher-up-only section (issue #27/#35)", () => {
+    const internText = formatHelp("Intern");
+    expect(internText).toContain("/pending");
+    expect(internText).toContain("/dashboard");
+  });
+
+  it("has one section, not a role split — HigherUp and Intern see the same commands bar /edit's note (issue #27/#35)", () => {
+    expect(formatHelp("Intern")).toBe(formatHelp("HigherUp"));
+  });
+});
+
+describe("BOT_COMMANDS / formatHelp coherence (issue #27/#35)", () => {
+  it("every command Telegram's autocomplete menu offers also appears in /help", async () => {
+    const { BOT_COMMANDS } = await import("./createBot.js");
+    const helpText = formatHelp("HigherUp");
+    for (const { command } of BOT_COMMANDS) {
+      expect(helpText).toContain(`/${command}`);
+    }
   });
 });

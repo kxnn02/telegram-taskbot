@@ -4,6 +4,43 @@ A running log of what's shipped, for interns, higher-ups, and anyone else follow
 technical changelog — see `git log` or the GitHub issues for that level of detail. See
 `PRD.md` for the full design and `CONTEXT.md` for why things were built the way they were.
 
+## 2026-09-01 — Devie-parity command redesign: direct commands, free-set statuses
+
+Every command is now a one-line direct command, and the old submit → review → approve/revise
+workflow is gone. This matches **Devie**, another DevCon bot the cohort's higher-ups already use
+daily — see [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md) for the full reasoning
+and [#27](https://github.com/kxnn02/telegram-taskbot/issues/27) for the spec.
+
+- **Create a task in one line**: `/addtask <title> [by <date>] [@username]`, or `@`-mention the
+  bot with "pls work on ..." in a group chat. The old `/assign` step-by-step wizard survives only
+  as the fallback for a bare `/addtask`.
+- **Six free-set statuses** — `backlog`, `todo`, `in progress`, `in review`, `blocked`, `done` —
+  replace the gated `Assigned → In Progress → Submitted → Approved`/`Needs Revision` lifecycle.
+  Any roster member can set any status on any task with `/update <ref> <status>`, or the
+  `/done`/`/complete` shortcuts. `/update` also accepts a bulk, comma- or newline-separated list
+  of refs, with per-task ✓/✗ reporting and one collapsed notification DM per recipient.
+- **Read access opens up**: `/tasks` (renamed from `/alltasks`), `/mytasks`, `/pending`, and
+  `/task <ref>` are available to everyone, not scoped by role. `/edit` is now the only
+  higher-up-restricted command.
+- **`/blocked` becomes a status**, not a flag, so `/unblock <ref>` (renamed from `/unblocked`)
+  restores whatever status a task was in before it was blocked.
+- **Renames, no aliases** (no installed user base yet, so nothing needed a deprecation window):
+  `/alltasks` → `/tasks`, `/backlog` → `/overdue` (since "backlog" is now a status name),
+  `/unblocked` → `/unblock`. `/submit`, `/approve`, `/revise`, and `/canceltask` are gone outright
+  — each replies with a one-line pointer to its replacement rather than the generic "unknown
+  command" fallback, since this is exactly where old muscle memory needed a redirect.
+- **Telegram's command menu is now registered** (`setMyCommands`) — typing `/` in the app now
+  autocompletes every live command, which had never worked before this round.
+
+Four regressions were accepted knowingly to get this parity — see ADR-0009's "Consequences"
+section: there's no more `Cancelled` or `NeedsRevision` status, a finished task is no longer
+locked from editing, and self-approval is now possible (anyone, including the assignee, can mark
+their own task Done). The daily/weekly digest's counts-only guarantee is untouched by any of this.
+
+This ships **before** the production cutover ([#17](https://github.com/kxnn02/telegram-taskbot/issues/17)),
+since no real user has ever used the bot yet, which is exactly what made the no-alias
+simplification above possible.
+
 ## 2026-08-31 — Re-platform planned (nothing shipped yet)
 
 v1 plus the post-v1 bot improvements (#1-#9) are done and closed, but the bot was never deployed

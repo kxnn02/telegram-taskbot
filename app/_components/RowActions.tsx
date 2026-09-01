@@ -5,30 +5,42 @@ import { useState } from "react";
 import type { TaskWithFlags } from "../../src/service/taskService";
 import { Icon } from "./icons";
 
+/** #27's normative status table — the six free-set statuses any roster
+ * member may set on any task, mirroring what the bot's `/update` does. */
+const STATUS_OPTIONS: Array<{ value: TaskWithFlags["status"]; label: string }> = [
+  { value: "backlog", label: "Backlog" },
+  { value: "todo", label: "To do" },
+  { value: "in_progress", label: "In progress" },
+  { value: "in_review", label: "In review" },
+  { value: "blocked", label: "Blocked" },
+  { value: "done", label: "Done" },
+];
+
 /**
- * Per-row edit/approve/revise actions for the oversight table (Phase 6.2,
- * issue #17 — explicitly deferred by Phase 6.1's `app/page.tsx` comment).
- * Edit is a plain link to the edit page (same as the Express dashboard's
- * `editActionCell`); Approve/Revise are new to the dashboard (the Express
- * version never had them — only bot inline buttons did) and are added here
- * as small `fetch` calls against the new REST mutation routes, per
- * ADR-0008. No new data is threaded in beyond what `TaskWithFlags` already
- * carries (id, status) — `oversightData.ts`'s contract is untouched.
+ * Per-row actions for the oversight table (Phase 6.2, issue #17; redesigned
+ * for the free-set status model, issue #27/#29). The Approve/Revise buttons
+ * and their `canReview = status === "in_review"` gate encoded the deleted
+ * review gate and are gone; in their place, a status dropdown lets any
+ * roster member set any of the six statuses directly, via the same
+ * `PATCH /api/tasks/:id` route `TaskForm` already uses (extended to accept
+ * an optional `status` field). Edit's `canEdit` gate is gone too — the
+ * Approved edit-lock no longer exists, so Edit is always shown.
  */
 export function RowActions({ task }: { task: Pick<TaskWithFlags, "id" | "status"> }) {
   const router = useRouter();
-  const [pending, setPending] = useState<"approve" | "revise" | undefined>();
+  const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>();
 
-  // The Approved edit-lock is gone (issue #27/#28) — every task is editable.
-  const canEdit = true;
-  const canReview = task.status === "in_review";
-
-  async function act(action: "approve" | "revise") {
-    setPending(action);
+  async function changeStatus(status: TaskWithFlags["status"]) {
+    if (status === task.status) return;
+    setPending(true);
     setError(undefined);
     try {
-      const res = await fetch(`/api/tasks/${task.id}/${action}`, { method: "POST" });
+      const res = await fetch(`/api/tasks/${task.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
       const data = (await res.json()) as { ok: true } | { ok: false; error: string };
       if (!data.ok) {
         setError(data.error);
@@ -36,45 +48,29 @@ export function RowActions({ task }: { task: Pick<TaskWithFlags, "id" | "status"
       }
       router.refresh();
     } finally {
-      setPending(undefined);
+      setPending(false);
     }
   }
-
-  if (!canEdit && !canReview) return null;
 
   return (
     <div className="row-actions" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
       <div style={{ display: "flex", gap: 6 }}>
-        {canEdit ? (
-          <a className="btn secondary sm" href={`/tasks/${task.id}/edit`}>
-            <Icon name="pen" size={14} />
-            <span>Edit</span>
-          </a>
-        ) : null}
-        {canReview ? (
-          <>
-            <button
-              type="button"
-              className="btn secondary sm"
-              style={{ cursor: "pointer" }}
-              disabled={pending !== undefined}
-              onClick={() => act("approve")}
-            >
-              <Icon name="check" size={14} />
-              <span>Approve</span>
-            </button>
-            <button
-              type="button"
-              className="btn secondary sm"
-              style={{ cursor: "pointer" }}
-              disabled={pending !== undefined}
-              onClick={() => act("revise")}
-            >
-              <Icon name="pen" size={14} />
-              <span>Revise</span>
-            </button>
-          </>
-        ) : null}
+        <a className="btn secondary sm" href={`/tasks/${task.id}/edit`}>
+          <Icon name="pen" size={14} />
+          <span>Edit</span>
+        </a>
+        <select
+          aria-label={`Change status of task ${task.id}`}
+          value={task.status}
+          disabled={pending}
+          onChange={(e) => changeStatus(e.target.value as TaskWithFlags["status"])}
+        >
+          {STATUS_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
       </div>
       {error ? <span style={{ color: "#C2363B", fontSize: 12 }}>{error}</span> : null}
     </div>

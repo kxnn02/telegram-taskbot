@@ -91,19 +91,18 @@ export class DigestBuilder {
     return sections.join("\n\n");
   }
 
-  /** Per-intern counts for the daily group-chat summary (PRD §8) — deliberately
-   * counts-only, see `InternDailyCounts`. Includes every intern in the
-   * cohort's roster, even ones with zero tasks, for full-cohort visibility. */
+  /** Per-member counts for the daily group-chat summary (PRD §8) — deliberately
+   * counts-only, see `InternDailyCounts`. Includes every roster member in the
+   * cohort, even ones with zero tasks, for full-cohort visibility — not just
+   * interns, since assignment is open to the whole roster (issue #27/#29). */
   async groupDailyCounts(cohortId: string): Promise<InternDailyCounts[]> {
-    const interns = this.deps.roster
-      .all()
-      .filter((entry) => entry.role === "Intern" && entry.cohortId === cohortId);
+    const members = this.deps.roster.all().filter((entry) => entry.cohortId === cohortId);
 
     return Promise.all(
-      interns.map(async (entry) => {
+      members.map(async (entry) => {
         const caller: Caller = {
           username: entry.username,
-          role: "Intern",
+          role: entry.role,
           cohortId,
         };
         const result = await this.deps.service.listMyTasks(caller);

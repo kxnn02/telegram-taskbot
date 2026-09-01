@@ -1,6 +1,6 @@
 # ADR-0009: Direct commands and free-set statuses, matching Devie
 
-- **Status**: Accepted (planning only — not yet implemented)
+- **Status**: Accepted, implemented (#28-#35 complete)
 - **Date**: 2026-09-01
 - **Supersedes**: the task lifecycle in `PRD.md` §4, the command surface in §5, and the
   notification triggers in §8. Supersedes the `/edit`-and-`/assign` decision recorded in

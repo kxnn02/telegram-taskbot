@@ -1,3 +1,10 @@
+-- SUPERSEDED IN PART by 20260901115000_job_endpoint_vault_config.sql.
+-- The "REQUIRED MANUAL SETUP" block below cannot be carried out: Supabase's
+-- `postgres` role is not a superuser, so `alter database ... set` on a
+-- custom parameter fails with 42501 (issue #37). `call_job_endpoint` now
+-- reads its configuration from Supabase Vault instead. The schedules and
+-- times defined here are unchanged and still current.
+--
 -- pg_cron + pg_net schedules for the four notification-job HTTP endpoints
 -- (ADR-0007, issue #15): hourly overdue-crossing check, daily due-tomorrow
 -- reminder, daily digest, weekly digest. Each schedule fires an
