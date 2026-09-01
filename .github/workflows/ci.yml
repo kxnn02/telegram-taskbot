@@ -23,6 +23,12 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      # Catches webpack-bundling issues tsc alone can't see (e.g. the
+      # NodeNext ".js"-extension imports in src/ not resolving through
+      # webpack without next.config.ts's extensionAlias) — no live
+      # Supabase credentials are needed since the dashboard's dynamic
+      # routes aren't executed at build time, only type-checked/bundled.
+      - run: npm run build:next
 
   contract:
     name: Supabase contract tests (main only)
