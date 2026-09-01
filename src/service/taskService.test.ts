@@ -696,21 +696,17 @@ describe("getStats", () => {
 describe("dashboard higher-up login gate — must NOT be removed alongside the workflow gates", () => {
   it("stays rejecting an intern outside of TaskService entirely (pinning the check still exists)", async () => {
     // This isn't a workflow gate exercised through TaskService — it's
-    // dashboardServer.ts:93 / telegramLoginHandler.ts:48's audience gate.
-    // Pinned here as a plain role check so a future edit that deletes it
-    // is caught by a grep-able assertion rather than relying on an e2e
-    // dashboard test in this stage.
+    // telegramLoginHandler.ts:48's audience gate (the Express dashboard's
+    // dashboardServer.ts carried the same check before its removal in
+    // Stage 8, #57). Pinned here as a plain role check so a future edit
+    // that deletes it is caught by a grep-able assertion rather than
+    // relying on an e2e dashboard test in this stage.
     const fs = await import("node:fs");
-    const dashboardSrc = fs.readFileSync(
-      new URL("../web/dashboardServer.ts", import.meta.url),
-      "utf8",
-    );
-    expect(dashboardSrc).toMatch(/entry\.role !== "HigherUp"/);
     const loginHandlerSrc = fs.readFileSync(
       new URL("../web/telegramLoginHandler.ts", import.meta.url),
       "utf8",
     );
-    expect(loginHandlerSrc).toMatch(/HigherUp/);
+    expect(loginHandlerSrc).toMatch(/entry\.role !== "HigherUp"/);
   });
 });
 

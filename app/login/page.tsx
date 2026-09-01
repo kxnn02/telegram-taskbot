@@ -4,8 +4,8 @@ import { Logo } from "../_components/icons";
 import { TelegramLoginWidget } from "../_components/TelegramLoginWidget";
 
 /**
- * Login page (Phase 6.1, issue #17 — step 3): faithful port of
- * dashboardServer.ts's renderLoginPage, serving the Telegram Login Widget
+ * Login page (Phase 6.1, issue #17 — step 3): faithful port of the removed
+ * Express dashboard's renderLoginPage, serving the Telegram Login Widget
  * script pointed at the new Next.js callback route
  * (`/api/auth/telegram/callback`). An `?error=` query param (set by that
  * route on a rejected login) renders as an inline banner instead of a

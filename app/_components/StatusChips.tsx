@@ -1,7 +1,7 @@
 import { STATUS_GROUPS, type StatusGroup } from "../../src/web/taskView";
 
-/** Faithful port of dashboardServer.ts's renderStatusChips — only shown in
- * `group=intern` mode, same as the Express dashboard. */
+/** Faithful port of the removed Express dashboard's renderStatusChips — only
+ * shown in `group=intern` mode, same as that dashboard. */
 export function StatusChips({ activeStatus }: { activeStatus: StatusGroup | undefined }) {
   const options: Array<StatusGroup | "all"> = ["all", ...STATUS_GROUPS];
   return (

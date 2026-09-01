@@ -11,8 +11,8 @@ import { TaskForm } from "../../../_components/TaskForm";
  * Edit-task page (Phase 6.2, issue #17 — the per-row Edit action explicitly
  * deferred by Phase 6.1). Session-gated the same way as the oversight page.
  * Loads the current task via `TaskService.getTask` purely to prefill the
- * form (and to re-check the Approved-lock, matching
- * `dashboardServer.ts`'s `GET /tasks/:id/edit`) — the actual save happens
+ * form (and to re-check the Approved-lock, matching the removed Express
+ * dashboard's `GET /tasks/:id/edit`) — the actual save happens
  * client-side against `PATCH /api/tasks/:id`, which re-validates everything
  * itself, so a task that changed between this page load and the save still
  * fails safely there rather than here.
