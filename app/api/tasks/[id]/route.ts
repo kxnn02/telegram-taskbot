@@ -7,9 +7,15 @@ import { parseEditTaskRequest } from "../../../../src/web/taskMutationRequests";
 /**
  * Task editing (Phase 6.2, issue #17 — REST mutation, not a Server Action,
  * per ADR-0008). Deliberately thin, same split as `POST /api/tasks`: body-
- * shape parsing lives in `taskMutationRequests.ts`, business rules (locked
- * once Approved, assignee must be a known intern, higher-up-only, etc.) all
- * live in and are enforced by `TaskService.editTask`.
+ * shape parsing lives in `taskMutationRequests.ts`, business rules (assignee
+ * must be a known roster member, valid due date, etc.) all live in and are
+ * enforced by `TaskService.editTask`.
+ *
+ * Also accepts an optional `status` field (issue #27/#29) — one route per
+ * resource, per ADR-0008, rather than the now-deleted `/approve` and
+ * `/revise` status-specific routes. A status change is dispatched through
+ * `TaskService.setStatus` rather than folded into `editTask`'s patch, since
+ * `editTask` (stage 1a) has no `status` field and isn't touched here.
  */
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -31,9 +37,21 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ ok: false, error: parsed.error }, { status: 400 });
   }
 
-  const result = await deps.service.editTask(caller, taskId, parsed.value);
-  if (!result.ok) {
-    return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
+  const { status, ...patch } = parsed.value;
+
+  const editResult = await deps.service.editTask(caller, taskId, patch);
+  if (!editResult.ok) {
+    return NextResponse.json({ ok: false, error: editResult.error }, { status: 400 });
   }
-  return NextResponse.json({ ok: true, task: result.value });
+
+  let task = editResult.value;
+  if (status !== undefined) {
+    const statusResult = await deps.service.setStatus(caller, taskId, status);
+    if (!statusResult.ok) {
+      return NextResponse.json({ ok: false, error: statusResult.error }, { status: 400 });
+    }
+    task = statusResult.value;
+  }
+
+  return NextResponse.json({ ok: true, task });
 }

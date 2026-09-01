@@ -26,3 +26,25 @@ export async function notifyUser(
     // failure surface as an error to whoever triggered the mutation.
   }
 }
+
+/**
+ * Notification policy for a status change (issue #27/#29, replacing the
+ * submit/approve/revise-specific notify calls the old review-gate commands
+ * used): DM the assignee and the task's creator, skipping whoever performed
+ * the change, and never sending the same person two DMs for one event —
+ * covers the case where the assignee and the creator are the same person
+ * (a self-assigned task) as well as the actor being either of them.
+ */
+export async function notifyStatusChange(
+  bot: Bot,
+  registrations: RegistrationStorePort,
+  task: { assigneeUsername: string; assignedByUsername: string },
+  actorUsername: string,
+  text: string,
+): Promise<void> {
+  const recipients = new Set([task.assigneeUsername, task.assignedByUsername]);
+  recipients.delete(actorUsername);
+  for (const username of recipients) {
+    await notifyUser(bot, registrations, username, text);
+  }
+}

@@ -255,7 +255,7 @@ describe("/edit wizard field picker", () => {
     }
   });
 
-  it("tapping Assignee with a non-intern username is rejected with the known-intern error", async () => {
+  it("tapping Assignee with a higher-up's username reassigns to them — assignment isn't intern-only (issue #27/#29)", async () => {
     const taskId = await seedTask();
     const higherUpId = nextUserId();
     await registerCaller(testBot, higherUpId, "carla");
@@ -264,14 +264,11 @@ describe("/edit wizard field picker", () => {
     await testBot.bot.handleUpdate(callbackUpdate(higherUpId, higherUpId, "editfield:assignee"));
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "carla")); // higher-up, not intern
 
-    const text = lastReplyText(testBot.calls);
-    expect(text).toMatch(/isn't a known intern/i);
-
     const result = await testBot.service.getTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       taskId,
     );
-    expect(result.ok && result.value.assigneeUsername).toBe("alice"); // unchanged
+    expect(result.ok && result.value.assigneeUsername).toBe("carla");
   });
 
   it("tapping Assignee with a close-typo username gets a 'did you mean' suggestion (issue #8)", async () => {
@@ -284,7 +281,7 @@ describe("/edit wizard field picker", () => {
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "alicw")); // typo of alice
 
     const text = lastReplyText(testBot.calls);
-    expect(text).toMatch(/isn't a known intern/i);
+    expect(text).toMatch(/isn't a known roster member/i);
     expect(text).toMatch(/did you mean @alice/i);
 
     // still waiting for the next message: no auto-accept
@@ -314,7 +311,7 @@ describe("/edit wizard field picker", () => {
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "zephyrxyz"));
 
     const text = lastReplyText(testBot.calls);
-    expect(text).toMatch(/isn't a known intern/i);
+    expect(text).toMatch(/isn't a known roster member/i);
     expect(text).not.toMatch(/did you mean/i);
   });
 
@@ -348,7 +345,7 @@ describe("/edit wizard field picker", () => {
     await ambiguousBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "alicx")); // distance 1 from both alice/alicf
 
     const text = lastReplyText(ambiguousBot.calls);
-    expect(text).toMatch(/isn't a known intern/i);
+    expect(text).toMatch(/isn't a known roster member/i);
     expect(text).not.toMatch(/did you mean/i);
   });
 
@@ -504,9 +501,21 @@ describe("/assign full 4-step flow (regression, unaffected by /edit changes)", (
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "bobb")); // typo of bob
 
     const text = lastReplyText(testBot.calls);
-    expect(text).toMatch(/isn't a known intern/i);
+    expect(text).toMatch(/isn't a known roster member/i);
     expect(text).toMatch(/did you mean @bob/i);
     expect(await testBot.wizards.has(higherUpId)).toBe(true);
+  });
+
+  it("can assign to a HigherUp — assignment is no longer intern-only (issue #27/#29)", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/assign"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "carla"));
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/title/i);
   });
 });
 
@@ -625,7 +634,7 @@ describe("/blocked (no arguments): read-only blocked list, issue #6", () => {
   });
 });
 
-describe("Mark unblocked button on blocked notifications (issue #9)", () => {
+describe("Blocked notifications have no inline buttons — the review gate they encoded is gone (issue #27/#29)", () => {
   let roster: Roster;
   let testBot: ReturnType<typeof makeTestBot>;
 
@@ -655,55 +664,25 @@ describe("Mark unblocked button on blocked notifications (issue #9)", () => {
     return { taskId: task.value.id, higherUpId, aliceId };
   }
 
-  it("the blocked notification to the assigning higher-up includes a 'Mark unblocked' button", async () => {
-    const { taskId } = await seedBlockedTask();
+  it("the blocked notification to the assigning higher-up has no 'Mark unblocked' button", async () => {
+    await seedBlockedTask();
 
     const callbackData = lastKeyboardCallbackData(testBot.calls);
-    expect(callbackData).toContain(`unblock:${taskId}`);
+    expect(callbackData).toEqual([]);
     const text = lastReplyText(testBot.calls);
     expect(text).toMatch(/flagged as blocked/i);
   });
 
-  it("tapping the button clears the blocked flag via the same TaskService logic as /unblocked", async () => {
+  it("the removed unblock: callback is unrecognized — tapping a stale button does nothing", async () => {
     const { taskId, higherUpId } = await seedBlockedTask();
 
     await testBot.bot.handleUpdate(callbackUpdate(higherUpId, higherUpId, `unblock:${taskId}`));
-
-    const result = await testBot.service.getTask(
-      { username: "carla", role: "HigherUp", cohortId: COHORT },
-      taskId,
-    );
-    expect(result.ok && result.value.status).not.toBe("blocked");
-
-    const text = lastReplyText(testBot.calls);
-    expect(text).toMatch(/no longer blocked/i);
-  });
-
-  it("only a higher-up can act on the button, matching the Approve/Revise permission pattern", async () => {
-    const { taskId, aliceId } = await seedBlockedTask();
-
-    await testBot.bot.handleUpdate(callbackUpdate(aliceId, aliceId, `unblock:${taskId}`));
 
     const result = await testBot.service.getTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       taskId,
     );
     expect(result.ok && result.value.status).toBe("blocked");
-  });
-
-  it("tapping the button after the task was already unblocked (e.g. via the typed command) fails gracefully", async () => {
-    const { taskId, higherUpId } = await seedBlockedTask();
-
-    // Cleared first via the typed command, simulating a race or a different device.
-    await testBot.service.clearBlocked(
-      { username: "carla", role: "HigherUp", cohortId: COHORT },
-      taskId,
-    );
-
-    await testBot.bot.handleUpdate(callbackUpdate(higherUpId, higherUpId, `unblock:${taskId}`));
-
-    const text = lastReplyText(testBot.calls);
-    expect(text).toMatch(/isn't currently marked blocked/i);
   });
 
   it("the existing /unblocked <task_id> typed command still works unchanged", async () => {
@@ -717,6 +696,124 @@ describe("Mark unblocked button on blocked notifications (issue #9)", () => {
     );
     expect(result.ok && result.value.status).not.toBe("blocked");
     expect(lastReplyText(testBot.calls)).toMatch(/no longer blocked/i);
+  });
+});
+
+describe("/task <id> appends a per-status next-step hint (issue #27/#29)", () => {
+  it("hints at /submit for a todo task", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const task = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Ship it", description: "d", dueDate: "2026-09-05" },
+    );
+    if (!task.ok) throw new Error("setup failed");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/task ${task.value.id}`));
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("Status: To do");
+    expect(text).toMatch(/\/submit/);
+  });
+
+  it("hints 'Nice work!' for a done task", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const task = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Ship it", description: "d", dueDate: "2026-09-05" },
+    );
+    if (!task.ok) throw new Error("setup failed");
+    await testBot.service.setStatus({ username: "carla", role: "HigherUp", cohortId: COHORT }, task.value.id, "done");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/task ${task.value.id}`));
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("Nice work!");
+  });
+});
+
+describe("Notification policy on status changes (issue #27/#29)", () => {
+  let roster: Roster;
+  let testBot: ReturnType<typeof makeTestBot>;
+
+  beforeEach(() => {
+    roster = makeRoster();
+    testBot = makeTestBot(roster);
+  });
+
+  // Distinct from the command's own chat, so a notification DM is never
+  // confused with the bot's direct reply to whoever sent the command (both
+  // go through the same fake "sendMessage" transformer call).
+  function sentDMs(actingChatId: number): string[] {
+    return testBot.calls
+      .filter((c) => c.method === "sendMessage" && Number(c.payload.chat_id) !== actingChatId)
+      .map((c) => String(c.payload.chat_id));
+  }
+
+  it("/blocked DMs both the assignee and the creator when a third party acts", async () => {
+    const carlaId = nextUserId();
+    await registerCaller(testBot, carlaId, "carla");
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    const bobId = nextUserId();
+    await registerCaller(testBot, bobId, "bob");
+
+    const task = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Ship it", description: "d", dueDate: "2026-09-05" },
+    );
+    if (!task.ok) throw new Error("setup failed");
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(bobId, bobId, `/blocked ${task.value.id} waiting on access`),
+    );
+
+    const dms = sentDMs(bobId);
+    expect(dms).toContain(String(aliceId));
+    expect(dms).toContain(String(carlaId));
+    expect(dms).not.toContain(String(bobId));
+    expect(dms).toHaveLength(2);
+  });
+
+  it("skips the actor when the actor is the assignee (submitting your own task)", async () => {
+    const carlaId = nextUserId();
+    await registerCaller(testBot, carlaId, "carla");
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+
+    const task = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Ship it", description: "d", dueDate: "2026-09-05" },
+    );
+    if (!task.ok) throw new Error("setup failed");
+
+    await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, `/submit ${task.value.id}`));
+
+    const dms = sentDMs(aliceId);
+    expect(dms).not.toContain(String(aliceId));
+    expect(dms).toContain(String(carlaId));
+    expect(dms).toHaveLength(1);
+  });
+
+  it("dedupes so a task's creator-and-assignee gets only one DM, not two", async () => {
+    const carlaId = nextUserId();
+    await registerCaller(testBot, carlaId, "carla");
+    const bobId = nextUserId();
+    await registerCaller(testBot, bobId, "bob");
+
+    const task = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "carla", title: "Self-assigned", description: "d", dueDate: "2026-09-05" },
+    );
+    if (!task.ok) throw new Error("setup failed");
+
+    await testBot.bot.handleUpdate(messageUpdate(bobId, bobId, `/approve ${task.value.id}`));
+
+    const dms = sentDMs(bobId);
+    expect(dms.filter((id) => id === String(carlaId))).toHaveLength(1);
   });
 });
 

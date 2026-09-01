@@ -156,6 +156,20 @@ describe("runDailyDigest", () => {
     expect(groupMessage).toBeDefined();
     expect(groupMessage!.text.toLowerCase()).not.toContain("onboarding");
   });
+
+  it("a HigherUp holding their own task sees it, not just the oversight view (issue #27/#29)", async () => {
+    const { deps, service, bot } = await makeDeps();
+    const created = await assign(service, { assigneeUsername: "dave" });
+    if (!created.ok) throw new Error("setup failed");
+
+    const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
+    await runDailyDigest(deps, digestBuilder, COHORT);
+
+    const daveDm = bot.sent.find(
+      (m) => m.text.includes("Daily digest") && m.text.includes("onboarding doc"),
+    );
+    expect(daveDm).toBeDefined();
+  });
 });
 
 describe("runWeeklyDigest", () => {
