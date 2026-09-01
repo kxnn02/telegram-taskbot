@@ -3,7 +3,7 @@ import type { CohortStats } from "../service/taskService.js";
 /**
  * Presentation-only formatting for the Next.js stats page (Phase 6.2, issue
  * #17 — originally issue #4), factored out of the page component so it's
- * directly unit-testable, mirroring `dashboardServer.ts`'s `renderStatsPage`
+ * directly unit-testable, mirroring the removed Express dashboard's `renderStatsPage`
  * formatting steps and `taskView.ts`'s precedent of keeping pure
  * presentation logic out of the render layer. `CohortStats` itself is
  * already fully computed by `TaskService.getStats` — nothing here talks to

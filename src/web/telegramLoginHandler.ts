@@ -10,17 +10,16 @@ import { signSession } from "./sessionCookie.js";
  * framework-independent — takes a plain query-string-shaped object instead
  * of a real `NextRequest`, mirroring `webhookHandler.ts`'s split between
  * pure logic and a thin adapter — so it's directly unit-testable and so the
- * exact same logic that already runs in the Express dashboard
- * (`dashboardServer.ts`'s `/auth/telegram/callback` route) is reproduced
- * here rather than re-derived. `dashboardServer.ts` itself is untouched;
- * this is a new, separate copy for the new stack.
+ * exact same logic that used to run in the Express dashboard's
+ * `/auth/telegram/callback` route (now removed, Stage 8 / #57) is
+ * reproduced here rather than re-derived.
  */
 export interface TelegramLoginDeps {
   botToken: string;
   roster: Roster;
   /** The cohort this deployed dashboard instance serves (ADR-0004) — the
    * roster lookup below is always bound to this id, same reasoning as
-   * `dashboardServer.ts`'s `activeCohortId`. */
+   * the removed Express dashboard's `activeCohortId`. */
   activeCohortId: string;
   /** Secret used to sign the stateless session cookie (ADR-0008). */
   sessionSecret: string;

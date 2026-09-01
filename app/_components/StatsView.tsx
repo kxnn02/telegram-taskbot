@@ -3,9 +3,9 @@ import { buildStatsViewModel } from "../../src/web/statsView";
 import { initialsFor } from "../../src/web/layout";
 import { Icon, type IconName } from "./icons";
 
-/** Faithful port of dashboardServer.ts's statCard/renderStatsPage, minus the
- * Express-specific HTML string building — formatting itself is delegated to
- * `buildStatsViewModel` (unit-tested directly). */
+/** Faithful port of the removed Express dashboard's statCard/renderStatsPage,
+ * minus the Express-specific HTML string building — formatting itself is
+ * delegated to `buildStatsViewModel` (unit-tested directly). */
 function StatCard({ label, value, ic, bg, fg }: { label: string; value: string; ic: IconName; bg: string; fg: string }) {
   return (
     <div className="stat">

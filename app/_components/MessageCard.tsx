@@ -1,6 +1,6 @@
 import { Icon } from "./icons";
 
-/** Faithful port of dashboardServer.ts's renderMessagePage body. */
+/** Faithful port of the removed Express dashboard's renderMessagePage body. */
 export function MessageCard({
   title,
   message,

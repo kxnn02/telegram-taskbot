@@ -9,7 +9,7 @@ import { loadOversightView } from "./oversightData.js";
  * Data-fetching + authorization for the Next.js oversight page (Phase 6.1 /
  * issue #17's read-only oversight view). Pure function, independent of any
  * React/Next types, so the RSC (`app/page.tsx`) stays a thin wrapper around
- * it — mirrors dashboardServer.ts's `GET /` handler's query-parsing +
+ * it — mirrors the removed Express dashboard's `GET /` handler's query-parsing +
  * filtering, minus the res/req plumbing. Authorization itself is not
  * reimplemented here: it's delegated entirely to
  * `TaskService.listAllTasks`, which already enforces "HigherUp sees
