@@ -396,6 +396,27 @@ instead). Do not "simplify" this back to a whole-string chrono scan; that's the 
 fixed. See `addTaskParse.ts`'s doc comment and `addTaskParse.test.ts` for the validated
 input/output table.
 
+### Wizard chat scoping stored as a `WizardData` field, not a `wizard_state` column (issue #52/#53, finding F3)
+
+`WizardState` used to record no chat, so `bot.on("message:text")` looked up in-progress wizard
+state by Telegram user id alone — any text that person sent in *any* chat was treated as the
+next answer to their form. Starting `/addtask` in a DM, then sending an ordinary sentence in the
+cohort group, made the bot answer in the group as though that sentence were the assignee.
+
+The fix adds an optional `chatId` to `WizardData` (`src/bot/wizard.ts`) rather than a new column
+on the `wizard_state` table: `SupabaseWizardStateStore` already maps the whole `WizardData` object
+into that table's `data` jsonb column (ADR-0006), so a new field round-trips for free — no SQL
+migration needed. `chatId` is set when a bare `/addtask` or bare `/edit` starts a wizard, and
+checked everywhere wizard input is accepted: the free-text step handler, the mid-wizard command
+auto-cancel, and the `editfield:`/`duedate:` callback handlers. A mismatched chat is treated as if
+no wizard existed (free text) or answered with "That form was started in another chat." (a
+callback) — the form itself is left untouched in its own chat. `chatId === undefined` matches any
+chat, so wizard rows already in the database when this deploys keep working instead of becoming
+permanently unusable.
+
+Bare `/addtask` run directly in a group is unaffected: the wizard still runs publicly there and
+still expects its next answer from that same group, per the existing group-chat-support decision.
+
 ## Out of scope (deferred to v2)
 
 Mini App UI, file attachments, CSV export, recurring tasks, and standup response-collection were

@@ -23,6 +23,13 @@ export interface WizardData {
   /** Only present for /edit — which single field this edit wizard is
    * collecting, chosen via the field-choice menu. */
   editField?: EditField;
+  /** The chat the form was started in (issue #52/#53, finding F3). Wizard
+   * input — free-text answers, the interruption auto-cancel, and the
+   * editfield/duedate callbacks — is only accepted from this chat, so an
+   * in-progress form in one chat doesn't eat unrelated messages the same
+   * user sends elsewhere. `undefined` matches any chat, so wizard rows
+   * already in the database when this deploys keep working. */
+  chatId?: number;
 }
 
 export interface WizardState {

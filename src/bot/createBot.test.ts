@@ -110,6 +110,15 @@ function messageUpdate(userId: number, chatId: number, text: string): Update {
 }
 
 function groupMessageUpdate(userId: number, username: string, chatId: number, text: string): Update {
+  const entities = text.startsWith("/")
+    ? [
+        {
+          type: "bot_command",
+          offset: 0,
+          length: (text.match(/^\/\S+/)?.[0] ?? text).length,
+        },
+      ]
+    : undefined;
   return {
     update_id: updateIdSeq++,
     message: {
@@ -118,6 +127,7 @@ function groupMessageUpdate(userId: number, username: string, chatId: number, te
       chat: { id: chatId, type: "group", title: "Dump Group" },
       from: { id: userId, is_bot: false, first_name: "Test", username },
       text,
+      ...(entities ? { entities } : {}),
     },
   } as Update;
 }
@@ -672,6 +682,126 @@ describe("bare /addtask falls back to the step-by-step wizard (issue #30)", () =
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "carla"));
     const text = lastReplyText(testBot.calls);
     expect(text).toMatch(/title/i);
+  });
+});
+
+describe("Stage 4: wizards are scoped to the chat they were started in (issue #52/#53, finding F3)", () => {
+  const GROUP_CHAT_ID = -200;
+
+  it("a wizard started in a DM ignores plain text sent in a group by the same user", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    const callsBefore = testBot.calls.length;
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(higherUpId, "carla", GROUP_CHAT_ID, "hey everyone good morning"),
+    );
+
+    expect(testBot.calls.length).toBe(callsBefore);
+    const state = await testBot.wizards.get(higherUpId);
+    expect(state?.step).toBe("awaiting_assignee");
+  });
+
+  it("a wizard started in a DM still advances when answered in that same DM (regression guard)", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "alice"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/title/i);
+  });
+
+  it("a wizard started in a group still advances when answered in that same group (regression guard for CONTEXT.md:78)", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(groupMessageUpdate(higherUpId, "carla", GROUP_CHAT_ID, "/addtask"));
+    await testBot.bot.handleUpdate(groupMessageUpdate(higherUpId, "carla", GROUP_CHAT_ID, "alice"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/title/i);
+  });
+
+  it("a command in a different chat does not cancel an in-progress wizard", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    await testBot.bot.handleUpdate(groupMessageUpdate(higherUpId, "carla", GROUP_CHAT_ID, "/help"));
+
+    const replies = testBot.calls
+      .filter((c) => c.method === "sendMessage")
+      .map((c) => c.payload.text as string);
+    expect(replies.some((t) => /cancelled your in-progress form/i.test(t))).toBe(false);
+    expect(lastReplyText(testBot.calls)).not.toMatch(/cancelled/i);
+    const state = await testBot.wizards.get(higherUpId);
+    expect(state?.step).toBe("awaiting_assignee");
+  });
+
+  it("a command in the same chat still cancels an in-progress wizard (existing behaviour)", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/help"));
+
+    const replies = testBot.calls
+      .filter((c) => c.method === "sendMessage")
+      .map((c) => c.payload.text as string);
+    expect(replies.some((t) => /cancelled your in-progress form/i.test(t))).toBe(true);
+    expect(await testBot.wizards.has(higherUpId)).toBe(false);
+  });
+
+  it("a duedate callback from a mismatched chat is rejected and does not save", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "alice"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "Ship the feature"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "skip"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "in 5 days"));
+
+    await testBot.bot.handleUpdate(callbackUpdate(higherUpId, GROUP_CHAT_ID, "duedate:yes"));
+
+    const answerCall = [...testBot.calls].reverse().find((c) => c.method === "answerCallbackQuery");
+    expect(answerCall?.payload.text).toBe("That form was started in another chat.");
+    const list = await testBot.service.listAllTasks({
+      username: "carla",
+      role: "HigherUp",
+      cohortId: COHORT,
+    });
+    expect(list.ok).toBe(true);
+    if (list.ok) expect(list.value).toHaveLength(0);
+  });
+
+  it("a wizard row with no chatId (pre-deploy row) still accepts input from any chat", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.wizards.start(higherUpId, "assign");
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(higherUpId, "carla", GROUP_CHAT_ID, "alice"),
+    );
+
+    expect(lastReplyText(testBot.calls)).toMatch(/title/i);
   });
 });
 
