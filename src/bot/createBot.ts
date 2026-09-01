@@ -30,6 +30,7 @@ import {
 } from "./format.js";
 import { buildStandup, formatStandup } from "./standup.js";
 import type { Caller, Role, TaskStatus } from "../domain/types.js";
+import { isPastDate } from "../domain/overdue.js";
 import type { Roster } from "../domain/roster.js";
 
 export interface CreateBotOptions {
@@ -63,6 +64,11 @@ export interface CreateBotOptions {
    * config file from disk. Production code always omits this. */
   roster?: Roster;
 }
+
+/** Appended to a reply when a resolved due date is already in the past
+ * (issue #56 F10) — a warning, not a rejection: backdating a task is
+ * legitimate. */
+const PAST_DUE_WARNING = "⚠️ That due date is already in the past.";
 
 /** Per-status next-step hint appended to `/task <id>`'s detail reply (#27's
  * status table). There's no more gated "you can't act on this" case — any
@@ -543,6 +549,10 @@ export function createBot(options: CreateBotOptions): CreatedBot {
           return;
         }
         const statusText = item.statusText ?? "";
+        if (statusText.trim().length === 0) {
+          await ctx.reply(UPDATE_USAGE);
+          return;
+        }
         const status = parseStatusWord(statusText);
         if (!status) {
           await ctx.reply(
@@ -775,6 +785,9 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       return;
     }
     let reply = `Task ${result.value.id} created and assigned to @${result.value.assigneeUsername}, due ${result.value.dueDate}.`;
+    if (isPastDate(result.value.dueDate, new Date())) {
+      reply += `\n${PAST_DUE_WARNING}`;
+    }
     if (result.value.assigneeUsername !== normalizeUsername(caller.username)) {
       const notified = await notifyUser(
         bot,
@@ -885,7 +898,11 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         description: "description",
         dueDate: "due date",
       };
-      await ctx.reply(`Task ${id} updated — ${fieldLabel[field]} changed.`);
+      let editReply = `Task ${id} updated — ${fieldLabel[field]} changed.`;
+      if (field === "dueDate" && isPastDate(patch.dueDate!, new Date())) {
+        editReply += `\n${PAST_DUE_WARNING}`;
+      }
+      await ctx.reply(editReply);
     }),
   );
 
@@ -1114,7 +1131,11 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         data: { pendingDueDate: parsed },
       });
       const keyboard = new InlineKeyboard().text("Yes", "duedate:yes").text("No", "duedate:no");
-      await ctx.reply(`That's ${parsed.friendly}. Save this?`, {
+      let confirmPrompt = `That's ${parsed.friendly}. Save this?`;
+      if (isPastDate(parsed.isoDate, new Date())) {
+        confirmPrompt += `\n${PAST_DUE_WARNING}`;
+      }
+      await ctx.reply(confirmPrompt, {
         reply_markup: keyboard,
       });
       return;
@@ -1182,7 +1203,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         bot,
         registrations,
         result.value.assigneeUsername,
-        `You've been assigned Task ${result.value.id}: "${result.value.title}" (due ${result.value.dueDate}). Send /task ${result.value.id} for full details, /submit ${result.value.id} when done.`,
+        `You've been assigned Task ${result.value.id}: "${result.value.title}" (due ${result.value.dueDate}). Send /task ${result.value.id} for full details, /done ${result.value.id} when you're ready for review.`,
       );
       if (!notified && result.value.assigneeUsername !== normalizeUsername(caller.username)) {
         reply += `\nHeads-up: @${result.value.assigneeUsername} hasn't sent /start yet, so I couldn't notify them.`;

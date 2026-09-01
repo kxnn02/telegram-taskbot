@@ -7,8 +7,8 @@ import { parseDueDateTextRequest } from "../../../../src/web/taskMutationRequest
 
 /**
  * Natural-language due-date parsing for the create/edit task forms (Phase
- * 6.2, issue #17), mirroring the Express dashboard's two-step "parse, then
- * confirm the friendly date, then save" flow (`dashboardServer.ts`'s
+ * 6.2, issue #17), mirroring the removed Express dashboard's two-step
+ * "parse, then confirm the friendly date, then save" flow (its
  * `POST /tasks/new` step) but as a small REST endpoint the Client Component
  * form calls before showing its confirm step — same `parseDueDate` used by
  * the assignment wizard and the old Express dashboard, not a re-derived

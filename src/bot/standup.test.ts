@@ -191,6 +191,14 @@ describe("formatStandup (standup redesign)", () => {
     expect(text).toContain("finished thing");
   });
 
+  it("renders the Manila-local date, not UTC's (issue #56 F9)", async () => {
+    const { service } = makeService();
+    const today = new Date("2026-09-02T02:00:00+08:00");
+    const report = await buildStandup(service, carla, today);
+    const text = formatStandup(report);
+    expect(text).toContain("Wednesday, September 2, 2026");
+  });
+
   it("is a distinct formatter from the digest's formatGroupDailySummary", () => {
     expect(formatStandup).not.toBe(formatGroupDailySummary as unknown as typeof formatStandup);
   });

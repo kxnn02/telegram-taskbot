@@ -9,7 +9,7 @@ import {
 /**
  * Data-fetching + query-parsing for the Next.js oversight page (Phase 6.1 /
  * issue #17), factored out of the RSC itself so it's directly unit-testable
- * — mirrors `dashboardServer.ts`'s `GET /` handler's query-parsing and
+ * — mirrors the removed Express dashboard's `GET /` handler's query-parsing and
  * filtering logic, minus the Express req/res plumbing. Authorization is
  * NOT reimplemented here: `TaskService.listAllTasks` already enforces
  * "HigherUp sees the whole cohort, Intern sees only their own tasks"

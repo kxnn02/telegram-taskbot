@@ -3,7 +3,7 @@ import { groupByAction, ACTION_GROUPS, type ActionGroup, type StatusGroup } from
 import { Icon, type IconName } from "./icons";
 import { ActionRow } from "./TaskRow";
 
-/** Faithful port of dashboardServer.ts's ACTION_SECTION_META/renderActionSection. */
+/** Faithful port of the removed Express dashboard's ACTION_SECTION_META/renderActionSection. */
 interface ActionSectionMeta {
   label: string;
   ic: IconName;
