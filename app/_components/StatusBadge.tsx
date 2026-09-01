@@ -1,8 +1,8 @@
 import type { TaskWithFlags } from "../../src/service/taskService";
 import { Icon, type IconName } from "./icons";
 
-/** Faithful port of dashboardServer.ts's STATUS_META/statusBadge — same
- * colors, same icon-vocabulary, same tag-vs-badge distinction. */
+/** Faithful port of the removed Express dashboard's STATUS_META/statusBadge —
+ * same colors, same icon-vocabulary, same tag-vs-badge distinction. */
 type BadgeKind = "tag" | "badge";
 const STATUS_META: Record<
   TaskWithFlags["status"],

@@ -3,7 +3,7 @@ import { groupByAssignee } from "../../src/web/taskView";
 import { initialsFor } from "../../src/web/layout";
 import { InternRow } from "./TaskRow";
 
-/** Faithful port of dashboardServer.ts's renderInternPanels. */
+/** Faithful port of the removed Express dashboard's renderInternPanels. */
 export function InternPanels({ tasks }: { tasks: TaskWithFlags[] }) {
   const grouped = groupByAssignee(tasks);
   const entries = [...grouped.entries()].sort(([a], [b]) => a.localeCompare(b));

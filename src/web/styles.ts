@@ -5,7 +5,7 @@
  * `colors_and_type.css` / `org.css`). Numeric values are intentionally not
  * rounded or "tidied" — they're the design system's exact values.
  *
- * Fonts are served as real files via `express.static` (see dashboardServer.ts),
+ * Fonts are served as real files from the Next.js `public/` directory,
  * not inlined as base64 — inlining was a constraint of the design canvas
  * only (it could only reach Google Fonts, not local files) and would bloat
  * every page load here.

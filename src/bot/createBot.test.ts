@@ -48,6 +48,12 @@ interface RecordedCall {
   payload: Record<string, unknown>;
 }
 
+const TELEGRAM_MESSAGE_LIMIT = 4096;
+
+// Mirrors the real Telegram Bot API (issue #55/F8): a sendMessage whose text
+// exceeds the 4096-character limit is rejected with "message is too long"
+// rather than silently accepted. Without this, an oversized-reply bug would
+// pass the test suite even though it fails against the real API.
 function makeFakeTransformer() {
   const calls: RecordedCall[] = [];
   let messageId = 1000;
@@ -55,13 +61,17 @@ function makeFakeTransformer() {
     calls.push({ method, payload: (payload ?? {}) as Record<string, unknown> });
     const p = (payload ?? {}) as Record<string, unknown>;
     if (method === "sendMessage" || method === "editMessageText") {
+      const text = (p.text as string) ?? "";
+      if (text.length > TELEGRAM_MESSAGE_LIMIT) {
+        throw new Error("Bad Request: message is too long");
+      }
       return {
         ok: true,
         result: {
           message_id: (p.message_id as number) ?? messageId++,
           date: Math.floor(Date.now() / 1000),
           chat: { id: Number(p.chat_id) || 1, type: "private" },
-          text: (p.text as string) ?? "",
+          text,
         },
       } as never;
     }
@@ -291,6 +301,34 @@ describe("/edit wizard field picker", () => {
     }
   });
 
+  it("the wizard's due-date confirm prompt warns when the parsed date is in the past (F10)", async () => {
+    const taskId = await seedTask();
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/edit ${taskId}`));
+    await testBot.bot.handleUpdate(callbackUpdate(higherUpId, higherUpId, "editfield:duedate"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "Jan 5 2020"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/save this\?/i);
+    expect(text).toContain("⚠️ That due date is already in the past.");
+  });
+
+  it("the wizard's due-date confirm prompt does not warn for a future date (F10)", async () => {
+    const taskId = await seedTask();
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/edit ${taskId}`));
+    await testBot.bot.handleUpdate(callbackUpdate(higherUpId, higherUpId, "editfield:duedate"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "Dec 25 2026"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/save this\?/i);
+    expect(text).not.toContain("already in the past");
+  });
+
   it("tapping Assignee with a higher-up's username reassigns to them — assignment isn't intern-only (issue #27/#29)", async () => {
     const taskId = await seedTask();
     const higherUpId = nextUserId();
@@ -511,6 +549,45 @@ describe("direct /edit <task_id> <field> <value> (issue #30)", () => {
     if (result.ok) expect(result.value.dueDate).toBe("2026-09-20");
   });
 
+  it("warns when the direct duedate edit resolves to a past date (F10)", async () => {
+    const taskId = await seedTask();
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(higherUpId, higherUpId, `/edit ${taskId} duedate Jan 5 2020`),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("⚠️ That due date is already in the past.");
+  });
+
+  it("does not warn when the direct duedate edit resolves to a future date (F10)", async () => {
+    const taskId = await seedTask();
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(higherUpId, higherUpId, `/edit ${taskId} duedate Sept 20`),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).not.toContain("already in the past");
+  });
+
+  it("does not warn when editing a non-duedate field (F10)", async () => {
+    const taskId = await seedTask();
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(higherUpId, higherUpId, `/edit ${taskId} title Brand new title`),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).not.toContain("already in the past");
+  });
+
   it("rejects a due-date value chrono cannot parse, with usage help rather than silently defaulting", async () => {
     const taskId = await seedTask();
     const higherUpId = nextUserId();
@@ -679,6 +756,28 @@ describe("bare /addtask falls back to the step-by-step wizard (issue #30)", () =
     expect(text).toMatch(/isn't a known roster member/i);
     expect(text).toMatch(/did you mean @bob/i);
     expect(await testBot.wizards.has(higherUpId)).toBe(true);
+  });
+
+  it("the assignment DM points to /done, not the removed /submit (F11)", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "alice"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "Ship the feature"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "skip"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "in 5 days"));
+    await testBot.bot.handleUpdate(callbackUpdate(higherUpId, higherUpId, "duedate:yes"));
+
+    const dmToAlice = testBot.calls.find(
+      (c) => c.method === "sendMessage" && Number(c.payload.chat_id) === aliceId,
+    );
+    expect(dmToAlice?.payload.text).toContain("/done");
+    expect(dmToAlice?.payload.text).not.toContain("/submit");
   });
 
   it("can assign to a HigherUp — assignment is no longer intern-only (issue #27/#29)", async () => {
@@ -966,6 +1065,26 @@ describe("direct /addtask one-liner (issue #27/#30)", () => {
 
     const text = lastReplyText(testBot.calls);
     expect(text).toMatch(/created/i);
+  });
+
+  it("warns when the resolved due date is already in the past (F10)", async () => {
+    const internId = nextUserId();
+    await registerCaller(testBot, internId, "alice");
+
+    await addtask(internId, "retro writeup by Jan 5 2020");
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("⚠️ That due date is already in the past.");
+  });
+
+  it("does not warn when the resolved due date is in the future (F10)", async () => {
+    const internId = nextUserId();
+    await registerCaller(testBot, internId, "alice");
+
+    await addtask(internId, "fix the login by Sept 5");
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).not.toContain("already in the past");
   });
 
   describe("the coming-Friday default, Asia/Manila", () => {
@@ -1453,6 +1572,38 @@ describe("/task <id> appends a per-status next-step hint (issue #27/#29/#31)", (
     const text = lastReplyText(testBot.calls);
     expect(text).toContain("Nice work!");
   });
+
+  it("a task with enough notes to exceed Telegram's 4096-character limit sends multiple messages and does not throw (issue #55/F8)", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const task = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Ship it", description: "d", dueDate: "2026-09-05" },
+    );
+    if (!task.ok) throw new Error("setup failed");
+    for (let i = 0; i < 80; i++) {
+      await testBot.bot.handleUpdate(
+        messageUpdate(
+          higherUpId,
+          higherUpId,
+          `/note ${task.value.id} A reasonably descriptive note to pad this out, number ${i}`,
+        ),
+      );
+    }
+
+    const callsBefore = testBot.calls.length;
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/task ${task.value.id}`));
+
+    const replies = testBot.calls
+      .slice(callsBefore)
+      .filter((c) => c.method === "sendMessage" && Number(c.payload.chat_id) === higherUpId);
+    expect(replies.length).toBeGreaterThan(1);
+    for (const reply of replies) {
+      expect((reply.payload.text as string).length).toBeLessThanOrEqual(4096);
+    }
+  });
 });
 
 describe("Notification policy on status changes (issue #27/#29)", () => {
@@ -1908,6 +2059,29 @@ describe("/standup (issue #33)", () => {
     expect(text).toMatch(/no tasks completed this week/i);
   });
 
+  it("a report large enough to exceed Telegram's 4096-character limit is chunked, not thrown (issue #55/F8)", async () => {
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    for (let i = 0; i < 60; i++) {
+      await testBot.service.assignTask(
+        { username: "carla", role: "HigherUp", cohortId: COHORT },
+        {
+          assigneeUsername: "alice",
+          title: `Task number ${i} — a reasonably descriptive title to pad it out`,
+          dueDate: "2026-09-05",
+        },
+      );
+    }
+
+    await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/standup"));
+
+    const replies = testBot.calls.filter((c) => c.method === "sendMessage");
+    expect(replies.length).toBeGreaterThan(1);
+    for (const reply of replies) {
+      expect((reply.payload.text as string).length).toBeLessThanOrEqual(4096);
+    }
+  });
+
   it("does not list a member who has nothing in a given status", async () => {
     await testBot.service.assignTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
@@ -1989,6 +2163,25 @@ describe("/update <ref> <status> — generic status setter (issue #27/#31)", () 
     expect(text).toMatch(/in review/);
     expect(text).toMatch(/blocked/);
     expect(text).toMatch(/done/);
+  });
+
+  it("/update <ref> with no status gets the usage message, not an empty-quotes error (F12)", async () => {
+    const { taskId, higherUpId } = await seedTask();
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/update ${taskId}`));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/^Usage: \/update/);
+    expect(text).not.toContain('""');
+  });
+
+  it("/update <ref> with a real unrecognised word still names it (F12 regression guard)", async () => {
+    const { taskId, higherUpId } = await seedTask();
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/update ${taskId} finished`));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toBe(
+      'I don\'t recognize "finished" as a status. Valid statuses: backlog, todo, in progress, in review, blocked, done',
+    );
   });
 
   it("an invalid ref gets a usage message", async () => {
@@ -2352,6 +2545,23 @@ describe("/overdue replaces /backlog (issue #27/#31 — no alias retained)", () 
     const text = lastReplyText(testBot.calls);
     expect(text).not.toMatch(/not sure what you mean/i);
     expect(text).toContain("/overdue");
+  });
+
+  it("a small number of overdue tasks still sends exactly one message — chunking must not fragment normal-sized replies (issue #55/F8)", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const task = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Overdue thing", description: "d", dueDate: "2020-01-01" },
+    );
+    if (!task.ok) throw new Error("setup failed");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/overdue"));
+
+    const replies = testBot.calls.filter((c) => c.method === "sendMessage");
+    expect(replies).toHaveLength(1);
   });
 });
 

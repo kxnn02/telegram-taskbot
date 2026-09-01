@@ -20,6 +20,14 @@ export function isOverdue(task: Task, now: Date): boolean {
   return due < today;
 }
 
+/** True when `isoDate` falls before today, Asia/Manila-resolved — used to
+ * warn (never reject) on a backdated due date (issue #56 F10). */
+export function isPastDate(isoDate: string, now: Date): boolean {
+  const today = DateTime.fromJSDate(now, { zone: MANILA_ZONE }).startOf("day");
+  const due = DateTime.fromISO(isoDate, { zone: MANILA_ZONE }).startOf("day");
+  return due < today;
+}
+
 /** Whole days overdue, for `/overdue`'s "N days overdue" display. Assumes
  * `isOverdue(task, now)` is already true; returns 0 or negative otherwise. */
 export function daysOverdue(task: Task, now: Date): number {

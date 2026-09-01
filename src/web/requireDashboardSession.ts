@@ -6,7 +6,7 @@ import { verifySession } from "./sessionCookie.js";
  * API routes (Phase 6.2, issue #17). Every mutation Route Handler
  * (`app/api/tasks/**`) calls this instead of re-deriving the same
  * `verifySession` plumbing already used by `app/page.tsx` and
- * `dashboardServer.ts`'s `getCaller` — kept here as a plain, framework-
+ * the removed Express dashboard's `getCaller` — kept here as a plain, framework-
  * independent function (a cookie string in, a `Caller | undefined` out) so
  * it's directly unit-testable without booting Next. This resolves *whether
  * there's a valid session at all*, nothing more — role/ownership

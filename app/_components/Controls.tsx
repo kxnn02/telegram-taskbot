@@ -1,6 +1,6 @@
 import type { GroupMode } from "../../src/web/oversightData";
 
-/** Faithful port of dashboardServer.ts's renderControls. */
+/** Faithful port of the removed Express dashboard's renderControls. */
 export function Controls({
   groupMode,
   assignees,

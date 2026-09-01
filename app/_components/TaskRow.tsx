@@ -5,7 +5,7 @@ import { RowActions } from "./RowActions";
 import { StatusBadge } from "./StatusBadge";
 
 /**
- * Faithful port of dashboardServer.ts's actionRow/internRow. Phase 6.1
+ * Faithful port of the removed Express dashboard's actionRow/internRow. Phase 6.1
  * dropped the trailing actions cell entirely (mutations were out of scope
  * for that read-only slice); Phase 6.2 brings it back as `RowActions`, a
  * Client Component that calls the new REST mutation routes.

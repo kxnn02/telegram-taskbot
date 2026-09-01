@@ -6,7 +6,7 @@ import { buildStatsViewModel } from "./statsView.js";
  * Presentation-only formatting for the Next.js stats page (Phase 6.2, issue
  * #17 — originally issue #4), factored out so the page component stays a
  * thin render layer, mirroring taskView.ts's precedent of pulling pure
- * formatting logic out of dashboardServer.ts's render functions. No
+ * formatting logic out of the removed Express dashboard's render functions. No
  * TaskService/authorization logic here — `CohortStats` is already fully
  * computed by `TaskService.getStats`.
  */
