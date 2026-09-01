@@ -370,6 +370,27 @@ production request path is allowed to hit it. Regression coverage: `callerResolu
 proving `/start` and a data-read command both stay scoped to the deployment's bound cohort even
 when two separate bot instances share an identical ambiguous roster).
 
+### `/addtask` only reads a due date after an explicit `by` (issue #49/#51, finding F2/D2)
+
+`parseAddTaskArgs` used to hand the whole argument string to `parseDueDate` (chrono) and split
+the title off wherever chrono found *any* date-like phrase. That looks smarter than requiring the
+`by` keyword — natural-language dates work anywhere in the sentence — but chrono readily matches
+ordinary words that aren't dates in this context at all: month names (`fix bug in march module`),
+month abbreviations (`review the sept deck`), weekday abbreviations (`call sat about the API`),
+and time-of-day phrases (`deploy to prod at 5`). Every one of those got silently truncated to a
+mangled title with an invented due date, and the one-liner path has no confirm step, so it landed
+without the user ever seeing it.
+
+The fix anchors on `by` (#27's grammar already documented `/addtask <title> by <date>` — this
+restores that spec rather than changing it): every ` by ` occurrence is a candidate split point,
+walked last-to-first so `fix the bug found by QA by next Friday` splits on the second `by`. A
+candidate is only accepted when the text after it is *entirely* consumed by chrono's match (plus
+optional trailing punctuation) — otherwise the earlier `by` is tried, and if none qualify the
+whole string stays the title with no due date (the caller's coming-Friday default applies
+instead). Do not "simplify" this back to a whole-string chrono scan; that's the exact bug this
+fixed. See `addTaskParse.ts`'s doc comment and `addTaskParse.test.ts` for the validated
+input/output table.
+
 ## Out of scope (deferred to v2)
 
 Mini App UI, file attachments, CSV export, recurring tasks, and standup response-collection were

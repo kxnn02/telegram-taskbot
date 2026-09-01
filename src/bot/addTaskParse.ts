@@ -23,14 +23,35 @@ const USAGE = ADDTASK_USAGE;
 // either order").
 const MENTION_RE = /(?:^|\s)@(\w+)(?=\s|$)/;
 
+// Every ` by ` occurrence is a candidate split point (issue #49/#51,
+// finding F2/D2) — walked last to first below.
+const BY_RE = /\s+by\s+/gi;
+
+// Leftover after the matched date phrase must be empty or punctuation
+// only, or the split is rejected and title stays whole.
+const TRAILING_PUNCTUATION_ONLY_RE = /^[.,!?;:]*$/;
+
 /**
  * Parses a bare `/addtask <args>` string into title/assignee/due-date per
  * issue #27's create grammar. Strips a trailing `@mention` first, then
- * hands the remainder to `parseDueDate` and uses its matched span to split
- * the date out of the title — a naive keyword split would wrongly cut
- * titles that legitimately contain the word "by" but have no date clause
- * at all, since `parseDueDate` simply finds nothing in that case and the
- * whole remainder is kept as the title.
+ * finds a due date only after an explicit `by` keyword (issue #49/#51,
+ * finding F2/D2) — scanning the whole string for any date-like phrase
+ * (the previous approach) silently truncated titles and invented due
+ * dates out of ordinary words like month/weekday abbreviations ("march",
+ * "sept", "sat") or time phrases ("at 5").
+ *
+ * `by` occurrences are walked last to first so
+ * "fix the bug found by QA by next Friday" splits on the second "by", and
+ * a split is only accepted when the text after it is *entirely* consumed
+ * by the date match (plus optional trailing punctuation) — otherwise the
+ * next-earlier "by" is tried, and if none qualify the whole string is kept
+ * as the title.
+ *
+ * Two deliberate consequences of the full-consumption rule, kept as-is:
+ * "fix login by next Friday please" keeps the whole string as the title
+ * (trailing words after the date defeat full consumption — safe, since it
+ * never drops user text), and "write the doc by end of week" likewise,
+ * because chrono does not parse "end of week".
  */
 export function parseAddTaskArgs(
   raw: string,
@@ -54,16 +75,25 @@ export function parseAddTaskArgs(
     return { error: USAGE };
   }
 
-  const dateMatch = parseDueDate(text, referenceDate);
+  const byMatches = [...text.matchAll(BY_RE)];
   let title = text;
   let dueDate: ParsedDueDate | undefined;
-  if (dateMatch) {
-    title = text
-      .slice(0, dateMatch.index)
-      .trim()
-      .replace(/\s+by$/i, "")
-      .trim();
+
+  for (let i = byMatches.length - 1; i >= 0; i--) {
+    const byMatch = byMatches[i]!;
+    const matchStart = byMatch.index;
+    const matchEnd = matchStart + byMatch[0].length;
+    const remainder = text.slice(matchEnd).trim();
+
+    const dateMatch = parseDueDate(remainder, referenceDate);
+    if (!dateMatch || dateMatch.index !== 0) continue;
+
+    const leftover = remainder.slice(dateMatch.text.length).trim();
+    if (!TRAILING_PUNCTUATION_ONLY_RE.test(leftover)) continue;
+
+    title = text.slice(0, matchStart).trim();
     dueDate = dateMatch;
+    break;
   }
 
   if (title.length === 0) {

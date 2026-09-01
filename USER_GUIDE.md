@@ -38,6 +38,11 @@ thing instead of gating every action behind a review step.
 - `/addtask fix the login bug @jean` — assigned to `@jean` instead of you.
 - `/addtask fix the login bug @jean by next Friday` — both together, in either order.
 
+The word **`by`** is required to set a due date — the bot only looks for a date after `by`, so a
+title that happens to mention a month, weekday, or time (`fix bug in march module`, `call sat
+about the API`) is never misread as a date. No `by` clause means the coming-Friday default
+applies, and the title is kept exactly as typed.
+
 Send bare **`/addtask`** with no text to get the old step-by-step form instead (who, title,
 description, due date) — useful if you want to add a description, since the one-line form
 doesn't have room for one.
