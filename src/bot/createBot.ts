@@ -8,7 +8,7 @@ import type { WizardStateStorePort } from "../storage/wizardStateStorePort.js";
 import { parseDueDate } from "../date/parseDueDate.js";
 import { resolveCaller } from "./callerResolution.js";
 import { WizardManager, type WizardState, type EditField } from "./wizard.js";
-import { notifyUser } from "./notify.js";
+import { notifyUser, notifyStatusChange } from "./notify.js";
 import { suggestClosestUsername } from "./usernameSuggest.js";
 import {
   formatAllTasksGrouped,
@@ -19,7 +19,7 @@ import {
   formatPending,
   formatTaskDetail,
 } from "./format.js";
-import type { Caller } from "../domain/types.js";
+import type { Caller, TaskStatus } from "../domain/types.js";
 import type { Roster } from "../domain/roster.js";
 
 export interface CreateBotOptions {
@@ -54,11 +54,17 @@ export interface CreateBotOptions {
   roster?: Roster;
 }
 
-const NEXT_STEP_HINT: Record<string, string> = {
-  Assigned: "Send `/task <id>` for full details.",
-  InProgress: "Send `/submit <id>` when you're done.",
-  Submitted: "It's now awaiting review.",
-  NeedsRevision: "Take another look and `/submit <id>` again when ready.",
+/** Per-status next-step hint appended to `/task <id>`'s detail reply (#27's
+ * status table). There's no more gated "you can't act on this" case — any
+ * roster member may move a task to any status — so every hint just
+ * suggests the obvious next command rather than describing a permission. */
+const NEXT_STEP_HINT: Record<TaskStatus, string> = {
+  backlog: "Send `/update <id> todo` to bring it back into play.",
+  todo: "Send `/submit <id>` once you start it.",
+  in_progress: "Send `/submit <id>` when you're done.",
+  in_review: "It's now awaiting review.",
+  blocked: "Send `/unblocked <id>` once it's unblocked.",
+  done: "Nice work!",
 };
 
 export interface CreatedBot {
@@ -234,7 +240,11 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         return;
       }
       const result = await service.getTask(caller, id);
-      await ctx.reply(result.ok ? formatTaskDetail(result.value) : result.error);
+      if (!result.ok) {
+        await ctx.reply(result.error);
+        return;
+      }
+      await ctx.reply(`${formatTaskDetail(result.value)}\n\n${NEXT_STEP_HINT[result.value.status]}`);
     }),
   );
 
@@ -254,15 +264,12 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         return;
       }
       await ctx.reply(`Task ${id} marked as submitted. Nice work!`);
-      const approveRevise = new InlineKeyboard()
-        .text("Approve", `decision:approve:${id}`)
-        .text("Revise", `decision:revise:${id}`);
-      await notifyUser(
+      await notifyStatusChange(
         bot,
         registrations,
-        result.value.assignedByUsername,
-        `@${result.value.assigneeUsername} submitted Task ${id}: "${result.value.title}". Send /task ${id} for details, or tap a button below.`,
-        approveRevise,
+        result.value,
+        caller.username,
+        `@${result.value.assigneeUsername} submitted Task ${id}: "${result.value.title}". Send /task ${id} for details.`,
       );
     }),
   );
@@ -290,13 +297,12 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         return;
       }
       await ctx.reply(`Task ${id} flagged as blocked.`);
-      const unblockKeyboard = new InlineKeyboard().text("Mark unblocked", `unblock:${id}`);
-      await notifyUser(
+      await notifyStatusChange(
         bot,
         registrations,
-        result.value.assignedByUsername,
+        result.value,
+        caller.username,
         `Task ${id} ("${result.value.title}", @${result.value.assigneeUsername}) was flagged as blocked: ${result.value.blockedReason}`,
-        unblockKeyboard,
       );
     }),
   );
@@ -384,10 +390,11 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       decision === "approve"
         ? "Nice work!"
         : `Take another look and \`/submit ${id}\` again when ready.`;
-    await notifyUser(
+    await notifyStatusChange(
       bot,
       registrations,
-      result.value.assigneeUsername,
+      result.value,
+      caller.username,
       `Task ${id} ("${result.value.title}") was ${decision === "approve" ? "approved" : "sent back for revision"} by @${caller.username}. ${hint}`,
     );
   }
@@ -438,58 +445,10 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     );
   });
 
-  // ---- Approve/Revise inline buttons on submission notifications -------
-
-  bot.callbackQuery(/^decision:(approve|revise):(\d+)$/, async (ctx) => {
-    const userId = ctx.from.id;
-    const resolved = await requireCaller(userId);
-    if (resolved.status !== "ok" || resolved.caller.role !== "HigherUp") {
-      await ctx.answerCallbackQuery({ text: "Only higher-ups can do that." });
-      return;
-    }
-    const [, decision, idStr] = ctx.match as unknown as [string, string, string];
-    const id = Number(idStr);
-    const result =
-      decision === "approve"
-        ? await service.setStatus(resolved.caller, id, "done")
-        : await service.setStatus(resolved.caller, id, "todo");
-    await ctx.answerCallbackQuery();
-    if (!result.ok) {
-      await ctx.editMessageText(result.error);
-      return;
-    }
-    await ctx.editMessageText(
-      `Task ${id} marked ${decision === "approve" ? "Approved" : "Needs Revision"}.`,
-    );
-    const hint =
-      decision === "approve"
-        ? "Nice work!"
-        : `Take another look and \`/submit ${id}\` again when ready.`;
-    await notifyUser(
-      bot,
-      registrations,
-      result.value.assigneeUsername,
-      `Task ${id} ("${result.value.title}") was ${decision === "approve" ? "approved" : "sent back for revision"} by @${resolved.caller.username}. ${hint}`,
-    );
-  });
-
-  // ---- "Mark unblocked" inline button on blocked notifications (issue #9) -
-
-  bot.callbackQuery(/^unblock:(\d+)$/, async (ctx) => {
-    const userId = ctx.from.id;
-    const resolved = await requireCaller(userId);
-    if (resolved.status !== "ok" || resolved.caller.role !== "HigherUp") {
-      await ctx.answerCallbackQuery({ text: "Only higher-ups can do that." });
-      return;
-    }
-    const [, idStr] = ctx.match as unknown as [string, string];
-    const id = Number(idStr);
-    const result = await service.clearBlocked(resolved.caller, id);
-    await ctx.answerCallbackQuery();
-    await ctx.editMessageText(
-      result.ok ? `Task ${id} is no longer blocked.` : result.error,
-    );
-  });
+  // The Approve/Revise inline keyboard on submission notifications and the
+  // `unblock:` callback button both encoded the review gate that ADR-0009
+  // deletes — removed outright rather than retargeted (issue #27/#29).
+  // `/approve`, `/revise`, and `/unblocked` remain as typed commands.
 
   // ---- Assignment wizard (/assign) and /edit wizard ------------------
 
@@ -648,15 +607,16 @@ export function createBot(options: CreateBotOptions): CreatedBot {
 
     if (state.step === "awaiting_assignee") {
       const username = text.replace(/^@/, "");
-      if (!roster.isIntern(username, caller.cohortId)) {
-        const internUsernames = roster
+      if (!roster.isMember(username, caller.cohortId)) {
+        // Assignable to any roster member, not just interns (issue #27/#29).
+        const memberUsernames = roster
           .all()
-          .filter((entry) => entry.role === "Intern" && entry.cohortId === caller.cohortId)
+          .filter((entry) => entry.cohortId === caller.cohortId)
           .map((entry) => entry.username);
-        const suggestion = suggestClosestUsername(username, internUsernames);
+        const suggestion = suggestClosestUsername(username, memberUsernames);
         const suggestionText = suggestion ? ` Did you mean @${suggestion}?` : "";
         await ctx.reply(
-          `@${username} isn't a known intern in this cohort.${suggestionText} Try again, or /cancel.`,
+          `@${username} isn't a known roster member in this cohort.${suggestionText} Try again, or /cancel.`,
         );
         return;
       }
