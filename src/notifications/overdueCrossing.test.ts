@@ -13,9 +13,9 @@ function task(overrides: Partial<Task> = {}): Task {
     assigneeUsername: "alice",
     assignedByUsername: "carla",
     dueDate: "2026-09-05", // in the past relative to NOW
-    status: "InProgress",
+    status: "in_progress",
     notes: [],
-    blocked: false,
+    previousStatus: null,
     blockedReason: null,
     createdAt: "2026-09-01T00:00:00.000Z",
     updatedAt: "2026-09-01T00:00:00.000Z",
@@ -43,9 +43,9 @@ describe("findNewOverdueCrossings", () => {
     expect(result).toHaveLength(0);
   });
 
-  it("excludes an overdue-by-date task that's already Approved", async () => {
+  it("excludes an overdue-by-date task that's already done", async () => {
     const result = await findNewOverdueCrossings(
-      [task({ id: 4, status: "Approved" })],
+      [task({ id: 4, status: "done" })],
       NOW,
       () => false,
     );

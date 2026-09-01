@@ -16,9 +16,9 @@ function task(overrides: Partial<TaskWithFlags> = {}): TaskWithFlags {
     assigneeUsername: "alice",
     assignedByUsername: "carla",
     dueDate: "2026-09-05",
-    status: "InProgress",
+    status: "blocked",
     notes: [],
-    blocked: true,
+    previousStatus: "in_progress",
     blockedReason: "waiting on API access",
     createdAt: "2026-09-01T00:00:00.000Z",
     updatedAt: "2026-09-01T00:00:00.000Z",
@@ -30,7 +30,7 @@ function task(overrides: Partial<TaskWithFlags> = {}): TaskWithFlags {
 
 function tasks(count: number, overrides: Partial<TaskWithFlags> = {}): TaskWithFlags[] {
   return Array.from({ length: count }, (_, i) =>
-    task({ id: i + 1, title: `Task ${i + 1}`, blocked: false, blockedReason: null, ...overrides }),
+    task({ id: i + 1, title: `Task ${i + 1}`, status: "todo", previousStatus: null, blockedReason: null, ...overrides }),
   );
 }
 
@@ -107,7 +107,7 @@ describe("formatApproved", () => {
   });
 
   it("lists approved tasks with assignee", () => {
-    const text = formatApproved([task({ status: "Approved", blocked: false, blockedReason: null })]);
+    const text = formatApproved([task({ status: "done", previousStatus: null, blockedReason: null })]);
     expect(text).toContain("#1");
     expect(text).toContain("@alice");
   });

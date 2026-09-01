@@ -79,7 +79,7 @@ describe("DigestBuilder.higherUpDailyDigest", () => {
     const { builder, service } = makeBuilder();
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
-    await service.submitTask(alice, created.value.id);
+    await service.setStatus(alice, created.value.id, "in_review");
     const text = await builder.higherUpDailyDigest("dave", COHORT);
     expect(text).not.toBeNull();
     expect(text).toContain(`#${created.value.id}`);
@@ -116,8 +116,8 @@ describe("DigestBuilder.higherUpWeeklyDigest", () => {
     const { builder, service } = makeBuilder();
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
-    await service.submitTask(alice, created.value.id);
-    await service.approveTask(carla, created.value.id);
+    await service.setStatus(alice, created.value.id, "in_review");
+    await service.setStatus(carla, created.value.id, "done");
     const text = await builder.higherUpWeeklyDigest("dave", COHORT, NOW);
     expect(text).not.toBeNull();
     expect(text).toContain(`#${created.value.id}`);
@@ -128,8 +128,8 @@ describe("DigestBuilder.higherUpWeeklyDigest", () => {
     const { builder, service } = makeBuilder(longAgo);
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
-    await service.submitTask(alice, created.value.id);
-    await service.approveTask(carla, created.value.id);
+    await service.setStatus(alice, created.value.id, "in_review");
+    await service.setStatus(carla, created.value.id, "done");
     const text = await builder.higherUpWeeklyDigest("dave", COHORT, NOW); // NOW is a month later
     expect(text).toBeNull();
   });
