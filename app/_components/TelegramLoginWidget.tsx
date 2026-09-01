@@ -23,7 +23,12 @@ import { useEffect, useRef } from "react";
  * shape. The `.tg-login-widget iframe` rule in styles.ts's CSS removes the
  * browser's default iframe border — without it, every browser draws a
  * visible inset border around Telegram's injected iframe since the widget
- * script itself never sets `border: 0` on it.
+ * script itself never sets `border: 0` on it. `data-userpic="false"` hides
+ * the account's profile photo: it's rendered as a plain, unmasked square
+ * inside Telegram's own cross-origin iframe (not something our CSS can
+ * reshape or recolor), so whenever an account's photo has a dark
+ * background it reads as a stray black square next to the button —
+ * dropping the photo sidesteps that per-account variability entirely.
  */
 export interface TelegramLoginWidgetProps {
   botUsername: string;
@@ -43,6 +48,7 @@ export function TelegramLoginWidget({ botUsername, authUrl }: TelegramLoginWidge
     script.setAttribute("data-telegram-login", botUsername);
     script.setAttribute("data-size", "large");
     script.setAttribute("data-radius", "18");
+    script.setAttribute("data-userpic", "false");
     script.setAttribute("data-auth-url", authUrl);
     script.setAttribute("data-request-access", "write");
     container.appendChild(script);
