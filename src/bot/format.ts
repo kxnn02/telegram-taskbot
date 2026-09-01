@@ -43,10 +43,16 @@ function paginate<T>(items: T[], requestedPage: number, pageSize = PAGE_SIZE): P
   return { items: items.slice(start, start + pageSize), page, totalPages };
 }
 
-function paginationFooter(commandName: string, page: number, totalPages: number): string | null {
+function paginationFooter(
+  commandName: string,
+  page: number,
+  totalPages: number,
+  hintPrefix = "",
+): string | null {
   if (totalPages <= 1) return null;
+  const prefix = hintPrefix ? `${hintPrefix} ` : "";
   if (page < totalPages) {
-    return `Page ${page} of ${totalPages} — send /${commandName} ${page + 1} for more`;
+    return `Page ${page} of ${totalPages} — send /${commandName} ${prefix}${page + 1} for more`;
   }
   return `Page ${page} of ${totalPages}.`;
 }
@@ -73,7 +79,15 @@ export function formatMyTasks(tasks: TaskWithFlags[], page = 1): string {
   return lines.join("\n");
 }
 
-export function formatAllTasksGrouped(tasks: TaskWithFlags[], page = 1): string {
+/** Renders `/tasks` (issue #33; replaces `/alltasks`), grouped by assignee
+ * and paginated. `hintPrefix` carries the filter argument (`@alice`,
+ * `intern`) into the next-page hint so a filtered result's footer points
+ * back at the same filter rather than plain `/tasks <page>`. */
+export function formatAllTasksGrouped(
+  tasks: TaskWithFlags[],
+  page = 1,
+  hintPrefix = "",
+): string {
   if (tasks.length === 0) {
     return "No tasks in this cohort yet.";
   }
@@ -90,7 +104,7 @@ export function formatAllTasksGrouped(tasks: TaskWithFlags[], page = 1): string 
       const lines = list.map((t) => "  - " + formatTaskLine(t));
       return `@${assignee}:\n${lines.join("\n")}`;
     });
-  const footer = paginationFooter("alltasks", paged.page, paged.totalPages);
+  const footer = paginationFooter("tasks", paged.page, paged.totalPages, hintPrefix);
   return footer ? `${sections.join("\n\n")}\n\n${footer}` : sections.join("\n\n");
 }
 
@@ -116,6 +130,16 @@ export function formatBacklog(tasks: TaskWithFlags[]): string {
       (t) =>
         `- #${t.id} ${t.title} — ${t.daysOverdue} day(s) overdue (assigned to @${t.assigneeUsername})`,
     ),
+  ].join("\n");
+}
+
+export function formatDeadlines(tasks: TaskWithFlags[]): string {
+  if (tasks.length === 0) {
+    return "Nothing due in the next 7 days.";
+  }
+  return [
+    "Due in the next 7 days:",
+    ...tasks.map((t) => `- ${formatTaskLine(t)} (assigned to @${t.assigneeUsername})`),
   ].join("\n");
 }
 
@@ -177,13 +201,17 @@ const EVERYONE_HELP = [
   "/cancel — abort an in-progress wizard",
   "/addtask <title> [by <date>] [@username] — create a task in one line, assigned to you by default, due the coming Friday unless you give a date",
   "/addtask — bare, starts the step-by-step form instead",
-  "/alltasks — every task in the cohort, grouped by assignee",
+  "/tasks [page] — every task in the cohort, grouped by assignee",
+  "/tasks @username — filter to one member's tasks",
+  "/tasks intern|higherup — filter to tasks assigned to that role",
   "/mytasks — your open tasks",
   "/task <ref> — full detail on one task (ref is 23 or t23)",
   "/update <ref> <status> — set a task's status (backlog, todo, in progress, in review, blocked, done)",
   "/done <ref> — mark a task In review",
   "/complete <ref> — mark a task Done",
   "/overdue — overdue tasks",
+  "/deadlines — open tasks due in the next 7 days, soonest first",
+  "/standup — on-demand standup report for the cohort",
   "/blocked — blocked tasks",
   "/blocked <ref> <reason> — flag a task as blocked",
   "/unblock <ref> — restore a blocked task to its previous status",

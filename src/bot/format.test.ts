@@ -5,6 +5,7 @@ import {
   formatAllTasksGrouped,
   formatApproved,
   formatBlocked,
+  formatDeadlines,
   formatMyTasks,
   formatTaskLine,
   formatTaskDetail,
@@ -103,6 +104,31 @@ describe("formatAllTasksGrouped pagination", () => {
     expect(page2).toContain("Page 2 of 2");
     expect(page2).toContain("#11");
     expect(page2).toContain("#12");
+  });
+
+  it("hints at /tasks (not /alltasks) for the next page, with a filter prefix when given", () => {
+    const text = formatAllTasksGrouped(tasks(11), 1, "@alice");
+    expect(text).toContain("/tasks @alice 2");
+  });
+
+  it("hints at plain /tasks when no filter prefix is given (issue #33 renames /alltasks)", () => {
+    const text = formatAllTasksGrouped(tasks(11), 1);
+    expect(text).toContain("/tasks 2");
+  });
+});
+
+describe("formatDeadlines", () => {
+  it("says nothing is due when the list is empty", () => {
+    expect(formatDeadlines([])).toBe("Nothing due in the next 7 days.");
+  });
+
+  it("lists upcoming tasks with assignee, soonest first as given", () => {
+    const text = formatDeadlines([
+      task({ id: 1, title: "sooner", dueDate: "2026-09-01", status: "todo", previousStatus: null, blockedReason: null }),
+      task({ id: 2, title: "later", dueDate: "2026-09-05", status: "todo", previousStatus: null, blockedReason: null }),
+    ]);
+    expect(text.indexOf("#1")).toBeLessThan(text.indexOf("#2"));
+    expect(text).toContain("@alice");
   });
 });
 
