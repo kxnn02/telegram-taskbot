@@ -7,7 +7,7 @@ import type { TaskStorePort } from "../storage/taskStorePort.js";
 import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
 import type { WizardStateStorePort } from "../storage/wizardStateStorePort.js";
 import { comingFriday, parseDueDate } from "../date/parseDueDate.js";
-import { ADDTASK_USAGE, parseAddTaskArgs } from "./addTaskParse.js";
+import { parseAddTaskArgs } from "./addTaskParse.js";
 import { parseMentionTrigger } from "./mentionParse.js";
 import { resolveCaller } from "./callerResolution.js";
 import { WizardManager, type WizardState, type EditField } from "./wizard.js";
@@ -962,7 +962,14 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     if (text.startsWith("/")) {
       // Reaching here means no bot.command() handler above matched it —
       // i.e. an unrecognized command (PRD §6).
-      await ctx.reply("Not sure what you mean — try /help");
+      const commandToken = text.slice(1).split(/\s/, 1)[0] ?? "";
+      const atIndex = commandToken.indexOf("@");
+      const addressedToOtherBot =
+        atIndex !== -1 &&
+        commandToken.slice(atIndex + 1).toLowerCase() !== bot.botInfo.username.toLowerCase();
+      if (ctx.chat.type === "private" && !addressedToOtherBot) {
+        await ctx.reply("Not sure what you mean — try /help");
+      }
       return;
     }
     const userId = ctx.from.id;
@@ -975,7 +982,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       // before.
       const trigger = parseMentionTrigger(text, bot.botInfo.username);
       if (trigger.kind === "unrecognized") {
-        await ctx.reply(`Not sure what you mean — did you mean /addtask <title>? ${ADDTASK_USAGE}`);
+        await ctx.reply(`Did you mean to create a task? Try: @${bot.botInfo.username} add task <title>`);
         return;
       }
       if (trigger.kind === "addtask") {

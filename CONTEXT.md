@@ -88,7 +88,12 @@ Disable) — without that, a bot in a group only receives messages that start wi
 reply to it, or `@`-mention it, which would silently break the wizards' free-text follow-up
 steps in a group. With privacy mode off, the bot sees every message in the group, which is why
 `createBot.ts`'s wizard fallback ("Not sure what you mean") only fires in DMs — firing it on
-every plain-text group message would spam ordinary chatter.
+every plain-text group message would spam ordinary chatter. Issue #52 extended the same
+don't-spam-the-group rule to two holes that were left open when it was first applied: an
+unrecognized slash command in a group now only draws a reply when it isn't explicitly addressed
+to a different bot (`/cmd@other_bot`), and a bare `@bot` mention with no recognised intent
+phrase now only draws a reply when the mention leads the message — an embedded, glancing mention
+(`thanks @bot !`) stays silent, same as unmentioned chatter.
 
 **Accepted tradeoff**: task titles, descriptions, and notes now post publicly into the group
 chat whenever a command is run there (e.g. `/task 3`, `/note 3 ...`). This was an explicit,

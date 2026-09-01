@@ -55,4 +55,19 @@ describe("parseMentionTrigger", () => {
       kind: "none",
     });
   });
+
+  it("returns unrecognized for a leading mention with no intent phrase (issue #52, F7)", () => {
+    expect(parseMentionTrigger(`@${BOT} how's it going`, BOT)).toEqual({ kind: "unrecognized" });
+  });
+
+  it("returns none for an embedded mention with no intent phrase (issue #52, F7)", () => {
+    expect(parseMentionTrigger(`thanks @${BOT} !`, BOT)).toEqual({ kind: "none" });
+  });
+
+  it("still returns addtask for an embedded mention followed by an intent phrase", () => {
+    expect(parseMentionTrigger(`hey @${BOT} pls work on fix the login`, BOT)).toEqual({
+      kind: "addtask",
+      args: "fix the login",
+    });
+  });
 });
