@@ -14,7 +14,7 @@ import {
 export interface AssignTaskInput {
   assigneeUsername: string;
   title: string;
-  description: string;
+  description?: string;
   dueDate: string; // ISO yyyy-MM-dd, already resolved by the bot's date parser
 }
 
@@ -34,33 +34,42 @@ export interface InternCompletionStats {
  * entirely from existing task fields — no new tracking/columns. See the
  * per-field doc comments on `getStats` for the exact definitions used. */
 export interface CohortStats {
-  /** Approved-task count per known intern in the cohort, including interns
-   * with zero, sorted by username. */
+  /** `done`-task count per known roster member in the cohort, including
+   * members with zero — covers every roster member, not just interns,
+   * since assignment is open to the whole roster (issue #27/#28). Sorted
+   * by username. */
   completedPerIntern: InternCompletionStats[];
-  /** Approved / (all non-Cancelled tasks) for the cohort. 0 when there are
-   * no countable tasks. Cancelled tasks are excluded entirely (PRD §4). */
+  /** done / (all tasks) for the cohort. 0 when there are no tasks at all.
+   * There is no more `Cancelled` status to exclude from the denominator
+   * (issue #27). */
   completionRate: number;
-  /** Average hours between createdAt and updatedAt for tasks *currently* in
-   * Submitted status. This is a best-effort approximation: `updatedAt` is a
-   * single last-write-wins timestamp, not a status-change history, so it
-   * only reflects the actual submission instant for tasks that haven't been
-   * edited or reviewed since — which is exactly the currently-Submitted
-   * subset. `null` when there's no such data yet. */
+  /** Average hours between createdAt and updatedAt for tasks *currently*
+   * in `in_review` status. This is a best-effort approximation:
+   * `updatedAt` is a single last-write-wins timestamp, not a status-change
+   * history, so it only reflects the actual submission instant for tasks
+   * that haven't been edited or reviewed since — which is exactly the
+   * currently-`in_review` subset. `null` when there's no such data yet. */
   averageTimeToSubmitHours: number | null;
-  /** Count of tasks Approved within the last 7 days. Reliable because
-   * `editTask` refuses to touch a task once Approved, so `updatedAt` on an
-   * Approved task is frozen at the moment it was approved. */
+  /** Count of tasks marked `done` within the last 7 days, taken from
+   * `updatedAt`. Since `done` is now reopenable (the Approved edit-lock is
+   * gone, issue #27), a task's `updatedAt` on a currently-`done` task is
+   * only reliable as "last time anything about it changed", not
+   * necessarily the moment it was marked done — an accepted approximation
+   * consistent with "done" being a claim rather than a verified fact. */
   completedThisWeek: number;
 }
 
 const MS_PER_HOUR = 60 * 60 * 1000;
 const MS_PER_WEEK = 7 * 24 * MS_PER_HOUR;
 
+/** Every status except `done` — drives `/mytasks` (issue #28's redefinition
+ * of the old OPEN_STATUSES, which enumerated the gate-era open statuses). */
 const OPEN_STATUSES: TaskStatus[] = [
-  "Assigned",
-  "InProgress",
-  "Submitted",
-  "NeedsRevision",
+  "backlog",
+  "todo",
+  "in_progress",
+  "in_review",
+  "blocked",
 ];
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -83,6 +92,23 @@ function stripVersion(record: TaskRecord): Task {
   return task;
 }
 
+/** Applies the `previous_status` lifecycle rules (issue #27) to a status
+ * transition, mutating `task` in place: written only on entry to
+ * `blocked`, cleared (along with `blockedReason`) on every exit from
+ * `blocked`, and never overwritten by re-blocking an already-blocked task. */
+function transitionStatus(task: Task, newStatus: TaskStatus): void {
+  const wasBlocked = task.status === "blocked";
+  const enteringBlocked = newStatus === "blocked" && !wasBlocked;
+  const exitingBlocked = wasBlocked && newStatus !== "blocked";
+  if (enteringBlocked) {
+    task.previousStatus = task.status;
+  } else if (exitingBlocked) {
+    task.previousStatus = null;
+    task.blockedReason = null;
+  }
+  task.status = newStatus;
+}
+
 /**
  * The task-service layer: every business rule in the system lives here as a
  * plain function, independent of Telegram/HTTP. Both the bot layer and the
@@ -95,6 +121,13 @@ function stripVersion(record: TaskRecord): Task {
  * conflict (ADR-0006) as an ordinary `ServiceResult` failure instead of a
  * thrown exception, matching how every other business-rule violation in
  * this file is reported.
+ *
+ * ADR-0009 / issue #27: the workflow gate is gone. Any roster member may
+ * set any status on any task, assign to any roster member, and read any
+ * task — all scoped only by cohort, which is a tenancy boundary and stays
+ * enforced everywhere below. The dashboard's higher-up-only *audience*
+ * gate (who the oversight tool is for) is a separate thing and is not
+ * touched here — see `getStats` and `dashboardServer.ts`.
  */
 export class TaskService {
   constructor(
@@ -106,21 +139,15 @@ export class TaskService {
   // ---- Mutations -----------------------------------------------------
 
   async assignTask(caller: Caller, input: AssignTaskInput): Promise<ServiceResult<Task>> {
-    if (caller.role !== "HigherUp") {
-      return fail("Only higher-ups can assign tasks.");
-    }
-
     const assignee = normalizeUsername(input.assigneeUsername);
-    if (!this.roster.isIntern(assignee, caller.cohortId)) {
+    if (!this.roster.isMember(assignee, caller.cohortId)) {
       return fail(
-        `${displayName(assignee)} isn't a known intern in this cohort — tasks can only be assigned to interns.`,
+        `${displayName(assignee)} isn't a known roster member in this cohort.`,
       );
     }
 
     const titleError = requireNonEmpty(input.title, "Title");
     if (titleError) return fail(titleError);
-    const descError = requireNonEmpty(input.description, "Description");
-    if (descError) return fail(descError);
     const dueDateError = requireValidDate(input.dueDate);
     if (dueDateError) return fail(dueDateError);
 
@@ -130,13 +157,13 @@ export class TaskService {
       id,
       cohortId: caller.cohortId,
       title: input.title.trim(),
-      description: input.description.trim(),
+      description: input.description?.trim() ? input.description.trim() : undefined,
       assigneeUsername: assignee,
       assignedByUsername: normalizeUsername(caller.username),
       dueDate: input.dueDate,
-      status: "Assigned",
+      status: "todo",
       notes: [],
-      blocked: false,
+      previousStatus: null,
       blockedReason: null,
       createdAt: now,
       updatedAt: now,
@@ -150,28 +177,15 @@ export class TaskService {
     taskId: number,
     patch: EditTaskInput,
   ): Promise<ServiceResult<Task>> {
-    if (caller.role !== "HigherUp") {
-      return fail("Only higher-ups can edit tasks.");
-    }
-
     const found = await this.mustFindInCallerCohort(caller, taskId);
     if (!found.ok) return fail(found.error);
     const task = found.value;
 
-    if (task.status === "Approved") {
-      return fail(
-        `Task ${taskId} is already Approved and is locked from further edits.`,
-      );
-    }
-    if (task.status === "Cancelled") {
-      return fail(`Task ${taskId} was cancelled and can no longer be edited.`);
-    }
-
     if (patch.assigneeUsername !== undefined) {
       const assignee = normalizeUsername(patch.assigneeUsername);
-      if (!this.roster.isIntern(assignee, caller.cohortId)) {
+      if (!this.roster.isMember(assignee, caller.cohortId)) {
         return fail(
-          `${displayName(assignee)} isn't a known intern in this cohort — tasks can only be assigned to interns.`,
+          `${displayName(assignee)} isn't a known roster member in this cohort.`,
         );
       }
       task.assigneeUsername = assignee;
@@ -182,9 +196,7 @@ export class TaskService {
       task.title = patch.title.trim();
     }
     if (patch.description !== undefined) {
-      const err = requireNonEmpty(patch.description, "Description");
-      if (err) return fail(err);
-      task.description = patch.description.trim();
+      task.description = patch.description.trim() ? patch.description.trim() : undefined;
     }
     if (patch.dueDate !== undefined) {
       const err = requireValidDate(patch.dueDate);
@@ -196,106 +208,27 @@ export class TaskService {
     return this.persist(task);
   }
 
-  async submitTask(caller: Caller, taskId: number): Promise<ServiceResult<Task>> {
-    if (caller.role !== "Intern") {
-      return fail("Only the assigned intern can submit a task.");
-    }
+  /** Sets a task's status directly — no role check, no legal-transition
+   * check: any roster member may set any status on any task in their own
+   * cohort (issue #27/#28). Handles the `previous_status` lifecycle when
+   * `status` is (or was) `blocked`, same as `setBlocked`/`clearBlocked`;
+   * unlike `setBlocked`, a plain `setStatus(..., "blocked")` always records
+   * a null `blockedReason` (the `/update <ref> blocked` path). */
+  async setStatus(
+    caller: Caller,
+    taskId: number,
+    status: TaskStatus,
+  ): Promise<ServiceResult<Task>> {
     const found = await this.mustFindInCallerCohort(caller, taskId);
     if (!found.ok) return fail(found.error);
     const task = found.value;
 
-    if (normalizeUsername(caller.username) !== task.assigneeUsername) {
-      return fail(`Task ${taskId} isn't assigned to you.`);
-    }
-
-    if (task.status === "Cancelled") {
-      return fail(`Task ${taskId} was cancelled and can't be submitted.`);
-    }
-    if (task.status === "Submitted") {
-      return fail(`Task ${taskId} has already been submitted and is awaiting review.`);
-    }
-    if (task.status === "Approved") {
-      return fail(`Task ${taskId} was already approved.`);
-    }
-    if (!["Assigned", "InProgress", "NeedsRevision"].includes(task.status)) {
-      return fail(`Task ${taskId} can't be submitted from its current status (${task.status}).`);
-    }
-
-    task.status = "Submitted";
-    task.updatedAt = this.clock.now().toISOString();
-    return this.persist(task);
-  }
-
-  async approveTask(caller: Caller, taskId: number): Promise<ServiceResult<Task>> {
-    if (caller.role !== "HigherUp") {
-      return fail("Only higher-ups can approve tasks.");
-    }
-    const found = await this.mustFindInCallerCohort(caller, taskId);
-    if (!found.ok) return fail(found.error);
-    const task = found.value;
-
-    if (task.status === "Approved") {
-      return fail(
-        `Task ${taskId} was already approved by ${displayName(caller.username)}.`,
-      );
-    }
-    if (task.status !== "Submitted") {
-      return fail(
-        `Task ${taskId} is still ${task.status}, not yet submitted for review.`,
-      );
-    }
-
-    task.status = "Approved";
-    task.updatedAt = this.clock.now().toISOString();
-    return this.persist(task);
-  }
-
-  async reviseTask(caller: Caller, taskId: number): Promise<ServiceResult<Task>> {
-    if (caller.role !== "HigherUp") {
-      return fail("Only higher-ups can send tasks back for revision.");
-    }
-    const found = await this.mustFindInCallerCohort(caller, taskId);
-    if (!found.ok) return fail(found.error);
-    const task = found.value;
-
-    if (task.status === "Approved") {
-      return fail(`Task ${taskId} was already approved and can't be revised.`);
-    }
-    if (task.status !== "Submitted") {
-      return fail(
-        `Task ${taskId} is still ${task.status}, not yet submitted for review.`,
-      );
-    }
-
-    task.status = "NeedsRevision";
-    task.updatedAt = this.clock.now().toISOString();
-    return this.persist(task);
-  }
-
-  async cancelTask(caller: Caller, taskId: number): Promise<ServiceResult<Task>> {
-    if (caller.role !== "HigherUp") {
-      return fail("Only higher-ups can cancel tasks.");
-    }
-    const found = await this.mustFindInCallerCohort(caller, taskId);
-    if (!found.ok) return fail(found.error);
-    const task = found.value;
-
-    if (task.status === "Cancelled") {
-      return fail(`Task ${taskId} was already cancelled.`);
-    }
-    if (task.status === "Approved") {
-      return fail(`Task ${taskId} is already Approved and can't be cancelled.`);
-    }
-
-    task.status = "Cancelled";
+    transitionStatus(task, status);
     task.updatedAt = this.clock.now().toISOString();
     return this.persist(task);
   }
 
   async addNote(caller: Caller, taskId: number, text: string): Promise<ServiceResult<Task>> {
-    if (caller.role !== "HigherUp") {
-      return fail("Only higher-ups can add notes.");
-    }
     const found = await this.mustFindInCallerCohort(caller, taskId);
     if (!found.ok) return fail(found.error);
     const task = found.value;
@@ -315,100 +248,62 @@ export class TaskService {
     return this.persist(task);
   }
 
+  /** Sets a task to `blocked` and records an optional reason — the
+   * `/blocked <ref> <reason>` path. Any roster member may block any task in
+   * their own cohort (issue #27/#28). `previous_status` is stashed only on
+   * entry to `blocked`; re-blocking an already-blocked task leaves it
+   * untouched. */
   async setBlocked(
     caller: Caller,
     taskId: number,
-    reason: string,
+    reason?: string,
   ): Promise<ServiceResult<Task>> {
     const found = await this.mustFindInCallerCohort(caller, taskId);
     if (!found.ok) return fail(found.error);
     const task = found.value;
 
-    const permError = this.requireCanTouchBlockedFlag(caller, task);
-    if (permError) return fail(permError);
-
-    if (task.status === "Cancelled" || task.status === "Approved") {
-      return fail(
-        `Task ${taskId} is ${task.status} and can no longer be flagged as blocked.`,
-      );
-    }
-
-    const err = requireNonEmpty(reason, "Blocked reason");
-    if (err) return fail(err);
-
-    task.blocked = true;
-    task.blockedReason = reason.trim();
+    transitionStatus(task, "blocked");
+    task.blockedReason = reason?.trim() ? reason.trim() : null;
     task.updatedAt = this.clock.now().toISOString();
     return this.persist(task);
   }
 
+  /** Restores a blocked task to its `previous_status`, falling back to
+   * `todo` when that's null (issue #27/#28) — the `/unblock` path. Any
+   * roster member may unblock any task in their own cohort. */
   async clearBlocked(caller: Caller, taskId: number): Promise<ServiceResult<Task>> {
     const found = await this.mustFindInCallerCohort(caller, taskId);
     if (!found.ok) return fail(found.error);
     const task = found.value;
 
-    const permError = this.requireCanTouchBlockedFlag(caller, task);
-    if (permError) return fail(permError);
-
-    if (!task.blocked) {
+    if (task.status !== "blocked") {
       return fail(`Task ${taskId} isn't currently marked blocked.`);
     }
 
-    task.blocked = false;
+    task.status = task.previousStatus ?? "todo";
+    task.previousStatus = null;
     task.blockedReason = null;
     task.updatedAt = this.clock.now().toISOString();
     return this.persist(task);
   }
 
-  private requireCanTouchBlockedFlag(
-    caller: Caller,
-    task: Task,
-  ): string | undefined {
-    if (caller.role === "HigherUp") return undefined;
-    if (normalizeUsername(caller.username) !== task.assigneeUsername) {
-      return `Task ${task.id} isn't assigned to you.`;
-    }
-    return undefined;
-  }
-
   // ---- Reads ------------------------------------------------------------
 
-  /** Full detail view. Auto-transitions Assigned -> InProgress the first
-   * time the assigned intern views it (PRD §4). Interns other than the
-   * assignee cannot view another intern's task detail (PRD §5). */
+  /** Full detail view. A pure read: never writes (issue #27/#28 — the old
+   * Assigned -> InProgress auto-transition-on-view is gone, and so is the
+   * "an intern can only view their own task" restriction, since read
+   * access is open to the whole cohort). */
   async getTask(caller: Caller, taskId: number): Promise<ServiceResult<TaskWithFlags>> {
     const found = await this.mustFindInCallerCohort(caller, taskId);
     if (!found.ok) return fail(found.error);
-    const task = found.value;
-
-    if (
-      caller.role === "Intern" &&
-      normalizeUsername(caller.username) !== task.assigneeUsername
-    ) {
-      return fail(
-        `Task ${taskId} isn't assigned to you. Try /alltasks for the team overview.`,
-      );
-    }
-
-    if (
-      caller.role === "Intern" &&
-      normalizeUsername(caller.username) === task.assigneeUsername &&
-      task.status === "Assigned"
-    ) {
-      task.status = "InProgress";
-      task.updatedAt = this.clock.now().toISOString();
-      const persisted = await this.persist(task);
-      if (!persisted.ok) return fail(persisted.error);
-      return ok(this.withFlags(persisted.value));
-    }
-
-    return ok(this.withFlags(task));
+    return ok(this.withFlags(found.value));
   }
 
+  /** Caller's own open (non-`done`) tasks. Open to any roster member — a
+   * `HigherUp` holding an assigned task gets it back from here too, now
+   * that assignment isn't intern-only (issue #28's second, separate change
+   * to this method). */
   async listMyTasks(caller: Caller): Promise<ServiceResult<TaskWithFlags[]>> {
-    if (caller.role !== "Intern") {
-      return fail("Only interns have a personal /mytasks list.");
-    }
     const all = await this.store.listTasksByCohort(caller.cohortId);
     const mine = all.filter(
       (t) =>
@@ -423,64 +318,57 @@ export class TaskService {
     return ok(all.map((t) => this.withFlags(t)));
   }
 
+  /** The review queue: tasks in `in_review`, cohort-wide. Open to any
+   * roster member (issue #28 — drops the old higher-up-only gate). */
   async listPending(caller: Caller): Promise<ServiceResult<TaskWithFlags[]>> {
-    if (caller.role !== "HigherUp") {
-      return fail("Only higher-ups have a review queue.");
-    }
     const all = await this.store.listTasksByCohort(caller.cohortId);
-    const pending = all.filter((t) => t.status === "Submitted");
+    const pending = all.filter((t) => t.status === "in_review");
     return ok(pending.map((t) => this.withFlags(t)));
   }
 
-  /** Blocked-flag view: cohort-wide for higher-ups (used by the daily/weekly
-   * digests, issue #2, and the on-demand /blocked command, issue #6), scoped
-   * to just the caller's own tasks for interns — the same
-   * scope-by-role-not-reject-interns shape as listBacklog. */
+  /** Blocked-status view, cohort-wide for every caller regardless of role
+   * (issue #28 drops the old scope-by-role-not-reject-interns shape — every
+   * roster member sees the whole cohort's blocked tasks). */
   async listBlocked(caller: Caller): Promise<ServiceResult<TaskWithFlags[]>> {
     const all = await this.store.listTasksByCohort(caller.cohortId);
-    const scoped =
-      caller.role === "Intern"
-        ? all.filter(
-            (t) => t.assigneeUsername === normalizeUsername(caller.username),
-          )
-        : all;
-    const blocked = scoped.filter((t) => t.blocked);
+    const blocked = all.filter((t) => t.status === "blocked");
     return ok(blocked.map((t) => this.withFlags(t)));
   }
 
   /** Cohort-wide stats for the dashboard's stats view (issue #4). Higher-up
-   * only, same audience gate as the dashboard itself. See `CohortStats` for
-   * exact field definitions and the judgment calls behind them. */
+   * only — this is the dashboard's audience gate, not a workflow gate, and
+   * is unrelated to the workflow gates removed elsewhere in this file. See
+   * `CohortStats` for exact field definitions and the judgment calls
+   * behind them. */
   async getStats(caller: Caller): Promise<ServiceResult<CohortStats>> {
     if (caller.role !== "HigherUp") {
       return fail("Only higher-ups can view cohort stats.");
     }
 
     const all = await this.store.listTasksByCohort(caller.cohortId);
-    const countable = all.filter((t) => t.status !== "Cancelled");
-    const approved = countable.filter((t) => t.status === "Approved");
+    const done = all.filter((t) => t.status === "done");
 
-    const interns = this.roster
+    const members = this.roster
       .all()
-      .filter((e) => e.role === "Intern" && e.cohortId === caller.cohortId)
+      .filter((e) => e.cohortId === caller.cohortId)
       .map((e) => e.username)
       .sort();
-    const completedByIntern = new Map<string, number>();
-    for (const username of interns) completedByIntern.set(username, 0);
-    for (const task of approved) {
-      completedByIntern.set(
+    const completedByMember = new Map<string, number>();
+    for (const username of members) completedByMember.set(username, 0);
+    for (const task of done) {
+      completedByMember.set(
         task.assigneeUsername,
-        (completedByIntern.get(task.assigneeUsername) ?? 0) + 1,
+        (completedByMember.get(task.assigneeUsername) ?? 0) + 1,
       );
     }
-    const completedPerIntern: InternCompletionStats[] = [...completedByIntern.entries()]
+    const completedPerIntern: InternCompletionStats[] = [...completedByMember.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([username, completed]) => ({ username, completed }));
 
-    const completionRate = countable.length === 0 ? 0 : approved.length / countable.length;
+    const completionRate = all.length === 0 ? 0 : done.length / all.length;
 
-    const submitted = countable.filter((t) => t.status === "Submitted");
-    const timesToSubmitHours = submitted.map(
+    const inReview = all.filter((t) => t.status === "in_review");
+    const timesToSubmitHours = inReview.map(
       (t) => (Date.parse(t.updatedAt) - Date.parse(t.createdAt)) / MS_PER_HOUR,
     );
     const averageTimeToSubmitHours =
@@ -489,7 +377,7 @@ export class TaskService {
         : timesToSubmitHours.reduce((sum, h) => sum + h, 0) / timesToSubmitHours.length;
 
     const now = this.clock.now().getTime();
-    const completedThisWeek = approved.filter(
+    const completedThisWeek = done.filter(
       (t) => now - Date.parse(t.updatedAt) <= MS_PER_WEEK,
     ).length;
 
@@ -501,17 +389,11 @@ export class TaskService {
     });
   }
 
+  /** Overdue tasks, cohort-wide for every caller regardless of role
+   * (issue #28 drops the old scope-by-role-not-reject-interns shape). */
   async listBacklog(caller: Caller): Promise<ServiceResult<TaskWithFlags[]>> {
     const all = await this.store.listTasksByCohort(caller.cohortId);
-    const scoped =
-      caller.role === "Intern"
-        ? all.filter(
-            (t) => t.assigneeUsername === normalizeUsername(caller.username),
-          )
-        : all;
-    const overdue = scoped
-      .map((t) => this.withFlags(t))
-      .filter((t) => t.overdue);
+    const overdue = all.map((t) => this.withFlags(t)).filter((t) => t.overdue);
     return ok(overdue);
   }
 
