@@ -8,6 +8,15 @@ import { InMemoryWizardStateStore } from "../storage/inMemoryWizardStateStore.js
 import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
 import { createBot, type CreatedBot } from "./createBot.js";
 
+beforeEach(() => {
+  vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-08-31T02:00:00.000Z"));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 const COHORT = "cohort-5";
 
 function makeRoster() {
