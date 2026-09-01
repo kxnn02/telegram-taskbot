@@ -549,6 +549,10 @@ export function createBot(options: CreateBotOptions): CreatedBot {
           return;
         }
         const statusText = item.statusText ?? "";
+        if (statusText.trim().length === 0) {
+          await ctx.reply(UPDATE_USAGE);
+          return;
+        }
         const status = parseStatusWord(statusText);
         if (!status) {
           await ctx.reply(

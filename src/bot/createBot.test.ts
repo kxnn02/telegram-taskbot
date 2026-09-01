@@ -2156,6 +2156,25 @@ describe("/update <ref> <status> — generic status setter (issue #27/#31)", () 
     expect(text).toMatch(/done/);
   });
 
+  it("/update <ref> with no status gets the usage message, not an empty-quotes error (F12)", async () => {
+    const { taskId, higherUpId } = await seedTask();
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/update ${taskId}`));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/^Usage: \/update/);
+    expect(text).not.toContain('""');
+  });
+
+  it("/update <ref> with a real unrecognised word still names it (F12 regression guard)", async () => {
+    const { taskId, higherUpId } = await seedTask();
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/update ${taskId} finished`));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toBe(
+      'I don\'t recognize "finished" as a status. Valid statuses: backlog, todo, in progress, in review, blocked, done',
+    );
+  });
+
   it("an invalid ref gets a usage message", async () => {
     const higherUpId = nextUserId();
     await registerCaller(testBot, higherUpId, "carla");
