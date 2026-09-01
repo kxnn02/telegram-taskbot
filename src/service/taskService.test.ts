@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { InMemoryTaskStore } from "../storage/inMemoryTaskStore.js";
 import { FixedClock } from "../domain/clock.js";
 import { Roster } from "../domain/roster.js";
@@ -123,6 +123,33 @@ describe("assignTask", () => {
     const second = await assign(service, { assigneeUsername: "bob" });
     expect(first.ok && first.value.id).toBe(1);
     expect(second.ok && second.value.id).toBe(2);
+  });
+
+  it("collapses newlines in the title so list views can't break (issue #59/H13)", async () => {
+    const { service } = makeService();
+    const result = await assign(service, { title: "first line\nsecond line" });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.title).toBe("first line second line");
+  });
+
+  it("collapses tabs and runs of spaces in the title to single spaces (issue #59/H13)", async () => {
+    const { service } = makeService();
+    const result = await assign(service, { title: "first\t\tline   second" });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.title).toBe("first line second");
+  });
+
+  it("still rejects a whitespace-only title rather than collapsing it to empty (issue #59/H13)", async () => {
+    const { service } = makeService();
+    const result = await assign(service, { title: "  \n " });
+    expect(result.ok).toBe(false);
+  });
+
+  it("preserves newlines in a multi-line description (issue #59/H13)", async () => {
+    const { service } = makeService();
+    const result = await assign(service, { description: "line one\nline two" });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.description).toBe("line one\nline two");
   });
 });
 
@@ -261,6 +288,17 @@ describe("editTask", () => {
     const result = await service.editTask(carla, created.value.id, { assigneeUsername: "dave" });
     expect(result.ok).toBe(true);
   });
+
+  it("collapses newlines in an edited title (issue #59/H13)", async () => {
+    const { service } = makeService();
+    const created = await assign(service);
+    if (!created.ok) throw new Error("setup failed");
+    const result = await service.editTask(carla, created.value.id, {
+      title: "first line\nsecond line",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.title).toBe("first line second line");
+  });
 });
 
 describe("addNote", () => {
@@ -283,6 +321,35 @@ describe("addNote", () => {
     if (!created.ok) throw new Error("setup failed");
     const result = await service.addNote(carla, created.value.id, "   ");
     expect(result.ok).toBe(false);
+  });
+
+  it("does not store the note when persist reports a conflict (issue #59/H2)", async () => {
+    const { service, store } = makeService();
+    const created = await assign(service);
+    if (!created.ok) throw new Error("setup failed");
+    const insertNoteSpy = vi.spyOn(store, "insertNote");
+    vi.spyOn(store, "updateTask").mockResolvedValue({ outcome: "conflict" });
+
+    const result = await service.addNote(alice, created.value.id, "first attempt");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/changed by someone else/i);
+    expect(insertNoteSpy).not.toHaveBeenCalled();
+  });
+
+  it("leaves zero notes stored after two failed retries against a conflicting store (issue #59/H2)", async () => {
+    const { service, store } = makeService();
+    const created = await assign(service);
+    if (!created.ok) throw new Error("setup failed");
+    vi.spyOn(store, "updateTask").mockResolvedValue({ outcome: "conflict" });
+
+    await service.addNote(alice, created.value.id, "first attempt");
+    await service.addNote(alice, created.value.id, "first attempt");
+
+    vi.restoreAllMocks();
+    const stored = await service.getTask(alice, created.value.id);
+    expect(stored.ok).toBe(true);
+    if (stored.ok) expect(stored.value.notes).toHaveLength(0);
   });
 });
 
