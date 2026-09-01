@@ -47,6 +47,15 @@ Supabase/roster/group → call Telegram's API to repoint the webhook from the dr
 production → confirm the dry-run URL stops receiving traffic. This is manual because reusing one
 bot token means only one webhook URL can be active at a time — there is no automatic hand-off.
 
+**Branch flow, pre-cutover**: because `dry-run` is the only branch actually exercised against
+live Telegram traffic (the dump group), every feature branch merges into `dry-run` first — not
+`main`. Only after it's been exercised there does `dry-run` merge into `main`. Landing on `main`
+first and periodically catching `dry-run` up (as happened for a stretch before this was written
+down) inverts the safety net: it ships untested-against-Telegram code into the branch that will
+become production, with `dry-run` only proving itself right after the fact. `main` stays the
+integration point that eventually gets cut over to production; `dry-run` stays the gate it has
+to pass through first.
+
 ## Consequences
 
 **Accepted tradeoff**: two separate Supabase projects would have made a dry-run-code bug
