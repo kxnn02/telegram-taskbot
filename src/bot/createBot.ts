@@ -174,13 +174,18 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       text &&
       text.startsWith("/") &&
       userId !== undefined &&
-      !text.toLowerCase().startsWith("/cancel") &&
-      (await wizards.has(userId))
+      !text.toLowerCase().startsWith("/cancel")
     ) {
-      await wizards.cancel(userId);
-      await ctx.reply(
-        "Cancelled your in-progress form since you sent a new command.",
-      );
+      const state = await wizards.get(userId);
+      if (
+        state &&
+        (state.data.chatId === undefined || state.data.chatId === ctx.chat?.id)
+      ) {
+        await wizards.cancel(userId);
+        await ctx.reply(
+          "Cancelled your in-progress form since you sent a new command.",
+        );
+      }
     }
     await next();
   });
@@ -795,7 +800,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     withCaller(async (ctx, caller) => {
       const raw = matchToString(ctx.match).trim();
       if (raw.length === 0) {
-        await wizards.start(ctx.from!.id, "assign");
+        await wizards.start(ctx.from!.id, "assign", { chatId: ctx.chat!.id });
         await ctx.reply(
           "Who is this task for? Type @ to pick from Telegram's suggestions, or just send their username.",
         );
@@ -826,7 +831,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       }
 
       if (rest.length === 0) {
-        await wizards.start(ctx.from!.id, "edit", { taskId: id });
+        await wizards.start(ctx.from!.id, "edit", { taskId: id, chatId: ctx.chat!.id });
         const keyboard = new InlineKeyboard()
           .text("Assignee", "editfield:assignee")
           .text("Title", "editfield:title")
@@ -897,6 +902,10 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     const state = await wizards.get(userId);
     if (!state || state.step !== "awaiting_field_choice") {
       await ctx.answerCallbackQuery({ text: "That form has expired." });
+      return;
+    }
+    if (state.data.chatId !== undefined && state.data.chatId !== ctx.chat?.id) {
+      await ctx.answerCallbackQuery({ text: "That form was started in another chat." });
       return;
     }
     const resolved = await requireCaller(userId);
@@ -973,7 +982,17 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       return;
     }
     const userId = ctx.from.id;
-    const state = await wizards.get(userId);
+    const rawState = await wizards.get(userId);
+    // Chat-scoped wizards (issue #52/#53, finding F3): a wizard started in
+    // one chat must not consume unrelated messages the same user sends in
+    // another chat. Falling through to the no-wizard path below — rather
+    // than replying or cancelling — leaves the form untouched in its own
+    // chat. `chatId === undefined` matches any chat, for wizard rows
+    // already in the database when this deploys.
+    const state =
+      rawState && (rawState.data.chatId === undefined || rawState.data.chatId === ctx.chat.id)
+        ? rawState
+        : undefined;
     if (!state) {
       // Mention trigger (issue #34): checked ahead of the DM-only fallback
       // below, since it's meant to fire in group chatter too — but only on
@@ -1116,6 +1135,10 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     const state = await wizards.get(userId);
     if (!state || state.step !== "awaiting_due_date_confirm") {
       await ctx.answerCallbackQuery({ text: "That form has expired." });
+      return;
+    }
+    if (state.data.chatId !== undefined && state.data.chatId !== ctx.chat?.id) {
+      await ctx.answerCallbackQuery({ text: "That form was started in another chat." });
       return;
     }
     const resolved = await requireCaller(userId);
