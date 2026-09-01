@@ -9,6 +9,7 @@ import type { InternDailyCounts } from "../notifications/digestFormat.js";
 import { buildStandup, formatStandup } from "./standup.js";
 
 const COHORT = "cohort-5";
+const NOW = new Date("2026-09-01T02:00:00.000Z"); // Tuesday
 
 function makeRoster() {
   return new Roster([
@@ -24,31 +25,65 @@ const alice: Caller = { username: "alice", role: "Intern", cohortId: COHORT };
 function makeService() {
   const store = new InMemoryTaskStore();
   const roster = makeRoster();
-  const clock = new FixedClock(new Date("2026-08-31T02:00:00.000Z"));
+  const clock = new FixedClock(NOW);
   return { service: new TaskService(store, roster, clock), roster };
 }
 
-describe("buildStandup (issue #33)", () => {
-  it("includes every roster member in the cohort, even ones with no tasks", async () => {
-    const { service, roster } = makeService();
-    const entries = await buildStandup(service, roster, carla);
-    expect(entries.map((e) => e.username).sort()).toEqual(["alice", "bob", "carla"]);
-  });
-
-  it("groups each member's non-done tasks under their entry, with titles", async () => {
-    const { service, roster } = makeService();
+describe("buildStandup (standup redesign — summary + detail)", () => {
+  it("counts every status cohort-wide", async () => {
+    const { service } = makeService();
     await service.assignTask(carla, {
       assigneeUsername: "alice",
       title: "Write the onboarding doc",
       dueDate: "2026-09-05",
     });
-    const entries = await buildStandup(service, roster, carla);
-    const aliceEntry = entries.find((e) => e.username === "alice");
-    expect(aliceEntry?.tasks.map((t) => t.title)).toEqual(["Write the onboarding doc"]);
+    const created = await service.assignTask(carla, {
+      assigneeUsername: "bob",
+      title: "Fix the login bug",
+      dueDate: "2026-09-05",
+    });
+    if (!created.ok) throw new Error("setup failed");
+    await service.setStatus(carla, created.value.id, "in_review");
+
+    const report = await buildStandup(service, carla, NOW);
+    expect(report.counts.todo).toBe(1);
+    expect(report.counts.in_review).toBe(1);
+    expect(report.counts.done).toBe(0);
   });
 
-  it("excludes done tasks", async () => {
-    const { service, roster } = makeService();
+  it("groups each non-done status's tasks by assignee, skipping members with none in that status", async () => {
+    const { service } = makeService();
+    await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "Write the onboarding doc",
+      dueDate: "2026-09-05",
+    });
+
+    const report = await buildStandup(service, carla, NOW);
+    const todoSection = report.details.find((d) => d.status === "todo");
+    expect(todoSection?.members.map((m) => m.username)).toEqual(["alice"]);
+
+    const reviewSection = report.details.find((d) => d.status === "in_review");
+    expect(reviewSection).toBeUndefined();
+  });
+
+  it("carries task titles in the detail groups, unlike the counts-only digest", async () => {
+    const { service } = makeService();
+    await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "Write the onboarding doc",
+      dueDate: "2026-09-05",
+    });
+
+    const report = await buildStandup(service, carla, NOW);
+    const todoSection = report.details.find((d) => d.status === "todo");
+    expect(todoSection?.members[0]?.tasks.map((t) => t.title)).toEqual([
+      "Write the onboarding doc",
+    ]);
+  });
+
+  it("lists tasks marked done within the past 7 days under doneThisWeek", async () => {
+    const { service } = makeService();
     const created = await service.assignTask(carla, {
       assigneeUsername: "alice",
       title: "finished thing",
@@ -56,40 +91,111 @@ describe("buildStandup (issue #33)", () => {
     });
     if (!created.ok) throw new Error("setup failed");
     await service.setStatus(alice, created.value.id, "done");
-    const entries = await buildStandup(service, roster, carla);
-    const aliceEntry = entries.find((e) => e.username === "alice");
-    expect(aliceEntry?.tasks).toEqual([]);
+
+    const report = await buildStandup(service, carla, NOW);
+    expect(report.doneThisWeek.map((t) => t.title)).toEqual(["finished thing"]);
+    expect(report.counts.done).toBe(1);
+  });
+
+  it("excludes a done task older than 7 days from doneThisWeek but still counts it", async () => {
+    const store = new InMemoryTaskStore();
+    const roster = makeRoster();
+    const oldService = new TaskService(
+      store,
+      roster,
+      new FixedClock(new Date("2026-08-01T00:00:00.000Z")),
+    );
+    const created = await oldService.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "old finished thing",
+      dueDate: "2026-08-05",
+    });
+    if (!created.ok) throw new Error("setup failed");
+    await oldService.setStatus(alice, created.value.id, "done");
+
+    // buildStandup only needs the stored task, not the clock that wrote it,
+    // so re-read through a service running on today's clock.
+    const nowService = new TaskService(store, roster, new FixedClock(NOW));
+    const report = await buildStandup(nowService, carla, NOW);
+    expect(report.doneThisWeek).toEqual([]);
+    expect(report.counts.done).toBe(1);
+  });
+
+  it("carries the caller's cohortId and the report date through untouched", async () => {
+    const { service } = makeService();
+    const report = await buildStandup(service, carla, NOW);
+    expect(report.cohortId).toBe(COHORT);
+    expect(report.today).toEqual(NOW);
   });
 });
 
-describe("formatStandup (issue #33 — must not reuse the digest's title-free formatter or type)", () => {
-  it("may include task titles, unlike the counts-only digest", async () => {
-    const { service, roster } = makeService();
+describe("formatStandup (standup redesign)", () => {
+  it("renders a cohort/date header derived from the cohortId", async () => {
+    const { service } = makeService();
+    const report = await buildStandup(service, carla, NOW);
+    const text = formatStandup(report);
+    expect(text).toContain("Cohort 5");
+    expect(text).toContain("Tuesday, September 1, 2026");
+  });
+
+  it("renders an overview line for every status, even ones at zero", async () => {
+    const { service } = makeService();
+    const report = await buildStandup(service, carla, NOW);
+    const text = formatStandup(report);
+    expect(text).toMatch(/In progress: 0/);
+    expect(text).toMatch(/In review: 0/);
+    expect(text).toMatch(/To do: 0/);
+    expect(text).toMatch(/Backlog: 0/);
+    expect(text).toMatch(/Blocked: 0/);
+    expect(text).toMatch(/Done: 0/);
+  });
+
+  it("includes task titles in the detail section, unlike the counts-only digest", async () => {
+    const { service } = makeService();
     await service.assignTask(carla, {
       assigneeUsername: "alice",
       title: "Write the onboarding doc",
       dueDate: "2026-09-05",
     });
-    const entries = await buildStandup(service, roster, carla);
-    const text = formatStandup(entries);
+    const report = await buildStandup(service, carla, NOW);
+    const text = formatStandup(report);
     expect(text).toContain("Write the onboarding doc");
   });
 
-  it("says no open tasks for a member with none", () => {
-    const text = formatStandup([{ username: "alice", tasks: [] }]);
-    expect(text).toContain("@alice: no open tasks");
+  it("does not print a detail section for a status with nothing in it", async () => {
+    const { service } = makeService();
+    const report = await buildStandup(service, carla, NOW);
+    const text = formatStandup(report);
+    expect(text).not.toMatch(/In progress \(/);
   });
 
-  it("says nothing to report when the cohort has no roster members", () => {
-    expect(formatStandup([])).toMatch(/no roster members/i);
+  it("says nothing was completed this week when doneThisWeek is empty", async () => {
+    const { service } = makeService();
+    const report = await buildStandup(service, carla, NOW);
+    const text = formatStandup(report);
+    expect(text).toMatch(/no tasks completed this week/i);
+  });
+
+  it("lists a completed task's title under Done this week", async () => {
+    const { service } = makeService();
+    const created = await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "finished thing",
+      dueDate: "2026-09-05",
+    });
+    if (!created.ok) throw new Error("setup failed");
+    await service.setStatus(alice, created.value.id, "done");
+    const report = await buildStandup(service, carla, NOW);
+    const text = formatStandup(report);
+    expect(text).toMatch(/Done this week/i);
+    expect(text).toContain("finished thing");
   });
 
   it("is a distinct formatter from the digest's formatGroupDailySummary", () => {
     expect(formatStandup).not.toBe(formatGroupDailySummary as unknown as typeof formatStandup);
   });
 
-  it("standup's own type carries a task title field the digest's InternDailyCounts structurally has no room for", () => {
-    // InternDailyCounts is counts-only: username/onTrack/overdue/blocked, no title field.
+  it("standup's own detail shape carries a task title field the digest's InternDailyCounts structurally has no room for", () => {
     const digestShape: InternDailyCounts = { username: "alice", onTrack: 1, overdue: 0, blocked: 0 };
     expect(Object.keys(digestShape)).not.toContain("tasks");
   });
