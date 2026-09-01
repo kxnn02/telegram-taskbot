@@ -1,4 +1,5 @@
 import type { Bot, InlineKeyboard } from "grammy";
+import { normalizeUsername } from "../domain/roster.js";
 import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
 
 /**
@@ -7,6 +8,7 @@ import type { RegistrationStorePort } from "../storage/registrationStorePort.js"
  * prior message from the recipient, which is exactly why registration is
  * required (PRD §7/§12). This is deliberately "best effort, never throws":
  * a notification failure should never break the mutation that triggered it.
+ * Returns whether a message was actually sent.
  */
 export async function notifyUser(
   bot: Bot,
@@ -14,16 +16,19 @@ export async function notifyUser(
   username: string,
   text: string,
   keyboard?: InlineKeyboard,
-): Promise<void> {
-  const telegramId = await registrations.findTelegramId(username);
-  if (!telegramId) return;
+): Promise<boolean> {
   try {
+    const telegramId = await registrations.findTelegramId(username);
+    if (!telegramId) return false;
     await bot.api.sendMessage(telegramId, text, {
       reply_markup: keyboard,
     });
+    return true;
   } catch {
-    // Best-effort: e.g. the user blocked the bot. Never let a notification
-    // failure surface as an error to whoever triggered the mutation.
+    // Best-effort: e.g. the user blocked the bot, or the lookup itself
+    // failed. Never let a notification failure surface as an error to
+    // whoever triggered the mutation.
+    return false;
   }
 }
 
@@ -42,8 +47,11 @@ export async function notifyStatusChange(
   actorUsername: string,
   text: string,
 ): Promise<void> {
-  const recipients = new Set([task.assigneeUsername, task.assignedByUsername]);
-  recipients.delete(actorUsername);
+  const recipients = new Set([
+    normalizeUsername(task.assigneeUsername),
+    normalizeUsername(task.assignedByUsername),
+  ]);
+  recipients.delete(normalizeUsername(actorUsername));
   for (const username of recipients) {
     await notifyUser(bot, registrations, username, text);
   }

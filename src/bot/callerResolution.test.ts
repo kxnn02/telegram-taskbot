@@ -50,4 +50,16 @@ describe("resolveCaller — cohort binding", () => {
     const result = await resolveCaller(TELEGRAM_ID, registrations, ambiguousRoster(), "cohort-5");
     expect(result).toEqual({ status: "not_started" });
   });
+
+  it("returns a lowercase caller.username even when the roster entry's casing is mixed-case (issue #54/F4)", async () => {
+    const registrations = new InMemoryRegistrationStore();
+    await registrations.register(TELEGRAM_ID, "alice");
+    const roster = new Roster([{ username: "Alice", role: "Intern", cohortId: "cohort-5" }]);
+
+    const result = await resolveCaller(TELEGRAM_ID, registrations, roster, "cohort-5");
+    expect(result).toEqual({
+      status: "ok",
+      caller: { username: "alice", role: "Intern", cohortId: "cohort-5" },
+    });
+  });
 });
