@@ -1,6 +1,7 @@
 import { getDashboardDeps } from "../../src/web/nextDashboardDeps";
 import { CenteredShell } from "../_components/Shell";
 import { Logo } from "../_components/icons";
+import { TelegramLoginWidget } from "../_components/TelegramLoginWidget";
 
 /**
  * Login page (Phase 6.1, issue #17 — step 3): faithful port of
@@ -51,16 +52,7 @@ export default async function LoginPage({
         <div style={{ font: "var(--md3-body-md)", color: "#64748B", marginBottom: 20 }}>
           Higher-ups only. Interns manage their tasks in Telegram.
         </div>
-        <div style={{ display: "flex", justifyContent: "center" }}>
-          <script
-            async
-            src="https://telegram.org/js/telegram-widget.js?22"
-            data-telegram-login={deps.botUsername}
-            data-size="large"
-            data-auth-url="/api/auth/telegram/callback"
-            data-request-access="write"
-          />
-        </div>
+        <TelegramLoginWidget botUsername={deps.botUsername} authUrl="/api/auth/telegram/callback" />
         <div style={{ font: "var(--md3-body-sm)", color: "#94A3B8", marginTop: 18 }}>
           <svg viewBox="0 0 24 24" width={19} height={19} fill="currentColor" style={{ verticalAlign: "middle" }}>
             <path d="M21.7 3.4 2.9 10.6c-.9.35-.9.86-.16 1.08l4.7 1.47 1.8 5.5c.22.6.4.83.83.83.42 0 .6-.19.83-.42l2.28-2.2 4.74 3.5c.87.48 1.5.23 1.72-.8l3.1-14.6c.32-1.27-.48-1.85-1.31-1.5Z" />
