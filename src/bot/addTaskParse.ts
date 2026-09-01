@@ -13,8 +13,9 @@ export interface AddTaskParseError {
   error: string;
 }
 
-const USAGE =
+export const ADDTASK_USAGE =
   "Usage: /addtask <title> [by <date>] [@username], or bare /addtask to use the step-by-step form.";
+const USAGE = ADDTASK_USAGE;
 
 // Matches a whole `@username` token anywhere in the string, with the
 // surrounding whitespace, so it can be dropped regardless of whether it

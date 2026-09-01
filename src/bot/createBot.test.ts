@@ -108,6 +108,19 @@ function messageUpdate(userId: number, chatId: number, text: string): Update {
   } as Update;
 }
 
+function groupMessageUpdate(userId: number, username: string, chatId: number, text: string): Update {
+  return {
+    update_id: updateIdSeq++,
+    message: {
+      message_id: messageIdSeq++,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: chatId, type: "group", title: "Dump Group" },
+      from: { id: userId, is_bot: false, first_name: "Test", username },
+      text,
+    },
+  } as Update;
+}
+
 function callbackUpdate(userId: number, chatId: number, data: string): Update {
   return {
     update_id: updateIdSeq++,
@@ -850,6 +863,146 @@ describe("direct /addtask one-liner (issue #27/#30)", () => {
       expect(list.ok).toBe(true);
       if (list.ok) expect(list.value[0]?.dueDate).toBe("2026-09-11");
     });
+  });
+});
+
+describe("mention trigger: @bot pls work on <title> (issue #34)", () => {
+  let roster: Roster;
+  let testBot: ReturnType<typeof makeTestBot>;
+  const GROUP_CHAT_ID = -100;
+
+  beforeEach(() => {
+    roster = makeRoster();
+    testBot = makeTestBot(roster);
+  });
+
+  for (const phrase of ["pls work on", "please work on", "add task", "new task", "todo"]) {
+    it(`creates a task via "@test_bot ${phrase} <title>" in the group`, async () => {
+      const internId = nextUserId();
+      await registerCaller(testBot, internId, "alice");
+
+      await testBot.bot.handleUpdate(
+        groupMessageUpdate(internId, "alice", GROUP_CHAT_ID, `@test_bot ${phrase} fix login`),
+      );
+
+      const list = await testBot.service.listAllTasks({
+        username: "alice",
+        role: "Intern",
+        cohortId: COHORT,
+      });
+      expect(list.ok).toBe(true);
+      if (list.ok) {
+        expect(list.value).toHaveLength(1);
+        expect(list.value[0]?.title).toBe("fix login");
+        expect(list.value[0]?.assigneeUsername).toBe("alice");
+      }
+      expect(lastReplyText(testBot.calls)).toMatch(/created/i);
+    });
+  }
+
+  it("does nothing for ordinary unmentioned group chatter containing 'add task'", async () => {
+    const internId = nextUserId();
+    await registerCaller(testBot, internId, "alice");
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(internId, "alice", GROUP_CHAT_ID, "someone should add task the login bug"),
+    );
+
+    expect(testBot.calls).toHaveLength(0);
+    const list = await testBot.service.listAllTasks({
+      username: "alice",
+      role: "Intern",
+      cohortId: COHORT,
+    });
+    expect(list.ok).toBe(true);
+    if (list.ok) expect(list.value).toHaveLength(0);
+  });
+
+  it("replies with a redirect when mentioned with no recognisable intent", async () => {
+    const internId = nextUserId();
+    await registerCaller(testBot, internId, "alice");
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(internId, "alice", GROUP_CHAT_ID, "@test_bot how's it going"),
+    );
+
+    expect(lastReplyText(testBot.calls)).toMatch(/addtask/i);
+    const list = await testBot.service.listAllTasks({
+      username: "alice",
+      role: "Intern",
+      cohortId: COHORT,
+    });
+    expect(list.ok).toBe(true);
+    if (list.ok) expect(list.value).toHaveLength(0);
+  });
+
+  it("recognises a mention inside a longer sentence", async () => {
+    const internId = nextUserId();
+    await registerCaller(testBot, internId, "alice");
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(
+        internId,
+        "alice",
+        GROUP_CHAT_ID,
+        "hey team, @test_bot pls work on the login bug",
+      ),
+    );
+
+    const list = await testBot.service.listAllTasks({
+      username: "alice",
+      role: "Intern",
+      cohortId: COHORT,
+    });
+    expect(list.ok).toBe(true);
+    if (list.ok) expect(list.value[0]?.title).toBe("the login bug");
+  });
+
+  it("supports a mention plus assignment plus date", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(
+        higherUpId,
+        "carla",
+        GROUP_CHAT_ID,
+        "@test_bot add task fix login by Sept 5 @alice",
+      ),
+    );
+
+    const list = await testBot.service.listAllTasks({
+      username: "carla",
+      role: "HigherUp",
+      cohortId: COHORT,
+    });
+    expect(list.ok).toBe(true);
+    if (list.ok) {
+      expect(list.value[0]?.title).toBe("fix login");
+      expect(list.value[0]?.dueDate).toBe("2026-09-05");
+      expect(list.value[0]?.assigneeUsername).toBe("alice");
+    }
+  });
+
+  it("still requires /start first — an unregistered mentioner gets the registration prompt, not a task", async () => {
+    const internId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(internId, "ghost", GROUP_CHAT_ID, "@test_bot add task fix login"),
+    );
+
+    expect(lastReplyText(testBot.calls)).toMatch(/\/start first/i);
+  });
+
+  it("does not fire the wizard's DM-only 'Not sure what you mean' fallback for unmentioned group chatter", async () => {
+    const internId = nextUserId();
+    await registerCaller(testBot, internId, "alice");
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(internId, "alice", GROUP_CHAT_ID, "just chatting about nothing in particular"),
+    );
+
+    expect(testBot.calls).toHaveLength(0);
   });
 });
 
