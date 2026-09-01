@@ -8,12 +8,12 @@ const STATUS_META: Record<
   TaskWithFlags["status"],
   { kind: BadgeKind; bg: string; fg: string; ic: IconName; label: string }
 > = {
-  Assigned: { kind: "tag", bg: "", fg: "", ic: "hourglass", label: "Assigned" },
-  InProgress: { kind: "badge", bg: "#E4EEFE", fg: "#1A5FCC", ic: "spark", label: "In progress" },
-  Submitted: { kind: "badge", bg: "#FEF6D6", fg: "#9A6206", ic: "clock", label: "Submitted" },
-  Approved: { kind: "badge", bg: "#DEF6EA", fg: "#0E7A4B", ic: "check", label: "Approved" },
-  NeedsRevision: { kind: "badge", bg: "#FCE3E4", fg: "#C2363B", ic: "pen", label: "Needs revision" },
-  Cancelled: { kind: "tag", bg: "", fg: "", ic: "alert", label: "Cancelled" },
+  backlog: { kind: "tag", bg: "", fg: "", ic: "hourglass", label: "Backlog" },
+  todo: { kind: "tag", bg: "", fg: "", ic: "hourglass", label: "To do" },
+  in_progress: { kind: "badge", bg: "#E4EEFE", fg: "#1A5FCC", ic: "spark", label: "In progress" },
+  in_review: { kind: "badge", bg: "#FEF6D6", fg: "#9A6206", ic: "clock", label: "In review" },
+  blocked: { kind: "badge", bg: "#FCE3E4", fg: "#C2363B", ic: "alert", label: "Blocked" },
+  done: { kind: "badge", bg: "#DEF6EA", fg: "#0E7A4B", ic: "check", label: "Done" },
 };
 
 export function StatusBadge({ status }: { status: TaskWithFlags["status"] }) {

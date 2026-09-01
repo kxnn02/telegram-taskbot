@@ -20,8 +20,9 @@ export function RowActions({ task }: { task: Pick<TaskWithFlags, "id" | "status"
   const [pending, setPending] = useState<"approve" | "revise" | undefined>();
   const [error, setError] = useState<string | undefined>();
 
-  const canEdit = task.status !== "Approved" && task.status !== "Cancelled";
-  const canReview = task.status === "Submitted";
+  // The Approved edit-lock is gone (issue #27/#28) — every task is editable.
+  const canEdit = true;
+  const canReview = task.status === "in_review";
 
   async function act(action: "approve" | "revise") {
     setPending(action);

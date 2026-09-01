@@ -49,19 +49,6 @@ export default async function EditTaskPage({ params }: { params: Promise<{ id: s
     );
   }
 
-  if (found.value.status === "Approved") {
-    return (
-      <DashboardShell active="tasks" title="Edit task" caller={typedCaller}>
-        <MessageCard
-          title="Task locked"
-          message={`Task ${taskId} is Approved and locked from further edits, same as the bot's /edit rule.`}
-          backHref="/"
-          backLabel="Back to dashboard"
-        />
-      </DashboardShell>
-    );
-  }
-
   const interns = deps.roster
     .all()
     .filter((e) => e.role === "Intern" && e.cohortId === typedCaller.cohortId)
