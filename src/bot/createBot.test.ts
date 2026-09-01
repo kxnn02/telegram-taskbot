@@ -242,7 +242,10 @@ describe("/edit wizard field picker", () => {
 
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/edit ${taskId}`));
     await testBot.bot.handleUpdate(callbackUpdate(higherUpId, higherUpId, "editfield:duedate"));
-    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "in 3 days"));
+    // An absolute date, not a relative one: bot uses a real SystemClock, and
+    // a relative input like "in 3 days" would coincidentally resolve to the
+    // same value as the seeded fixture date on some real-world "today"s.
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "Dec 25 2026"));
 
     // Should now be showing a Yes/No confirm, not have saved yet.
     let text = lastReplyText(testBot.calls);
