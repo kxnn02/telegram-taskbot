@@ -12,6 +12,8 @@ import { resolveCaller } from "./callerResolution.js";
 import { WizardManager, type WizardState, type EditField } from "./wizard.js";
 import { notifyUser, notifyStatusChange } from "./notify.js";
 import { suggestClosestUsername } from "./usernameSuggest.js";
+import { parseTaskRef } from "./taskRef.js";
+import { parseStatusWord, VALID_STATUS_WORDS_TEXT } from "./statusParse.js";
 import {
   formatAllTasksGrouped,
   formatBacklog,
@@ -20,6 +22,7 @@ import {
   formatMyTasks,
   formatPending,
   formatTaskDetail,
+  statusLabel,
 } from "./format.js";
 import type { Caller, TaskStatus } from "../domain/types.js";
 import type { Roster } from "../domain/roster.js";
@@ -61,11 +64,11 @@ export interface CreateBotOptions {
  * roster member may move a task to any status — so every hint just
  * suggests the obvious next command rather than describing a permission. */
 const NEXT_STEP_HINT: Record<TaskStatus, string> = {
-  backlog: "Send `/revise <id>` to move it to To do status.",
-  todo: "Send `/submit <id>` once you start it.",
-  in_progress: "Send `/submit <id>` when you're done.",
-  in_review: "It's now awaiting review.",
-  blocked: "Send `/unblocked <id>` once it's unblocked.",
+  backlog: "Send `/update <id> todo` to move it to To do status.",
+  todo: "Send `/done <id>` once you start it.",
+  in_progress: "Send `/done <id>` when you're done.",
+  in_review: "It's now awaiting review. Send `/complete <id>` to mark it Done.",
+  blocked: "Send `/unblock <id>` once it's unblocked.",
   done: "Nice work!",
 };
 
@@ -218,10 +221,20 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   );
 
   bot.command(
-    "backlog",
+    "overdue",
     withCaller(async (ctx, caller) => {
       const result = await service.listBacklog(caller);
       await ctx.reply(result.ok ? formatBacklog(result.value) : result.error);
+    }),
+  );
+
+  // /backlog is renamed to /overdue (issue #27/#31) — "backlog" is now a
+  // real status, so a command meaning "overdue" under that name is a
+  // guaranteed misfire. No alias retained ("no installed base", #27).
+  bot.command(
+    "backlog",
+    withCaller(async (ctx) => {
+      await ctx.reply("/backlog is now /overdue.");
     }),
   );
 
@@ -250,29 +263,135 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }),
   );
 
-  // ---- Intern commands ---------------------------------------------------
+  // ---- Status-setting commands (issue #27/#31 — replaces the review gate)
+
+  /** Sets `status` on `id` and applies the shared status-change notification
+   * policy (issue #27/#29): DM the assignee and creator, skipping the actor.
+   * Shared by `/update`, `/done`, and `/complete` — all three are just this
+   * with a different fixed or parsed status and reply text. */
+  async function applyStatusChange(
+    caller: Caller,
+    id: number,
+    status: TaskStatus,
+    ctx: import("grammy").Context,
+    replySuffix: string,
+  ) {
+    const result = await service.setStatus(caller, id, status);
+    if (!result.ok) {
+      await ctx.reply(result.error);
+      return;
+    }
+    await ctx.reply(`Task ${id} ${replySuffix}`);
+    await notifyStatusChange(
+      bot,
+      registrations,
+      result.value,
+      caller.username,
+      `Task ${id} ("${result.value.title}") status changed to ${statusLabel(status)} by @${caller.username}. Send /task ${id} for details.`,
+    );
+  }
+
+  const UPDATE_USAGE = `Usage: /update <ref> <status> — status is one of: ${VALID_STATUS_WORDS_TEXT}`;
 
   bot.command(
-    "submit",
+    "update",
+    withCaller(async (ctx, caller) => {
+      const raw = matchToString(ctx.match).trim();
+      const spaceIdx = raw.indexOf(" ");
+      const refToken = spaceIdx === -1 ? raw : raw.slice(0, spaceIdx);
+      const id = parseTaskRef(refToken);
+      if (id === undefined) {
+        await ctx.reply(UPDATE_USAGE);
+        return;
+      }
+      const statusText = spaceIdx === -1 ? "" : raw.slice(spaceIdx + 1);
+      const status = parseStatusWord(statusText);
+      if (!status) {
+        await ctx.reply(
+          `I don't recognize "${statusText.trim()}" as a status. Valid statuses: ${VALID_STATUS_WORDS_TEXT}`,
+        );
+        return;
+      }
+      await applyStatusChange(caller, id, status, ctx, `set to ${statusLabel(status)}.`);
+    }),
+  );
+
+  // Devie parity's deliberate wart (issue #27): `/done` sets `in_review`
+  // while `/update <ref> done` sets `done`. Copied on purpose — do not fix.
+  bot.command(
+    "done",
     withCaller(async (ctx, caller) => {
       const id = parseIdArg(ctx.match);
       if (id === undefined) {
-        await ctx.reply("Usage: /submit <task_id>");
+        await ctx.reply("Usage: /done <ref>");
         return;
       }
-      const result = await service.setStatus(caller, id, "in_review");
-      if (!result.ok) {
-        await ctx.reply(result.error);
+      await applyStatusChange(caller, id, "in_review", ctx, "marked as submitted. Nice work!");
+    }),
+  );
+
+  bot.command(
+    "complete",
+    withCaller(async (ctx, caller) => {
+      const id = parseIdArg(ctx.match);
+      if (id === undefined) {
+        await ctx.reply("Usage: /complete <ref>");
         return;
       }
-      await ctx.reply(`Task ${id} marked as submitted. Nice work!`);
-      await notifyStatusChange(
-        bot,
-        registrations,
-        result.value,
-        caller.username,
-        `@${result.value.assigneeUsername} submitted Task ${id}: "${result.value.title}". Send /task ${id} for details.`,
-      );
+      await applyStatusChange(caller, id, "done", ctx, "marked Done. Nice work!");
+    }),
+  );
+
+  bot.command(
+    "unblock",
+    withCaller(async (ctx, caller) => {
+      const id = parseIdArg(ctx.match);
+      if (id === undefined) {
+        await ctx.reply("Usage: /unblock <ref>");
+        return;
+      }
+      const result = await service.clearBlocked(caller, id);
+      await ctx.reply(result.ok ? `Task ${id} is no longer blocked.` : result.error);
+    }),
+  );
+
+  // ---- Removed commands: helpful redirects, not the generic fallback ----
+  // No aliases retained ("no installed base", issue #27) — these just point
+  // whoever's muscle memory hits them at the replacement, since the dry-run
+  // exercise is exactly where that muscle memory lives (issue #31).
+
+  bot.command(
+    "submit",
+    withCaller(async (ctx) => {
+      await ctx.reply("/submit is gone — use /done <ref> instead.");
+    }),
+  );
+
+  bot.command(
+    "approve",
+    withCaller(async (ctx) => {
+      await ctx.reply("/approve is gone — use /complete <ref> instead.");
+    }),
+  );
+
+  bot.command(
+    "revise",
+    withCaller(async (ctx) => {
+      await ctx.reply("/revise is gone — use /update <ref> todo instead.");
+    }),
+  );
+
+  bot.command(
+    "canceltask",
+    withCaller(async (ctx) => {
+      await ctx.reply("/canceltask is gone — use /update <ref> backlog instead.");
+    }),
+  );
+
+  bot.command(
+    "unblocked",
+    withCaller(async (ctx) => {
+      await ctx.reply("/unblocked is gone — use /unblock <ref> instead.");
     }),
   );
 
@@ -309,19 +428,6 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }),
   );
 
-  bot.command(
-    "unblocked",
-    withCaller(async (ctx, caller) => {
-      const id = parseIdArg(ctx.match);
-      if (id === undefined) {
-        await ctx.reply("Usage: /unblocked <task_id>");
-        return;
-      }
-      const result = await service.clearBlocked(caller, id);
-      await ctx.reply(result.ok ? `Task ${id} is no longer blocked.` : result.error);
-    }),
-  );
-
   // ---- Higher-up commands: simple ones ------------------------------------
 
   bot.command(
@@ -347,110 +453,9 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }),
   );
 
-  bot.command(
-    "approve",
-    withCaller(async (ctx, caller) => {
-      const id = parseIdArg(ctx.match);
-      if (id === undefined) {
-        await ctx.reply("Usage: /approve <task_id>");
-        return;
-      }
-      await decide(caller, id, "approve", ctx);
-    }),
-  );
-
-  bot.command(
-    "revise",
-    withCaller(async (ctx, caller) => {
-      const id = parseIdArg(ctx.match);
-      if (id === undefined) {
-        await ctx.reply("Usage: /revise <task_id>");
-        return;
-      }
-      await decide(caller, id, "revise", ctx);
-    }),
-  );
-
-  async function decide(
-    caller: Caller,
-    id: number,
-    decision: "approve" | "revise",
-    ctx: import("grammy").Context,
-  ) {
-    const result =
-      decision === "approve"
-        ? await service.setStatus(caller, id, "done")
-        : await service.setStatus(caller, id, "todo");
-    if (!result.ok) {
-      await ctx.reply(result.error);
-      return;
-    }
-    await ctx.reply(
-      `Task ${id} marked ${decision === "approve" ? "Approved" : "Needs Revision"}.`,
-    );
-    const hint =
-      decision === "approve"
-        ? "Nice work!"
-        : `Take another look and \`/submit ${id}\` again when ready.`;
-    await notifyStatusChange(
-      bot,
-      registrations,
-      result.value,
-      caller.username,
-      `Task ${id} ("${result.value.title}") was ${decision === "approve" ? "approved" : "sent back for revision"} by @${caller.username}. ${hint}`,
-    );
-  }
-
-  // ---- /canceltask (with Yes/No confirmation) ------------------------
-
-  bot.command(
-    "canceltask",
-    withCaller(async (ctx, caller) => {
-      const id = parseIdArg(ctx.match);
-      if (id === undefined) {
-        await ctx.reply("Usage: /canceltask <task_id>");
-        return;
-      }
-      const found = await service.getTask(caller, id);
-      if (!found.ok) {
-        await ctx.reply(found.error);
-        return;
-      }
-      const keyboard = new InlineKeyboard()
-        .text("Yes, cancel it", `canceltask:yes:${id}`)
-        .text("No", `canceltask:no:${id}`);
-      await ctx.reply(
-        `Cancel Task ${id} ("${found.value.title}")? This can't be undone.`,
-        { reply_markup: keyboard },
-      );
-    }),
-  );
-
-  bot.callbackQuery(/^canceltask:(yes|no):(\d+)$/, async (ctx) => {
-    const userId = ctx.from.id;
-    const resolved = await requireCaller(userId);
-    if (resolved.status !== "ok") {
-      await ctx.answerCallbackQuery({ text: "Send /start first." });
-      return;
-    }
-    const [, decision, idStr] = ctx.match as unknown as [string, string, string];
-    const id = Number(idStr);
-    if (decision === "no") {
-      await ctx.answerCallbackQuery({ text: "Not cancelled." });
-      await ctx.editMessageText(`Kept Task ${id} as-is.`);
-      return;
-    }
-    const result = await service.setStatus(resolved.caller, id, "backlog");
-    await ctx.answerCallbackQuery();
-    await ctx.editMessageText(
-      result.ok ? `Task ${id} cancelled.` : result.error,
-    );
-  });
-
-  // The Approve/Revise inline keyboard on submission notifications and the
-  // `unblock:` callback button both encoded the review gate that ADR-0009
-  // deletes — removed outright rather than retargeted (issue #27/#29).
-  // `/approve`, `/revise`, and `/unblocked` remain as typed commands.
+  // `/approve`, `/revise`, and `/canceltask` (with its Yes/No confirmation
+  // and the `canceltask:` callback) are removed outright, not retargeted
+  // (issue #27/#31) — see the helpful-redirect commands above.
 
   // ---- /addtask (one-liner, with wizard fallback) and /edit wizard ----
 
@@ -894,10 +899,9 @@ function matchToString(match: CommandMatch): string {
   return typeof match === "string" ? match : (match[0] ?? "");
 }
 
+/** Accepts both `23` and `t23` (issue #27/#31's shared task-ref grammar). */
 function parseIdArg(match: CommandMatch): number | undefined {
-  const trimmed = matchToString(match).trim();
-  if (!/^\d+$/.test(trimmed)) return undefined;
-  return Number(trimmed);
+  return parseTaskRef(matchToString(match));
 }
 
 /** Page-number argument for /alltasks and /mytasks (issue #7). No argument

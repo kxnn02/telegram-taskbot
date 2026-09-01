@@ -174,8 +174,23 @@ describe("formatHelp", () => {
     expect(higherUpText).not.toContain("/assign");
   });
 
-  it("describes direct /edit usage for higher-ups (issue #30)", () => {
+  it("describes direct /edit usage (issue #30/#31)", () => {
     const text = formatHelp("HigherUp");
-    expect(text).toMatch(/\/edit <id> <field> <value>/);
+    expect(text).toMatch(/\/edit <ref> <field> <value>/);
+  });
+
+  it("lists /update, /done, /complete, /overdue, /unblock — not the removed review-gate commands (issue #27/#31)", () => {
+    const text = formatHelp("Intern");
+    expect(text).toContain("/update");
+    expect(text).toContain("/done");
+    expect(text).toContain("/complete");
+    expect(text).toContain("/overdue");
+    expect(text).toContain("/unblock");
+    expect(text).not.toMatch(/\/submit\b/);
+    expect(text).not.toMatch(/\/approve\b/);
+    expect(text).not.toMatch(/\/revise\b/);
+    expect(text).not.toMatch(/\/canceltask\b/);
+    expect(text).not.toContain("/unblocked");
+    expect(text).not.toMatch(/\/backlog\b/);
   });
 });

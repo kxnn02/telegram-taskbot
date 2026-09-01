@@ -20,7 +20,7 @@ export function isOverdue(task: Task, now: Date): boolean {
   return due < today;
 }
 
-/** Whole days overdue, for `/backlog`'s "N days overdue" display. Assumes
+/** Whole days overdue, for `/overdue`'s "N days overdue" display. Assumes
  * `isOverdue(task, now)` is already true; returns 0 or negative otherwise. */
 export function daysOverdue(task: Task, now: Date): number {
   const today = DateTime.fromJSDate(now, { zone: MANILA_ZONE }).startOf("day");
