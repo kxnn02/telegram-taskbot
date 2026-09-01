@@ -1362,6 +1362,251 @@ describe("/update <ref> <status> — generic status setter (issue #27/#31)", () 
   });
 });
 
+describe("Stage 4: bulk and multiline /update, with partial-failure reporting (issue #27/#32)", () => {
+  let roster: Roster;
+  let testBot: ReturnType<typeof makeTestBot>;
+
+  beforeEach(() => {
+    roster = makeRoster();
+    testBot = makeTestBot(roster);
+  });
+
+  async function seedTask(assignee = "alice"): Promise<number> {
+    const task = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: assignee, title: `Task for ${assignee}`, description: "d", dueDate: "2026-09-05" },
+    );
+    if (!task.ok) throw new Error("setup failed");
+    return task.value.id;
+  }
+
+  async function statusOf(id: number) {
+    const result = await testBot.service.getTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      id,
+    );
+    return result.ok ? result.value.status : undefined;
+  }
+
+  it("all-valid batch: one trailing status governs a comma-separated ref list", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const t1 = await seedTask();
+    const t2 = await seedTask();
+    const t3 = await seedTask();
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/update t${t1},t${t2},${t3} done`));
+
+    expect(await statusOf(t1)).toBe("done");
+    expect(await statusOf(t2)).toBe("done");
+    expect(await statusOf(t3)).toBe("done");
+    expect(lastReplyText(testBot.calls)).toMatch(/3\/3 updated/);
+  });
+
+  it("mixed statuses on one line: each comma segment carries its own status", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const t1 = await seedTask();
+    const t2 = await seedTask();
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/update t${t1} done, t${t2} review`));
+
+    expect(await statusOf(t1)).toBe("done");
+    expect(await statusOf(t2)).toBe("in_review");
+  });
+
+  it("multiline batch: newline-separated <ref> <status> pairs", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const t1 = await seedTask();
+    const t2 = await seedTask();
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/update\nt${t1} done\nt${t2} blocked`));
+
+    expect(await statusOf(t1)).toBe("done");
+    expect(await statusOf(t2)).toBe("blocked");
+  });
+
+  it("a batch with one unknown id reports that item's failure without aborting the rest", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const t1 = await seedTask();
+    const t2 = await seedTask();
+    const bogusId = t2 + 9999;
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(higherUpId, higherUpId, `/update t${t1} done, t${bogusId} done, t${t2} done`),
+    );
+
+    expect(await statusOf(t1)).toBe("done");
+    expect(await statusOf(t2)).toBe("done");
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/2\/3 updated/);
+    expect(text).toContain(`t${bogusId} ✗`);
+  });
+
+  it("a batch with one unparseable status word reports that item's failure", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const t1 = await seedTask();
+    const t2 = await seedTask();
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/update t${t1} done, t${t2} finished`));
+
+    expect(await statusOf(t1)).toBe("done");
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/1\/2 updated/);
+    expect(text).toMatch(/unrecognized status/i);
+  });
+
+  it("a batch with a cross-cohort id reports it as not found, without touching the others", async () => {
+    const crossRoster = new Roster([
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { username: "alice", role: "Intern", cohortId: COHORT },
+      { username: "dave", role: "Intern", cohortId: "other-cohort" },
+    ]);
+    const crossBot = makeTestBot(crossRoster);
+    const higherUpId = nextUserId();
+    await registerCaller(crossBot, higherUpId, "carla");
+
+    // A filler task in the *other* cohort, so the real `other` task below
+    // lands on an id that cohort-5 (COHORT) never assigns to anything —
+    // cohort id sequences are independent, so without this the two
+    // cohorts' single tasks would coincidentally share id 1 and the test
+    // wouldn't be able to tell a same-cohort hit from a cross-cohort leak.
+    await crossBot.service.assignTask(
+      { username: "dave", role: "Intern", cohortId: "other-cohort" },
+      { assigneeUsername: "dave", title: "filler", description: "d", dueDate: "2026-09-05" },
+    );
+    const other = await crossBot.service.assignTask(
+      { username: "dave", role: "Intern", cohortId: "other-cohort" },
+      { assigneeUsername: "dave", title: "not mine", description: "d", dueDate: "2026-09-05" },
+    );
+    if (!other.ok) throw new Error("setup failed");
+    const own = await crossBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "mine", description: "d", dueDate: "2026-09-05" },
+    );
+    if (!own.ok) throw new Error("setup failed");
+    expect(own.value.id).not.toBe(other.value.id);
+
+    await crossBot.bot.handleUpdate(
+      messageUpdate(higherUpId, higherUpId, `/update t${own.value.id} done, t${other.value.id} done`),
+    );
+
+    const mine = await crossBot.service.getTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      own.value.id,
+    );
+    expect(mine.ok && mine.value.status).toBe("done");
+    const text = lastReplyText(crossBot.calls);
+    expect(text).toMatch(/1\/2 updated/);
+    expect(text).toMatch(/doesn't exist/);
+  });
+
+  it("a wholly-invalid batch replies with usage help, not a wall of identical errors", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/update t9001 done, t9002 done"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/usage/i);
+  });
+
+  it("a single-item batch behaves identically to the non-batch command", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const t1 = await seedTask();
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/update t${t1} done`));
+
+    expect(lastReplyText(testBot.calls)).toBe(`Task ${t1} set to Done.`);
+  });
+
+  it("duplicate refs in one batch are each applied, independently, in order", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const t1 = await seedTask();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(higherUpId, higherUpId, `/update t${t1} in progress, t${t1} done`),
+    );
+
+    expect(await statusOf(t1)).toBe("done");
+    expect(lastReplyText(testBot.calls)).toMatch(/2\/2 updated/);
+  });
+
+  it("a mid-batch failure leaves the earlier items committed — no batch transaction", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const t1 = await seedTask();
+    const t2 = await seedTask();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(higherUpId, higherUpId, `/update t${t1} done, t${t2} bogus-status`),
+    );
+
+    expect(await statusOf(t1)).toBe("done");
+  });
+
+  it("a batch large enough to exceed Telegram's 4096-character limit is chunked, not truncated", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const ids: number[] = [];
+    for (let i = 0; i < 400; i++) {
+      ids.push(await seedTask());
+    }
+    const line = ids.map((id) => `t${id} done`).join(", ");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/update ${line}`));
+
+    for (const id of ids) {
+      expect(await statusOf(id)).toBe("done");
+    }
+    const replies = testBot.calls.filter((c) => c.method === "sendMessage");
+    expect(replies.length).toBeGreaterThan(1);
+    for (const reply of replies) {
+      expect((reply.payload.text as string).length).toBeLessThanOrEqual(4096);
+    }
+  }, 20000);
+
+  it("a 20-task batch touching one assignee sends that person exactly one DM", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    const ids: number[] = [];
+    for (let i = 0; i < 20; i++) {
+      ids.push(await seedTask("alice"));
+    }
+    const line = ids.map((id) => `t${id} done`).join(", ");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/update ${line}`));
+
+    const dmsToAlice = testBot.calls.filter(
+      (c) => c.method === "sendMessage" && Number(c.payload.chat_id) === aliceId,
+    );
+    expect(dmsToAlice).toHaveLength(1);
+  });
+
+  it("/done and /complete also accept comma-separated ref lists (issue #32)", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const t1 = await seedTask();
+    const t2 = await seedTask();
+    const t3 = await seedTask();
+    const t4 = await seedTask();
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/done ${t1},${t2}`));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/complete t${t3}, t${t4}`));
+
+    expect(await statusOf(t1)).toBe("in_review");
+    expect(await statusOf(t2)).toBe("in_review");
+    expect(await statusOf(t3)).toBe("done");
+    expect(await statusOf(t4)).toBe("done");
+  });
+});
+
 describe("/done and /complete — Devie's deliberate wart (issue #27/#31)", () => {
   let roster: Roster;
   let testBot: ReturnType<typeof makeTestBot>;
