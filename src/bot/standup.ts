@@ -1,6 +1,7 @@
 import type { TaskService, TaskWithFlags } from "../service/taskService.js";
 import type { Caller, TaskStatus } from "../domain/types.js";
 import { formatTaskLine, statusLabel } from "./format.js";
+import { MANILA_ZONE } from "../domain/overdue.js";
 
 const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
 
@@ -121,7 +122,7 @@ function formatReportDate(date: Date): string {
     year: "numeric",
     month: "long",
     day: "numeric",
-    timeZone: "UTC",
+    timeZone: MANILA_ZONE,
   }).format(date);
 }
 

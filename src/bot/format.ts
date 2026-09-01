@@ -113,7 +113,7 @@ export function formatPending(tasks: TaskWithFlags[]): string {
     return "Nothing pending review right now.";
   }
   return [
-    "Awaiting your review:",
+    "Awaiting review:",
     ...tasks.map(
       (t) => `- ${formatTaskLine(t)} (assigned to @${t.assigneeUsername})`,
     ),
@@ -161,7 +161,7 @@ export function formatApproved(tasks: TaskWithFlags[]): string {
     return "Nothing was approved in the past week.";
   }
   return [
-    "Approved this past week:",
+    "Marked done this past week:",
     ...tasks.map(
       (t) => `- #${t.id} ${t.title} (@${t.assigneeUsername})`,
     ),
