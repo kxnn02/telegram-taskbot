@@ -39,6 +39,12 @@ interface RecordedCall {
   payload: Record<string, unknown>;
 }
 
+const TELEGRAM_MESSAGE_LIMIT = 4096;
+
+// Mirrors the real Telegram Bot API (issue #55/F8): a sendMessage whose text
+// exceeds the 4096-character limit is rejected with "message is too long"
+// rather than silently accepted. Without this, an oversized-reply bug would
+// pass the test suite even though it fails against the real API.
 function makeFakeTransformer() {
   const calls: RecordedCall[] = [];
   let messageId = 1000;
@@ -46,13 +52,17 @@ function makeFakeTransformer() {
     calls.push({ method, payload: (payload ?? {}) as Record<string, unknown> });
     const p = (payload ?? {}) as Record<string, unknown>;
     if (method === "sendMessage" || method === "editMessageText") {
+      const text = (p.text as string) ?? "";
+      if (text.length > TELEGRAM_MESSAGE_LIMIT) {
+        throw new Error("Bad Request: message is too long");
+      }
       return {
         ok: true,
         result: {
           message_id: (p.message_id as number) ?? messageId++,
           date: Math.floor(Date.now() / 1000),
           chat: { id: Number(p.chat_id) || 1, type: "private" },
-          text: (p.text as string) ?? "",
+          text,
         },
       } as never;
     }
@@ -1444,6 +1454,38 @@ describe("/task <id> appends a per-status next-step hint (issue #27/#29/#31)", (
     const text = lastReplyText(testBot.calls);
     expect(text).toContain("Nice work!");
   });
+
+  it("a task with enough notes to exceed Telegram's 4096-character limit sends multiple messages and does not throw (issue #55/F8)", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const task = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Ship it", description: "d", dueDate: "2026-09-05" },
+    );
+    if (!task.ok) throw new Error("setup failed");
+    for (let i = 0; i < 80; i++) {
+      await testBot.bot.handleUpdate(
+        messageUpdate(
+          higherUpId,
+          higherUpId,
+          `/note ${task.value.id} A reasonably descriptive note to pad this out, number ${i}`,
+        ),
+      );
+    }
+
+    const callsBefore = testBot.calls.length;
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/task ${task.value.id}`));
+
+    const replies = testBot.calls
+      .slice(callsBefore)
+      .filter((c) => c.method === "sendMessage" && Number(c.payload.chat_id) === higherUpId);
+    expect(replies.length).toBeGreaterThan(1);
+    for (const reply of replies) {
+      expect((reply.payload.text as string).length).toBeLessThanOrEqual(4096);
+    }
+  });
 });
 
 describe("Notification policy on status changes (issue #27/#29)", () => {
@@ -1899,6 +1941,29 @@ describe("/standup (issue #33)", () => {
     expect(text).toMatch(/no tasks completed this week/i);
   });
 
+  it("a report large enough to exceed Telegram's 4096-character limit is chunked, not thrown (issue #55/F8)", async () => {
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    for (let i = 0; i < 60; i++) {
+      await testBot.service.assignTask(
+        { username: "carla", role: "HigherUp", cohortId: COHORT },
+        {
+          assigneeUsername: "alice",
+          title: `Task number ${i} — a reasonably descriptive title to pad it out`,
+          dueDate: "2026-09-05",
+        },
+      );
+    }
+
+    await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/standup"));
+
+    const replies = testBot.calls.filter((c) => c.method === "sendMessage");
+    expect(replies.length).toBeGreaterThan(1);
+    for (const reply of replies) {
+      expect((reply.payload.text as string).length).toBeLessThanOrEqual(4096);
+    }
+  });
+
   it("does not list a member who has nothing in a given status", async () => {
     await testBot.service.assignTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
@@ -2343,6 +2408,23 @@ describe("/overdue replaces /backlog (issue #27/#31 — no alias retained)", () 
     const text = lastReplyText(testBot.calls);
     expect(text).not.toMatch(/not sure what you mean/i);
     expect(text).toContain("/overdue");
+  });
+
+  it("a small number of overdue tasks still sends exactly one message — chunking must not fragment normal-sized replies (issue #55/F8)", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const task = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Overdue thing", description: "d", dueDate: "2020-01-01" },
+    );
+    if (!task.ok) throw new Error("setup failed");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/overdue"));
+
+    const replies = testBot.calls.filter((c) => c.method === "sendMessage");
+    expect(replies).toHaveLength(1);
   });
 });
 
