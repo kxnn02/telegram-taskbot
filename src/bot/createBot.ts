@@ -137,8 +137,32 @@ export function createBot(options: CreateBotOptions): CreatedBot {
 
   // ---- /start ---------------------------------------------------------
 
+  // ---- Outermost error guard (issue #49/#50, finding F1/D1) -------------
+  // Registered first, ahead of every other middleware including the
+  // wizard interrupter below: the webhook path (bot.handleUpdate) never
+  // consults bot.catch (see grammy's bot.js handleUpdate, which rethrows
+  // as a BotError instead of routing to the error handler — only the
+  // long-polling bot.start() path does that). Without this guard, any
+  // thrown error escapes handleTelegramWebhook as a 500 after the update
+  // id has already been claimed for dedup, so Telegram never retries and
+  // the user gets no reply at all.
+  bot.use(async (ctx, next) => {
+    try {
+      await next();
+    } catch (err) {
+      console.error(err);
+      try {
+        await ctx.reply(
+          "Something went wrong on my end and that command didn't finish. Please try again in a moment — send /task <ref> first if you want to check whether it went through.",
+        );
+      } catch (replyErr) {
+        console.error(replyErr);
+      }
+    }
+  });
+
   // ---- Mid-wizard command interruption (PRD §6) --------------------------
-  // Registered first so it fires ahead of every command handler below,
+  // Registered second so it fires ahead of every command handler below,
   // including /start: sending any recognized command while a wizard is in
   // progress is treated as an implicit "never mind" that auto-cancels the
   // wizard, then the actual command still runs normally.

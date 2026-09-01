@@ -5,6 +5,7 @@ import { Roster } from "../domain/roster.js";
 import { InMemoryTaskStore } from "../storage/inMemoryTaskStore.js";
 import { InMemoryRegistrationStore } from "../storage/inMemoryRegistrationStore.js";
 import { InMemoryWizardStateStore } from "../storage/inMemoryWizardStateStore.js";
+import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
 import { createBot, type CreatedBot } from "./createBot.js";
 
 const COHORT = "cohort-5";
@@ -2095,5 +2096,92 @@ describe("Cohort binding closes the reused-account ambiguity (dry-run isolation 
     await registerCaller(realBot, aliceId, "alice");
     await realBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/mytasks"));
     expect(lastReplyText(realBot.calls)).not.toContain("dry-run-only task");
+  });
+});
+
+describe("Stage 1: outermost error-guard middleware (issue #49/#50, finding F1)", () => {
+  const ERROR_GUARD_TEXT = "Something went wrong on my end";
+
+  function makeThrowingRegistrationBot(roster: Roster) {
+    const { calls, transformer } = makeFakeTransformer();
+    const bot = new Bot("TEST_TOKEN", { botInfo: FAKE_BOT_INFO });
+    bot.api.config.use(transformer);
+    const registrationStore: RegistrationStorePort = {
+      register: async () => {},
+      findUsername: async () => {
+        throw new Error("supabase down");
+      },
+      findTelegramId: async () => undefined,
+    };
+    const created = createBot({
+      token: "TEST_TOKEN",
+      taskStore: new InMemoryTaskStore(),
+      registrationStore,
+      wizardStateStore: new InMemoryWizardStateStore(),
+      activeCohortId: COHORT,
+      dashboardUrl: "http://localhost:1234",
+      bot,
+      roster,
+    });
+    return { ...created, calls };
+  }
+
+  it("a handler that throws produces a reply instead of an escaping error", async () => {
+    const roster = makeRoster();
+    const testBot = makeThrowingRegistrationBot(roster);
+    const userId = nextUserId();
+
+    await expect(
+      testBot.bot.handleUpdate(messageUpdate(userId, userId, "/mytasks")),
+    ).resolves.toBeUndefined();
+
+    expect(lastReplyText(testBot.calls)).toContain(ERROR_GUARD_TEXT);
+  });
+
+  it("does not swallow success: /help still replies and console.error is not called", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, userId, "/help"));
+
+    expect(lastReplyText(testBot.calls)).not.toContain(ERROR_GUARD_TEXT);
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it("a failure inside the reply itself does not escape", async () => {
+    const roster = makeRoster();
+    const bot = new Bot("TEST_TOKEN", { botInfo: FAKE_BOT_INFO });
+    const transformer: Transformer = async (_prev, method) => {
+      if (method === "sendMessage") {
+        throw new Error("telegram api unreachable");
+      }
+      return { ok: true, result: true } as never;
+    };
+    bot.api.config.use(transformer);
+    const registrationStore: RegistrationStorePort = {
+      register: async () => {},
+      findUsername: async () => {
+        throw new Error("supabase down");
+      },
+      findTelegramId: async () => undefined,
+    };
+    const created = createBot({
+      token: "TEST_TOKEN",
+      taskStore: new InMemoryTaskStore(),
+      registrationStore,
+      wizardStateStore: new InMemoryWizardStateStore(),
+      activeCohortId: COHORT,
+      dashboardUrl: "http://localhost:1234",
+      bot,
+      roster,
+    });
+    const userId = nextUserId();
+
+    await expect(
+      created.bot.handleUpdate(messageUpdate(userId, userId, "/mytasks")),
+    ).resolves.toBeUndefined();
   });
 });
