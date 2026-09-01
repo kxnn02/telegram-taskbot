@@ -381,6 +381,76 @@ describe("/edit wizard field picker", () => {
   });
 });
 
+describe("/canceltask confirm callback retargets to the free-set status model (#28)", () => {
+  it("confirming cancellation sets the task's status to backlog, not a removed Cancelled status", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const assignResult = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      {
+        assigneeUsername: "alice",
+        title: "Task to cancel",
+        description: "Some description",
+        dueDate: "2026-09-05",
+      },
+    );
+    if (!assignResult.ok) throw new Error("setup failed: " + assignResult.error);
+    const taskId = assignResult.value.id;
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(higherUpId, higherUpId, `/canceltask ${taskId}`),
+    );
+    await testBot.bot.handleUpdate(
+      callbackUpdate(higherUpId, higherUpId, `canceltask:yes:${taskId}`),
+    );
+
+    const getResult = await testBot.service.getTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      taskId,
+    );
+    expect(getResult.ok).toBe(true);
+    if (getResult.ok) {
+      expect(getResult.value.status).toBe("backlog");
+    }
+  });
+
+  it("declining the confirmation ('No') leaves the task's status unchanged", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const assignResult = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      {
+        assigneeUsername: "alice",
+        title: "Task to keep",
+        description: "Some description",
+        dueDate: "2026-09-05",
+      },
+    );
+    if (!assignResult.ok) throw new Error("setup failed: " + assignResult.error);
+    const taskId = assignResult.value.id;
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(higherUpId, higherUpId, `/canceltask ${taskId}`),
+    );
+    await testBot.bot.handleUpdate(
+      callbackUpdate(higherUpId, higherUpId, `canceltask:no:${taskId}`),
+    );
+
+    const getResult = await testBot.service.getTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      taskId,
+    );
+    expect(getResult.ok).toBe(true);
+    if (getResult.ok) {
+      expect(getResult.value.status).toBe("todo");
+    }
+  });
+});
+
 describe("/assign full 4-step flow (regression, unaffected by /edit changes)", () => {
   it("walks assignee -> title -> description -> due date -> confirm -> creates the task", async () => {
     const roster = makeRoster();
