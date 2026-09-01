@@ -18,6 +18,17 @@ up the codebase later.
 > Superseded sections are marked inline. **None of it is implemented yet** — the code described
 > below is still the code that exists. The full spec and phased implementation plan are tracked as
 > GitHub issues [#11](https://github.com/kxnn02/telegram-taskbot/issues/11)-[#17](https://github.com/kxnn02/telegram-taskbot/issues/17).
+>
+> **A second, independent redesign is also pending**
+> ([ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md)): the bot's commands become
+> direct one-liners and its six gated statuses are replaced by six free-set ones, matching
+> **Devie**, another DevCon bot this cohort's higher-ups already use. This deletes the
+> submit → review → approve workflow, opens task creation and read access to every roster
+> member, and turns `blocked` from a flag into a status. It ships **before** the production
+> cutover, so it also blocks Phase 6.3 in
+> [#17](https://github.com/kxnn02/telegram-taskbot/issues/17). Likewise not implemented yet;
+> tracked as [#27](https://github.com/kxnn02/telegram-taskbot/issues/27), stages
+> [#28](https://github.com/kxnn02/telegram-taskbot/issues/28)-[#35](https://github.com/kxnn02/telegram-taskbot/issues/35).
 
 ## Glossary
 
@@ -143,6 +154,14 @@ README's deploy notes once the project moves off local `npm run dev`.
 
 ### /edit is single-field, /assign stays a fixed 4-step chain
 
+> **Superseded by [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md).** `/assign` is
+> replaced by a one-line `/addtask`, and `/edit` gains a direct
+> `/edit <ref> <field> <value>` form. Both wizards described below survive, but as the
+> *fallback* taken when the command is sent bare — not as the primary path. The reasoning below
+> stands as the record of why the four-step chain was chosen, and note what it missed: four
+> required fields only forced a four-step chain because the description was mandatory, which
+> ADR-0009 relaxes.
+
 `/edit <id>` now opens with an inline-keyboard menu ("Which field?") instead of walking all four
 fields with `"-"` to skip — issue #5. `WizardState.step` gained `awaiting_field_choice` as the
 starting step for kind `"edit"` (kind `"assign"` still starts at `awaiting_assignee`); the field
@@ -167,6 +186,12 @@ through to the "not sure what you mean" fallback.
 
 ### `/blocked` overloads the existing command name (issue #6)
 
+> **Partly superseded by [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md).** The
+> dual-purpose overload survives exactly as described below. What changes underneath it is that
+> `blocked` becomes a *status* rather than an orthogonal boolean flag, so `/blocked <id> <reason>`
+> now sets a status and stashes the prior one in `previous_status`. A second route to the same
+> state also appears — `/update <ref> blocked` — which is why ADR-0009 makes the reason optional.
+
 Issue #6 asked for a new read-only `/blocked` (no arguments) list command, mirroring
 `/backlog`/`/pending`. But `/blocked <task_id> <reason>` already existed (PRD §5, intern-facing:
 flags a task as blocked). Rather than invent a different name for the list view — which the
@@ -185,6 +210,12 @@ reused as-is for the command reply, unchanged, consistent with `/backlog`/`/pend
 showing the assignee regardless of caller role.
 
 ### `/alltasks` and `/mytasks` paginate via a page-number argument (issue #7)
+
+> **Partly superseded by [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md).**
+> `/alltasks` is renamed `/tasks` and gains `@username` and role filters. The page-number
+> argument convention below is kept and extended to the renamed command — but note the new
+> parsing ambiguity it creates, since `/tasks 2` must still mean page 2 while `/tasks @jean` and
+> `/tasks intern` are filters.
 
 Both list commands now cap a reply at 10 tasks per page (`PAGE_SIZE` in `src/bot/format.ts`),
 with `/alltasks 2` / `/mytasks 2` requesting the next page. A command-argument page number was
@@ -234,6 +265,12 @@ flow is unchanged — it still just waits for the next message (a corrected user
 themselves for it to take effect.
 
 ### "Mark unblocked" inline button reuses `clearBlocked` as-is, no new rule (issue #9)
+
+> **Superseded by [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md).** The button is
+> removed along with the Approve/Revise buttons it was modelled on — all three encoded the
+> higher-up review gate that ADR-0009 deletes. `clearBlocked` itself survives, reached by
+> `/unblock <ref>`, and now restores `previous_status` rather than clearing a boolean. The
+> one-entry-point-per-rule principle below is unaffected and still worth keeping.
 
 Issue #9 asked for a one-tap alternative to typing `/unblocked <task_id>` on the blocked-flag
 notification a higher-up already receives (PRD §8). The button (`unblock:<id>` callback data,
