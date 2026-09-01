@@ -13,6 +13,7 @@ import {
   runDueSoonReminderCheck,
   runOverdueCrossingCheck,
   runWeeklyDigest,
+  sendDM,
   type NotifierBot,
   type SchedulerDeps,
 } from "./scheduler.js";
@@ -75,6 +76,21 @@ async function makeDeps(now: Date = NOW) {
   return { deps, service, roster, bot, overdueNotifications, registrations };
 }
 
+/** Wraps a real registration store so lookups for `badUsername` throw,
+ * mirroring the `.maybeSingle()` "multiple rows" failure a duplicated
+ * roster handle produces (#49's F5 / #59's H3). */
+function makeThrowingRegistrations(
+  store: InMemoryRegistrationStore,
+  badUsername: string,
+): InMemoryRegistrationStore {
+  const original = store.findTelegramId.bind(store);
+  vi.spyOn(store, "findTelegramId").mockImplementation(async (username: string) => {
+    if (username === badUsername) throw new Error("PGRST116 multiple rows");
+    return original(username);
+  });
+  return store;
+}
+
 function assign(
   service: TaskService,
   overrides: Partial<{
@@ -92,6 +108,24 @@ function assign(
     ...overrides,
   });
 }
+
+describe("sendDM (issue #59/H3)", () => {
+  it("returns false and does not throw when findTelegramId throws", async () => {
+    const { deps, registrations } = await makeDeps();
+    makeThrowingRegistrations(registrations, "alice");
+    await expect(sendDM(deps.bot, registrations, "alice", "hi")).resolves.toBe(false);
+  });
+
+  it("returns false when there is no Registration", async () => {
+    const { deps, registrations } = await makeDeps();
+    await expect(sendDM(deps.bot, registrations, "ghost", "hi")).resolves.toBe(false);
+  });
+
+  it("returns true on a successful send", async () => {
+    const { deps, registrations } = await makeDeps();
+    await expect(sendDM(deps.bot, registrations, "alice", "hi")).resolves.toBe(true);
+  });
+});
 
 describe("runOverdueCrossingCheck", () => {
   it("notifies both the intern and the assigning higher-up exactly once", async () => {
@@ -118,6 +152,19 @@ describe("runOverdueCrossingCheck", () => {
     await runOverdueCrossingCheck(deps, COHORT, NOW);
     expect(bot.sent).toHaveLength(0);
   });
+
+  it("a broken lookup for one task's assignee does not skip the next task, and does not mark the failed one notified (issue #59/H3)", async () => {
+    const past = new Date("2026-09-20T02:00:00.000Z");
+    const { deps, service, bot, overdueNotifications, registrations } = await makeDeps(past);
+    const first = await assign(service, { assigneeUsername: "alice" });
+    const second = await assign(service, { assigneeUsername: "bob" });
+    if (!first.ok || !second.ok) throw new Error("setup failed");
+    makeThrowingRegistrations(registrations, "alice");
+
+    await runOverdueCrossingCheck(deps, COHORT, past);
+
+    expect(await overdueNotifications.hasNotified(COHORT, second.value.id)).toBe(true);
+  });
 });
 
 describe("runDueSoonReminderCheck", () => {
@@ -134,6 +181,17 @@ describe("runDueSoonReminderCheck", () => {
     await assign(service, { dueDate: "2026-09-20" });
     await runDueSoonReminderCheck(deps, COHORT, NOW);
     expect(bot.sent).toHaveLength(0);
+  });
+
+  it("a broken lookup for one recipient does not skip the rest (issue #59/H3)", async () => {
+    const { deps, service, bot, registrations } = await makeDeps();
+    await assign(service, { assigneeUsername: "alice", dueDate: "2026-09-05" });
+    await assign(service, { assigneeUsername: "bob", dueDate: "2026-09-05" });
+    makeThrowingRegistrations(registrations, "alice");
+
+    await runDueSoonReminderCheck(deps, COHORT, NOW);
+
+    expect(bot.sent).toHaveLength(1);
   });
 });
 
@@ -170,6 +228,26 @@ describe("runDailyDigest", () => {
     );
     expect(daveDm).toBeDefined();
   });
+
+  it("a broken lookup for one member does not skip the rest of the roster, and the group summary still posts (issue #59/H3)", async () => {
+    const { deps, service, bot, registrations } = await makeDeps();
+    const created = await assign(service);
+    if (!created.ok) throw new Error("setup failed");
+    await service.setStatus(alice, created.value.id, "in_review");
+    // Roster order is alice, bob, carla, dave — alice's lookup throws.
+    makeThrowingRegistrations(registrations, "alice");
+
+    const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
+    await runDailyDigest(deps, digestBuilder, COHORT);
+
+    // carla and dave both have a pending review -> DM each, despite alice's
+    // lookup blowing up first in roster order.
+    const dmCount = bot.sent.filter((m) => typeof m.chatId === "number").length;
+    expect(dmCount).toBe(2);
+
+    const groupMessage = bot.sent.find((m) => m.chatId === "-100999");
+    expect(groupMessage).toBeDefined();
+  });
 });
 
 describe("runWeeklyDigest", () => {
@@ -182,5 +260,20 @@ describe("runWeeklyDigest", () => {
     const higherUpDms = bot.sent.filter((m) => m.text.includes("Weekly digest"));
     // Only alice (intern, has an open task) should get a weekly DM.
     expect(higherUpDms).toHaveLength(1);
+  });
+
+  it("a broken lookup for the middle roster member still reaches the last one (issue #59/H3)", async () => {
+    const { deps, service, bot, registrations } = await makeDeps();
+    await assign(service, { assigneeUsername: "alice" });
+    await assign(service, { assigneeUsername: "bob" });
+    // Roster order is alice, bob, carla, dave — bob is the middle member
+    // with an open task.
+    makeThrowingRegistrations(registrations, "bob");
+
+    const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
+    await runWeeklyDigest(deps, digestBuilder, COHORT, NOW);
+
+    const aliceDm = bot.sent.find((m) => m.text.includes("Weekly digest"));
+    expect(aliceDm).toBeDefined();
   });
 });
