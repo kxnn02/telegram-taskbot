@@ -219,4 +219,24 @@ describe("formatHelp", () => {
     expect(text).not.toContain("/unblocked");
     expect(text).not.toMatch(/\/backlog\b/);
   });
+
+  it("/pending and /dashboard are listed for everyone, not split into a higher-up-only section (issue #27/#35)", () => {
+    const internText = formatHelp("Intern");
+    expect(internText).toContain("/pending");
+    expect(internText).toContain("/dashboard");
+  });
+
+  it("has one section, not a role split — HigherUp and Intern see the same commands bar /edit's note (issue #27/#35)", () => {
+    expect(formatHelp("Intern")).toBe(formatHelp("HigherUp"));
+  });
+});
+
+describe("BOT_COMMANDS / formatHelp coherence (issue #27/#35)", () => {
+  it("every command Telegram's autocomplete menu offers also appears in /help", async () => {
+    const { BOT_COMMANDS } = await import("./createBot.js");
+    const helpText = formatHelp("HigherUp");
+    for (const { command } of BOT_COMMANDS) {
+      expect(helpText).toContain(`/${command}`);
+    }
+  });
 });

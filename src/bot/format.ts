@@ -195,33 +195,36 @@ export function formatTaskDetail(task: TaskWithFlags): string {
   ].join("\n");
 }
 
+// Almost nothing here is role-gated any more (issue #27/#35) — free-set
+// statuses and open reads mean one shared list covers both roles. /edit's
+// direct-edit form is the sole exception (still restricted to higher-ups,
+// issue #27/#31), so it's called out inline instead of living in its own
+// role-specific section the way the pre-#27 help text split things.
 const EVERYONE_HELP = [
   "/start — register yourself against the roster",
   "/help — this list",
   "/cancel — abort an in-progress wizard",
   "/addtask <title> [by <date>] [@username] — create a task in one line, assigned to you by default, due the coming Friday unless you give a date",
   "/addtask — bare, starts the step-by-step form instead",
+  "@-mention the bot with a task description — same as /addtask, works in group chats too",
   "/tasks [page] — every task in the cohort, grouped by assignee",
   "/tasks @username — filter to one member's tasks",
   "/tasks intern|higherup — filter to tasks assigned to that role",
   "/mytasks — your open tasks",
   "/task <ref> — full detail on one task (ref is 23 or t23)",
-  "/update <ref> <status> — set a task's status (backlog, todo, in progress, in review, blocked, done)",
+  "/update <ref> <status> — set a task's status (backlog, todo, in progress, in review, blocked, done); also takes a comma-separated list of refs for a bulk update",
   "/done <ref> — mark a task In review",
   "/complete <ref> — mark a task Done",
   "/overdue — overdue tasks",
+  "/pending — review queue (tasks In review)",
   "/deadlines — open tasks due in the next 7 days, soonest first",
   "/standup — on-demand standup report for the cohort",
   "/blocked — blocked tasks",
   "/blocked <ref> <reason> — flag a task as blocked",
   "/unblock <ref> — restore a blocked task to its previous status",
   "/note <ref> <text> — attach a feedback note",
-  "/edit <ref> <field> <value> — edit assignee, title, description, or duedate directly",
-  "/edit <ref> — bare, starts the field-choice form instead",
-];
-
-const HIGHER_UP_HELP = [
-  "/pending — review queue (tasks In review)",
+  "/edit <ref> <field> <value> — edit assignee, title, description, or duedate directly (restricted to higher-ups)",
+  "/edit <ref> — bare, starts the field-choice form instead (restricted to higher-ups)",
   "/dashboard — get the dashboard link",
 ];
 
@@ -232,9 +235,7 @@ export function formatHelp(role: Role | undefined): string {
       "Run /start to link your Telegram account to the roster.",
     ].join("\n");
   }
-  const sections =
-    role === "Intern" ? EVERYONE_HELP : [...EVERYONE_HELP, ...HIGHER_UP_HELP];
-  return ["Commands available to you:", ...sections.map((l) => "- " + l)].join(
+  return ["Commands available to you:", ...EVERYONE_HELP.map((l) => "- " + l)].join(
     "\n",
   );
 }

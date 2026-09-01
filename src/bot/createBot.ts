@@ -84,6 +84,43 @@ export interface CreatedBot {
   wizards: WizardManager;
 }
 
+/** Telegram's command-autocomplete menu (issue #27/#35) — descriptions
+ * mirror `formatHelp`'s EVERYONE_HELP list one-for-one, kept short since
+ * Telegram truncates the menu entry. Excludes the removed-command redirect
+ * handlers below (e.g. `/submit`, `/backlog`) on purpose: those exist only
+ * to point old muscle memory at the replacement, not to be offered as live
+ * commands. */
+export const BOT_COMMANDS = [
+  { command: "start", description: "Register yourself against the roster" },
+  { command: "help", description: "Show the commands available to you" },
+  { command: "cancel", description: "Abort an in-progress wizard" },
+  { command: "addtask", description: "Create a task in one line, or start the step-by-step form" },
+  { command: "tasks", description: "List cohort tasks, optionally filtered by @username or role" },
+  { command: "mytasks", description: "Show your open tasks" },
+  { command: "task", description: "Show full detail on one task" },
+  { command: "update", description: "Set a task's status (or bulk-update several)" },
+  { command: "done", description: "Mark a task In review" },
+  { command: "complete", description: "Mark a task Done" },
+  { command: "overdue", description: "List overdue tasks" },
+  { command: "pending", description: "Review queue (tasks In review)" },
+  { command: "deadlines", description: "Open tasks due in the next 7 days" },
+  { command: "standup", description: "On-demand standup report for the cohort" },
+  { command: "blocked", description: "List blocked tasks, or flag one as blocked" },
+  { command: "unblock", description: "Restore a blocked task to its previous status" },
+  { command: "note", description: "Attach a feedback note to a task" },
+  { command: "edit", description: "Edit a task's assignee, title, description, or due date (higher-ups only)" },
+  { command: "dashboard", description: "Get the dashboard link" },
+] as const;
+
+/** Registers `BOT_COMMANDS` with Telegram so the client's command-
+ * autocomplete menu is populated (issue #27/#35 — this had never been
+ * called anywhere in the repo before this stage). Idempotent: safe to call
+ * on every cold start, since it just overwrites Telegram's stored list with
+ * the same values when nothing changed. */
+export async function registerBotCommands(bot: Bot): Promise<void> {
+  await bot.api.setMyCommands([...BOT_COMMANDS]);
+}
+
 export function createBot(options: CreateBotOptions): CreatedBot {
   const bot = options.bot ?? new Bot(options.token);
   const roster = options.roster ?? loadRoster(options.rosterPath);
