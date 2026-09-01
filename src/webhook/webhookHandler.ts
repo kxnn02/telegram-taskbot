@@ -1,5 +1,5 @@
-import { timingSafeEqual } from "node:crypto";
 import type { Update } from "grammy/types";
+import { headerValue, secretMatches } from "./internalSecret.js";
 
 /**
  * Minimal request shape the core webhook logic needs — deliberately not
@@ -37,29 +37,6 @@ export interface WebhookHandlerDeps {
 }
 
 const SECRET_HEADER = "x-telegram-bot-api-secret-token";
-
-/**
- * Timing-safe comparison of the incoming secret-token header against the
- * expected value. A plain `===` here would leak a timing side-channel on a
- * secret-token check; `crypto.timingSafeEqual` requires equal-length
- * buffers, so a length mismatch (including a missing header) is treated as
- * a non-match up front without ever touching `timingSafeEqual`.
- */
-function secretMatches(candidate: string | undefined, expected: string): boolean {
-  if (candidate === undefined) return false;
-  const candidateBuf = Buffer.from(candidate);
-  const expectedBuf = Buffer.from(expected);
-  if (candidateBuf.length !== expectedBuf.length) return false;
-  return timingSafeEqual(candidateBuf, expectedBuf);
-}
-
-function headerValue(
-  headers: Record<string, string | string[] | undefined>,
-  name: string,
-): string | undefined {
-  const raw = headers[name];
-  return Array.isArray(raw) ? raw[0] : raw;
-}
 
 /**
  * Core Telegram webhook logic (ADR-0004), independent of any Vercel/HTTP

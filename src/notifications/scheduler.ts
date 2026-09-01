@@ -1,4 +1,3 @@
-import cron from "node-cron";
 import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
 import type { OverdueNotificationStorePort } from "../storage/overdueNotificationStorePort.js";
 import type { CohortStorePort } from "../storage/cohortStorePort.js";
@@ -37,10 +36,6 @@ export interface SchedulerDeps {
   cohorts: CohortStorePort;
 }
 
-function cohortIds(roster: Roster): string[] {
-  return [...new Set(roster.all().map((entry) => entry.cohortId))];
-}
-
 /** A synthetic caller used only to reach TaskService.listAllTasks (which
  * isn't role-restricted — it returns the whole cohort regardless of caller
  * role) so the scheduler can read raw cohort task state. Never used for
@@ -52,7 +47,7 @@ function schedulerCaller(cohortId: string): Caller {
 /** Best-effort DM send, mirroring src/bot/notify.ts's notifyUser: silently
  * no-ops if the recipient never ran /start, and never throws on delivery
  * failure (e.g. the user blocked the bot). */
-async function sendDM(
+export async function sendDM(
   bot: NotifierBot,
   registrations: RegistrationStorePort,
   username: string,
@@ -170,78 +165,10 @@ export async function runWeeklyDigest(
   }
 }
 
-export interface SchedulerHandle {
-  stop(): void;
-}
-
-/**
- * Wires the four notification jobs onto Asia/Manila cron schedules. This
- * function itself is a thin integration layer — the acceptance-criteria-load-
- * bearing logic it calls (findNewOverdueCrossings, findDueTomorrow,
- * DigestBuilder, formatGroupDailySummary) is unit-tested independently at
- * the service/query level; this wiring is the "thinner, separately-verified
- * integration concern" issue #2 calls out.
- */
-export function startScheduler(deps: SchedulerDeps): SchedulerHandle {
-  const digestBuilder = new DigestBuilder({
-    service: deps.service,
-    roster: deps.roster,
-  });
-
-  const tasks = [
-    // Overdue-crossing: checked hourly. A due date is day-granularity, so
-    // the crossing itself happens once at midnight Manila time; hourly
-    // polling catches it promptly without needing a sub-hourly job for an
-    // ~8-person cohort bot, and re-checks are cheap no-ops thanks to
-    // OverdueNotificationRepository's one-time tracking.
-    cron.schedule(
-      "0 * * * *",
-      () => {
-        const now = new Date();
-        for (const cohortId of cohortIds(deps.roster)) {
-          void runOverdueCrossingCheck(deps, cohortId, now);
-        }
-      },
-      { timezone: MANILA_TIMEZONE },
-    ),
-    // Due-date reminder: once daily, ahead of the 10am digest.
-    cron.schedule(
-      "0 9 * * *",
-      () => {
-        const now = new Date();
-        for (const cohortId of cohortIds(deps.roster)) {
-          void runDueSoonReminderCheck(deps, cohortId, now);
-        }
-      },
-      { timezone: MANILA_TIMEZONE },
-    ),
-    // Daily standup digest: 10am every day.
-    cron.schedule(
-      "0 10 * * *",
-      () => {
-        for (const cohortId of cohortIds(deps.roster)) {
-          void runDailyDigest(deps, digestBuilder, cohortId);
-        }
-      },
-      { timezone: MANILA_TIMEZONE },
-    ),
-    // Weekly digest: Monday 10am, alongside (not instead of) that day's
-    // daily digest — the two are deliberately separate PRD §8 features.
-    cron.schedule(
-      "0 10 * * 1",
-      () => {
-        const now = new Date();
-        for (const cohortId of cohortIds(deps.roster)) {
-          void runWeeklyDigest(deps, digestBuilder, cohortId, now);
-        }
-      },
-      { timezone: MANILA_TIMEZONE },
-    ),
-  ];
-
-  return {
-    stop() {
-      for (const task of tasks) task.stop();
-    },
-  };
-}
+// `startScheduler` (the node-cron wiring for the four jobs above) was
+// removed in Phase 4 (issue #15/ADR-0007): scheduling now lives in
+// Supabase `pg_cron` + `pg_net` calling the `/api/jobs/*` endpoints
+// (`src/jobs/notificationJobs.ts` wraps these same `run*` functions,
+// scoped to one cohort per call rather than looping every roster cohort
+// the way this file's removed cron wiring used to). The `run*` functions
+// above are unchanged and reused directly by those endpoints.
