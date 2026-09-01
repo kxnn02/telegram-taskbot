@@ -9,6 +9,7 @@ import { createDashboardServer } from "./dashboardServer.js";
 import type { TelegramAuthData } from "./telegramAuth.js";
 
 const BOT_TOKEN = "555555:dashboard-test-token";
+const SESSION_SECRET = "dashboard-test-session-secret";
 const COHORT = "cohort-5";
 const NOW = new Date("2026-08-31T02:00:00.000Z");
 
@@ -52,6 +53,7 @@ function makeApp() {
     service,
     botUsername: "devcon_cohort5_taskbot",
     activeCohortId: COHORT,
+    sessionSecret: SESSION_SECRET,
   });
   return { app, service };
 }
@@ -129,6 +131,7 @@ describe("GET /auth/telegram/callback", () => {
       service,
       botUsername: "devcon_cohort5_taskbot",
       activeCohortId: "cohort5-dryrun",
+      sessionSecret: SESSION_SECRET,
     });
 
     const login = await request(app)
@@ -147,6 +150,24 @@ describe("GET / (oversight view)", () => {
   it("redirects to /login when no session cookie is present", async () => {
     const { app } = makeApp();
     const res = await request(app).get("/");
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe("/login");
+  });
+
+  it("redirects to /login when the session cookie is tampered with", async () => {
+    const { app } = makeApp();
+    const login = await loginAs(app, "carla");
+    const cookie = sessionCookieFrom(login);
+    const valuePart = cookie.split(";")[0] as string; // "session=<value>"
+    const tamperedValue = valuePart.slice(0, -4) + "dead";
+    const res = await request(app).get("/").set("Cookie", tamperedValue);
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe("/login");
+  });
+
+  it("redirects to /login when the session cookie is garbage", async () => {
+    const { app } = makeApp();
+    const res = await request(app).get("/").set("Cookie", "session=not-a-real-session-value");
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe("/login");
   });
@@ -213,13 +234,24 @@ describe("GET / (oversight view)", () => {
     expect(res.text).not.toContain("Alice&#39;s task");
   });
 
-  it("no longer grants access after /logout", async () => {
+  it("/logout clears the session cookie, so a normal browser loses access afterward", async () => {
+    // Sessions are now a signed, stateless cookie (ADR-0008) — there's
+    // nothing server-side left to revoke, so "logout" can only tell the
+    // browser to drop the cookie (Set-Cookie with Max-Age=0). A real
+    // browser honors that and stops sending the old value, which this
+    // agent (a real cookie jar) models faithfully. Deliberately not
+    // tested here: manually replaying the old signed cookie value after
+    // logout still authenticates, since there's no server-side
+    // revocation/blocklist — ADR-0008 explicitly defers that as a future
+    // add, not needed at this dashboard's ~8-user scale.
     const { app } = makeApp();
-    const login = await loginAs(app, "carla");
-    const cookie = sessionCookieFrom(login);
+    const agent = request.agent(app);
+    await agent
+      .get("/auth/telegram/callback")
+      .query(telegramPayloadFor("carla") as unknown as Record<string, string>);
 
-    await request(app).get("/logout").set("Cookie", cookie);
-    const res = await request(app).get("/").set("Cookie", cookie);
+    await agent.get("/logout");
+    const res = await agent.get("/");
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe("/login");
   });

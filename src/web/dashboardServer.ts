@@ -7,7 +7,7 @@ import type { Caller } from "../domain/types.js";
 import type { CohortStats, TaskService, TaskWithFlags } from "../service/taskService.js";
 import { parseDueDate } from "../date/parseDueDate.js";
 import { verifyTelegramAuth, type TelegramAuthData } from "./telegramAuth.js";
-import { SessionStore } from "./sessionStore.js";
+import { signSession, verifySession } from "./sessionCookie.js";
 import { parseCookies, serializeCookie } from "./cookies.js";
 import {
   STATUS_GROUPS,
@@ -39,7 +39,10 @@ export interface CreateDashboardServerOptions {
    * cohorts that happen to share a username (the dry run intentionally
    * reuses real accounts across cohorts). */
   activeCohortId: string;
-  sessionStore?: SessionStore;
+  /** Secret used to sign the stateless session cookie (ADR-0008) —
+   * distinct from botToken so rotating one doesn't force rotating the
+   * other. */
+  sessionSecret: string;
 }
 
 const SESSION_COOKIE = "session";
@@ -52,16 +55,16 @@ const SESSION_COOKIE = "session";
  * routes here; that's issue #4.
  */
 export function createDashboardServer(options: CreateDashboardServerOptions): Express {
-  const sessionStore = options.sessionStore ?? new SessionStore();
   const app = express();
   app.use(express.urlencoded({ extended: false }));
   app.use(express.static(path.join(__dirname, "public")));
 
   function getCaller(req: Request): Caller | undefined {
     const cookies = parseCookies(req.headers.cookie);
-    const token = cookies[SESSION_COOKIE];
-    if (!token) return undefined;
-    return sessionStore.get(token);
+    const cookieValue = cookies[SESSION_COOKIE];
+    if (!cookieValue) return undefined;
+    const result = verifySession(cookieValue, options.sessionSecret);
+    return result.ok ? result.session : undefined;
   }
 
   function requireSession(req: Request, res: Response, next: NextFunction) {
@@ -105,15 +108,14 @@ export function createDashboardServer(options: CreateDashboardServerOptions): Ex
       role: entry.role,
       cohortId: entry.cohortId,
     };
-    const token = sessionStore.create(caller);
-    res.setHeader("Set-Cookie", serializeCookie(SESSION_COOKIE, token));
+    const cookieValue = signSession(caller, options.sessionSecret);
+    res.setHeader("Set-Cookie", serializeCookie(SESSION_COOKIE, cookieValue));
     res.redirect(302, "/");
   });
 
-  app.get("/logout", (req, res) => {
-    const cookies = parseCookies(req.headers.cookie);
-    const token = cookies[SESSION_COOKIE];
-    if (token) sessionStore.destroy(token);
+  app.get("/logout", (_req, res) => {
+    // Nothing server-side to destroy — the session lives entirely inside
+    // the signed cookie, so logging out just tells the browser to drop it.
     res.setHeader("Set-Cookie", serializeCookie(SESSION_COOKIE, "", { maxAgeSeconds: 0 }));
     res.redirect(302, "/login");
   });
