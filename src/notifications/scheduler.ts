@@ -45,20 +45,24 @@ function schedulerCaller(cohortId: string): Caller {
 }
 
 /** Best-effort DM send, mirroring src/bot/notify.ts's notifyUser: silently
- * no-ops if the recipient never ran /start, and never throws on delivery
- * failure (e.g. the user blocked the bot). */
+ * no-ops if the recipient never ran /start, and never throws — neither on
+ * the registration lookup (which can throw, e.g. a duplicated roster
+ * handle) nor on delivery failure (e.g. the user blocked the bot). Returns
+ * whether a message was actually sent. */
 export async function sendDM(
   bot: NotifierBot,
   registrations: RegistrationStorePort,
   username: string,
   text: string,
-): Promise<void> {
-  const telegramId = await registrations.findTelegramId(username);
-  if (!telegramId) return;
+): Promise<boolean> {
   try {
+    const telegramId = await registrations.findTelegramId(username);
+    if (!telegramId) return false;
     await bot.api.sendMessage(telegramId, text);
+    return true;
   } catch {
     // Best-effort — never let a notification failure propagate.
+    return false;
   }
 }
 
@@ -77,10 +81,17 @@ export async function runOverdueCrossingCheck(
     deps.overdueNotifications.hasNotified(c, id),
   );
   for (const task of crossings) {
-    const text = `Task ${task.id} ("${task.title}") is now overdue — it was due ${task.dueDate} and hasn't been submitted.`;
-    await sendDM(deps.bot, deps.registrations, task.assigneeUsername, text);
-    await sendDM(deps.bot, deps.registrations, task.assignedByUsername, text);
-    await deps.overdueNotifications.markNotified(task.cohortId, task.id);
+    try {
+      const text = `Task ${task.id} ("${task.title}") is now overdue — it was due ${task.dueDate} and hasn't been submitted.`;
+      await sendDM(deps.bot, deps.registrations, task.assigneeUsername, text);
+      await sendDM(deps.bot, deps.registrations, task.assignedByUsername, text);
+      await deps.overdueNotifications.markNotified(task.cohortId, task.id);
+    } catch (err) {
+      // Isolate one task's failure so the rest of the crossings still get
+      // notified — markNotified above is skipped, so this task is retried
+      // on the next run.
+      console.error(`runOverdueCrossingCheck: task ${task.id} failed`, err);
+    }
   }
 }
 
@@ -94,12 +105,16 @@ export async function runDueSoonReminderCheck(
   const tasks = result.ok ? result.value : [];
   const dueSoon = findDueTomorrow(tasks, now);
   for (const task of dueSoon) {
-    await sendDM(
-      deps.bot,
-      deps.registrations,
-      task.assigneeUsername,
-      `Reminder: Task ${task.id} ("${task.title}") is due tomorrow (${task.dueDate}).`,
-    );
+    try {
+      await sendDM(
+        deps.bot,
+        deps.registrations,
+        task.assigneeUsername,
+        `Reminder: Task ${task.id} ("${task.title}") is due tomorrow (${task.dueDate}).`,
+      );
+    } catch (err) {
+      console.error(`runDueSoonReminderCheck: task ${task.id} failed`, err);
+    }
   }
 }
 
@@ -129,19 +144,25 @@ export async function runDailyDigest(
 ): Promise<void> {
   const entries = deps.roster.all().filter((e) => e.cohortId === cohortId);
   for (const entry of entries) {
-    const text =
-      entry.role === "Intern"
-        ? await digestBuilder.internDigest(entry.username, cohortId)
-        : await higherUpCombinedDigest(digestBuilder, entry.username, cohortId, () =>
-            digestBuilder.higherUpDailyDigest(entry.username, cohortId),
-          );
-    if (text) {
-      await sendDM(
-        deps.bot,
-        deps.registrations,
-        entry.username,
-        `Daily digest:\n\n${text}`,
-      );
+    try {
+      const text =
+        entry.role === "Intern"
+          ? await digestBuilder.internDigest(entry.username, cohortId)
+          : await higherUpCombinedDigest(digestBuilder, entry.username, cohortId, () =>
+              digestBuilder.higherUpDailyDigest(entry.username, cohortId),
+            );
+      if (text) {
+        await sendDM(
+          deps.bot,
+          deps.registrations,
+          entry.username,
+          `Daily digest:\n\n${text}`,
+        );
+      }
+    } catch (err) {
+      // Isolate one member's failure so the rest of the roster, and the
+      // group-chat summary below, still go out.
+      console.error(`runDailyDigest: member ${entry.username} failed`, err);
     }
   }
 
@@ -169,19 +190,23 @@ export async function runWeeklyDigest(
 ): Promise<void> {
   const entries = deps.roster.all().filter((e) => e.cohortId === cohortId);
   for (const entry of entries) {
-    const text =
-      entry.role === "Intern"
-        ? await digestBuilder.internDigest(entry.username, cohortId)
-        : await higherUpCombinedDigest(digestBuilder, entry.username, cohortId, () =>
-            digestBuilder.higherUpWeeklyDigest(entry.username, cohortId, now),
-          );
-    if (text) {
-      await sendDM(
-        deps.bot,
-        deps.registrations,
-        entry.username,
-        `Weekly digest:\n\n${text}`,
-      );
+    try {
+      const text =
+        entry.role === "Intern"
+          ? await digestBuilder.internDigest(entry.username, cohortId)
+          : await higherUpCombinedDigest(digestBuilder, entry.username, cohortId, () =>
+              digestBuilder.higherUpWeeklyDigest(entry.username, cohortId, now),
+            );
+      if (text) {
+        await sendDM(
+          deps.bot,
+          deps.registrations,
+          entry.username,
+          `Weekly digest:\n\n${text}`,
+        );
+      }
+    } catch (err) {
+      console.error(`runWeeklyDigest: member ${entry.username} failed`, err);
     }
   }
 }
