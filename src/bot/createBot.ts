@@ -14,6 +14,7 @@ import { notifyUser, notifyStatusChange } from "./notify.js";
 import { suggestClosestUsername } from "./usernameSuggest.js";
 import { parseTaskRef } from "./taskRef.js";
 import { parseStatusWord, VALID_STATUS_WORDS_TEXT } from "./statusParse.js";
+import { parseRefListItems, parseUpdateItems, type BatchItem } from "./updateBatch.js";
 import {
   formatAllTasksGrouped,
   formatBacklog,
@@ -292,27 +293,153 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   }
 
   const UPDATE_USAGE = `Usage: /update <ref> <status> — status is one of: ${VALID_STATUS_WORDS_TEXT}`;
+  const TELEGRAM_MESSAGE_LIMIT = 4096;
+
+  interface BatchOutcome {
+    label: string;
+    ok: boolean;
+    message: string;
+    task?: { assigneeUsername: string; assignedByUsername: string; title: string };
+    status?: TaskStatus;
+  }
+
+  /** Runs one `setStatus` call per batch item (issue #32) — no batch
+   * transaction, on purpose: the storage port has no multi-statement
+   * transaction primitive, and per-item semantics match what a chat user
+   * expects from a list of instructions. `resolveStatus` lets each caller
+   * (`/update` parses a status per item, `/done`/`/complete` use a fixed
+   * one) plug in its own status resolution without duplicating the loop. */
+  async function runBatch(
+    caller: Caller,
+    items: BatchItem[],
+    resolveStatus: (item: BatchItem) => { status: TaskStatus } | { error: string },
+  ): Promise<BatchOutcome[]> {
+    const outcomes: BatchOutcome[] = [];
+    for (const item of items) {
+      if (item.ref === undefined) {
+        outcomes.push({ label: `"${item.label}"`, ok: false, message: "not a valid task ref" });
+        continue;
+      }
+      const label = `t${item.ref}`;
+      const resolved = resolveStatus(item);
+      if ("error" in resolved) {
+        outcomes.push({ label, ok: false, message: resolved.error });
+        continue;
+      }
+      const result = await service.setStatus(caller, item.ref, resolved.status);
+      if (!result.ok) {
+        outcomes.push({ label, ok: false, message: result.error });
+        continue;
+      }
+      outcomes.push({
+        label,
+        ok: true,
+        message: statusLabel(resolved.status),
+        task: result.value,
+        status: resolved.status,
+      });
+    }
+    return outcomes;
+  }
+
+  /** Splits a per-item reply into Telegram-sized chunks (issue #32
+   * acceptance: a large batch must chunk or summarise, never silently
+   * truncate) rather than one long string that could exceed the 4096-char
+   * message limit. */
+  function chunkBatchReply(header: string, lines: string[]): string[] {
+    const chunks: string[] = [];
+    let current = header;
+    for (const line of lines) {
+      if (current.length + 1 + line.length > TELEGRAM_MESSAGE_LIMIT - 100) {
+        chunks.push(current);
+        current = line;
+      } else {
+        current += "\n" + line;
+      }
+    }
+    chunks.push(current);
+    return chunks;
+  }
+
+  /** Notification collapsing (issue #27/#32) — the sharpest edge in the
+   * spec: a naive per-item loop would fire one DM per task, so a
+   * `/update t21,...,t40 done` aimed at one assignee would send them
+   * twenty DMs. Gather every successful outcome's notification across the
+   * whole batch, group by recipient, and send exactly one summary DM per
+   * recipient per command. */
+  async function sendBatchNotifications(caller: Caller, outcomes: BatchOutcome[]): Promise<void> {
+    const perRecipient = new Map<string, string[]>();
+    for (const outcome of outcomes) {
+      if (!outcome.ok || !outcome.task || !outcome.status) continue;
+      const recipients = new Set([outcome.task.assigneeUsername, outcome.task.assignedByUsername]);
+      recipients.delete(caller.username);
+      for (const username of recipients) {
+        const changes = perRecipient.get(username) ?? [];
+        changes.push(`${outcome.label} ("${outcome.task.title}") → ${statusLabel(outcome.status)}`);
+        perRecipient.set(username, changes);
+      }
+    }
+    for (const [username, changes] of perRecipient) {
+      const text = `@${caller.username} updated ${changes.length} of your tasks:\n${changes.join("\n")}`;
+      await notifyUser(bot, registrations, username, text);
+    }
+  }
+
+  /** Replies with partial-failure reporting (issue #32): a wholly-invalid
+   * batch gets usage help instead of a wall of identical errors; otherwise
+   * every item gets a ✓/✗ line and a one-line summary, then notifications
+   * fire once the reply is sent. */
+  async function finishBatch(
+    ctx: import("grammy").Context,
+    caller: Caller,
+    outcomes: BatchOutcome[],
+    usageText: string,
+  ): Promise<void> {
+    if (outcomes.every((o) => !o.ok)) {
+      await ctx.reply(usageText);
+    } else {
+      const successCount = outcomes.filter((o) => o.ok).length;
+      const lines = outcomes.map((o) => (o.ok ? `${o.label} ✓ ${o.message}` : `${o.label} ✗ ${o.message}`));
+      const header = `${successCount}/${outcomes.length} updated.`;
+      for (const chunk of chunkBatchReply(header, lines)) {
+        await ctx.reply(chunk);
+      }
+    }
+    await sendBatchNotifications(caller, outcomes);
+  }
 
   bot.command(
     "update",
     withCaller(async (ctx, caller) => {
       const raw = matchToString(ctx.match).trim();
-      const spaceIdx = raw.indexOf(" ");
-      const refToken = spaceIdx === -1 ? raw : raw.slice(0, spaceIdx);
-      const id = parseTaskRef(refToken);
-      if (id === undefined) {
+      const items = parseUpdateItems(raw);
+      if (items.length === 0) {
         await ctx.reply(UPDATE_USAGE);
         return;
       }
-      const statusText = spaceIdx === -1 ? "" : raw.slice(spaceIdx + 1);
-      const status = parseStatusWord(statusText);
-      if (!status) {
-        await ctx.reply(
-          `I don't recognize "${statusText.trim()}" as a status. Valid statuses: ${VALID_STATUS_WORDS_TEXT}`,
-        );
+      if (items.length === 1) {
+        const item = items[0]!;
+        if (item.ref === undefined) {
+          await ctx.reply(UPDATE_USAGE);
+          return;
+        }
+        const statusText = item.statusText ?? "";
+        const status = parseStatusWord(statusText);
+        if (!status) {
+          await ctx.reply(
+            `I don't recognize "${statusText.trim()}" as a status. Valid statuses: ${VALID_STATUS_WORDS_TEXT}`,
+          );
+          return;
+        }
+        await applyStatusChange(caller, item.ref, status, ctx, `set to ${statusLabel(status)}.`);
         return;
       }
-      await applyStatusChange(caller, id, status, ctx, `set to ${statusLabel(status)}.`);
+      const outcomes = await runBatch(caller, items, (item) => {
+        const statusText = item.statusText ?? "";
+        const status = parseStatusWord(statusText);
+        return status ? { status } : { error: `unrecognized status "${statusText.trim()}"` };
+      });
+      await finishBatch(ctx, caller, outcomes, UPDATE_USAGE);
     }),
   );
 
@@ -321,24 +448,46 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   bot.command(
     "done",
     withCaller(async (ctx, caller) => {
-      const id = parseIdArg(ctx.match);
-      if (id === undefined) {
+      const raw = matchToString(ctx.match).trim();
+      const items = parseRefListItems(raw);
+      if (items.length === 0) {
         await ctx.reply("Usage: /done <ref>");
         return;
       }
-      await applyStatusChange(caller, id, "in_review", ctx, "marked as submitted. Nice work!");
+      if (items.length === 1) {
+        const item = items[0]!;
+        if (item.ref === undefined) {
+          await ctx.reply("Usage: /done <ref>");
+          return;
+        }
+        await applyStatusChange(caller, item.ref, "in_review", ctx, "marked as submitted. Nice work!");
+        return;
+      }
+      const outcomes = await runBatch(caller, items, () => ({ status: "in_review" }));
+      await finishBatch(ctx, caller, outcomes, "Usage: /done <ref>");
     }),
   );
 
   bot.command(
     "complete",
     withCaller(async (ctx, caller) => {
-      const id = parseIdArg(ctx.match);
-      if (id === undefined) {
+      const raw = matchToString(ctx.match).trim();
+      const items = parseRefListItems(raw);
+      if (items.length === 0) {
         await ctx.reply("Usage: /complete <ref>");
         return;
       }
-      await applyStatusChange(caller, id, "done", ctx, "marked Done. Nice work!");
+      if (items.length === 1) {
+        const item = items[0]!;
+        if (item.ref === undefined) {
+          await ctx.reply("Usage: /complete <ref>");
+          return;
+        }
+        await applyStatusChange(caller, item.ref, "done", ctx, "marked Done. Nice work!");
+        return;
+      }
+      const outcomes = await runBatch(caller, items, () => ({ status: "done" }));
+      await finishBatch(ctx, caller, outcomes, "Usage: /complete <ref>");
     }),
   );
 
