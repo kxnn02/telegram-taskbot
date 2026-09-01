@@ -7,7 +7,8 @@ import type { TaskStorePort } from "../storage/taskStorePort.js";
 import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
 import type { WizardStateStorePort } from "../storage/wizardStateStorePort.js";
 import { comingFriday, parseDueDate } from "../date/parseDueDate.js";
-import { parseAddTaskArgs } from "./addTaskParse.js";
+import { ADDTASK_USAGE, parseAddTaskArgs } from "./addTaskParse.js";
+import { parseMentionTrigger } from "./mentionParse.js";
 import { resolveCaller } from "./callerResolution.js";
 import { WizardManager, type WizardState, type EditField } from "./wizard.js";
 import { notifyUser, notifyStatusChange } from "./notify.js";
@@ -174,24 +175,32 @@ export function createBot(options: CreateBotOptions): CreatedBot {
 
   // ---- Not-registered guard for everything else below --------------------
 
+  async function resolveCallerOrReply(
+    ctx: import("grammy").Context,
+  ): Promise<Caller | undefined> {
+    const userId = ctx.from?.id;
+    if (userId === undefined) return undefined;
+    const resolved = await requireCaller(userId);
+    if (resolved.status === "not_started") {
+      await ctx.reply("Send /start first so I know who you are.");
+      return undefined;
+    }
+    if (resolved.status === "not_on_roster") {
+      await ctx.reply(
+        "You're not on the roster yet — contact a higher-up to get added.",
+      );
+      return undefined;
+    }
+    return resolved.caller;
+  }
+
   function withCaller(
     handler: (ctx: import("grammy").Context, caller: Caller) => Promise<void>,
   ) {
     return async (ctx: import("grammy").Context) => {
-      const userId = ctx.from?.id;
-      if (userId === undefined) return;
-      const resolved = await requireCaller(userId);
-      if (resolved.status === "not_started") {
-        await ctx.reply("Send /start first so I know who you are.");
-        return;
-      }
-      if (resolved.status === "not_on_roster") {
-        await ctx.reply(
-          "You're not on the roster yet — contact a higher-up to get added.",
-        );
-        return;
-      }
-      await handler(ctx, resolved.caller);
+      const caller = await resolveCallerOrReply(ctx);
+      if (!caller) return;
+      await handler(ctx, caller);
     };
   }
 
@@ -674,6 +683,52 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     return `@${username} isn't a known roster member in this cohort.${suggestionText}`;
   }
 
+  // Shared by `/addtask <args>` and the mention trigger (issue #34, which
+  // reuses #30's create grammar verbatim rather than re-implementing it).
+  async function handleAddTaskArgs(
+    ctx: import("grammy").Context,
+    caller: Caller,
+    raw: string,
+  ) {
+    const parsed = parseAddTaskArgs(raw, new Date());
+    if ("error" in parsed) {
+      await ctx.reply(parsed.error);
+      return;
+    }
+
+    let assigneeUsername = caller.username;
+    if (parsed.assigneeUsername) {
+      const requested = parsed.assigneeUsername.replace(/^@/, "");
+      if (!roster.isMember(requested, caller.cohortId)) {
+        await ctx.reply(unknownRosterMemberReply(requested, caller.cohortId));
+        return;
+      }
+      assigneeUsername = requested;
+    }
+
+    const dueDate = parsed.dueDate?.isoDate ?? comingFriday(new Date()).isoDate;
+    const result = await service.assignTask(caller, {
+      assigneeUsername,
+      title: parsed.title,
+      dueDate,
+    });
+    if (!result.ok) {
+      await ctx.reply(`Couldn't create the task: ${result.error}`);
+      return;
+    }
+    await ctx.reply(
+      `Task ${result.value.id} created and assigned to @${result.value.assigneeUsername}, due ${result.value.dueDate}.`,
+    );
+    if (result.value.assigneeUsername !== normalizeUsername(caller.username)) {
+      await notifyUser(
+        bot,
+        registrations,
+        result.value.assigneeUsername,
+        `You've been assigned Task ${result.value.id}: "${result.value.title}" (due ${result.value.dueDate}). Send /task ${result.value.id} for full details.`,
+      );
+    }
+  }
+
   bot.command(
     "addtask",
     withCaller(async (ctx, caller) => {
@@ -685,44 +740,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         );
         return;
       }
-
-      const parsed = parseAddTaskArgs(raw, new Date());
-      if ("error" in parsed) {
-        await ctx.reply(parsed.error);
-        return;
-      }
-
-      let assigneeUsername = caller.username;
-      if (parsed.assigneeUsername) {
-        const requested = parsed.assigneeUsername.replace(/^@/, "");
-        if (!roster.isMember(requested, caller.cohortId)) {
-          await ctx.reply(unknownRosterMemberReply(requested, caller.cohortId));
-          return;
-        }
-        assigneeUsername = requested;
-      }
-
-      const dueDate = parsed.dueDate?.isoDate ?? comingFriday(new Date()).isoDate;
-      const result = await service.assignTask(caller, {
-        assigneeUsername,
-        title: parsed.title,
-        dueDate,
-      });
-      if (!result.ok) {
-        await ctx.reply(`Couldn't create the task: ${result.error}`);
-        return;
-      }
-      await ctx.reply(
-        `Task ${result.value.id} created and assigned to @${result.value.assigneeUsername}, due ${result.value.dueDate}.`,
-      );
-      if (result.value.assigneeUsername !== normalizeUsername(caller.username)) {
-        await notifyUser(
-          bot,
-          registrations,
-          result.value.assigneeUsername,
-          `You've been assigned Task ${result.value.id}: "${result.value.title}" (due ${result.value.dueDate}). Send /task ${result.value.id} for full details.`,
-        );
-      }
+      await handleAddTaskArgs(ctx, caller, raw);
     }),
   );
 
@@ -889,6 +907,22 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     const userId = ctx.from.id;
     const state = await wizards.get(userId);
     if (!state) {
+      // Mention trigger (issue #34): checked ahead of the DM-only fallback
+      // below, since it's meant to fire in group chatter too — but only on
+      // an explicit @-mention, never on unmentioned text, which is why
+      // "none" falls through to the same silent-in-groups behavior as
+      // before.
+      const trigger = parseMentionTrigger(text, bot.botInfo.username);
+      if (trigger.kind === "unrecognized") {
+        await ctx.reply(`Not sure what you mean — did you mean /addtask <title>? ${ADDTASK_USAGE}`);
+        return;
+      }
+      if (trigger.kind === "addtask") {
+        const caller = await resolveCallerOrReply(ctx);
+        if (!caller) return;
+        await handleAddTaskArgs(ctx, caller, trigger.args);
+        return;
+      }
       // With privacy mode off, the bot sees every message in a group chat,
       // not just ones meant for it — only DMs can assume every message is
       // addressed to the bot, so only reply with the fallback there.
