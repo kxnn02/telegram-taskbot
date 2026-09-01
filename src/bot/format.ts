@@ -1,5 +1,22 @@
 import type { TaskWithFlags } from "../service/taskService.js";
-import type { Role } from "../domain/types.js";
+import type { Role, TaskStatus } from "../domain/types.js";
+
+/** Display labels for the six free-set statuses (#27's normative status
+ * table) — the only place this vocabulary is spelled out for user-facing
+ * text, so every formatter below renders this instead of the raw
+ * snake_case stored value. */
+const STATUS_LABELS: Record<TaskStatus, string> = {
+  backlog: "Backlog",
+  todo: "To do",
+  in_progress: "In progress",
+  in_review: "In review",
+  blocked: "Blocked",
+  done: "Done",
+};
+
+export function statusLabel(status: TaskStatus): string {
+  return STATUS_LABELS[status];
+}
 
 /** Tasks per page for the paginated list commands (/alltasks, /mytasks) —
  * issue #7. A command-argument page number was chosen over inline
@@ -39,7 +56,7 @@ export function formatTaskLine(task: TaskWithFlags): string {
   if (task.overdue) flags.push(`OVERDUE ${task.daysOverdue}d`);
   if (task.status === "blocked") flags.push("BLOCKED");
   const flagText = flags.length > 0 ? ` [${flags.join(", ")}]` : "";
-  return `#${task.id} ${task.title} — ${task.status} (due ${task.dueDate})${flagText}`;
+  return `#${task.id} ${task.title} — ${statusLabel(task.status)} (due ${task.dueDate})${flagText}`;
 }
 
 export function formatMyTasks(tasks: TaskWithFlags[], page = 1): string {
@@ -142,7 +159,7 @@ export function formatTaskDetail(task: TaskWithFlags): string {
 
   return [
     `Task ${task.id}: ${task.title}`,
-    `Status: ${task.status}${flagLine}`,
+    `Status: ${statusLabel(task.status)}${flagLine}`,
     `Assignee: @${task.assigneeUsername}`,
     `Assigned by: @${task.assignedByUsername}`,
     `Due: ${task.dueDate}`,
@@ -158,26 +175,25 @@ const EVERYONE_HELP = [
   "/start — register yourself against the roster",
   "/help — this list",
   "/cancel — abort an in-progress wizard",
+  "/addtask <title> [by <date>] [@username] — create a task in one line, assigned to you by default, due the coming Friday unless you give a date",
+  "/addtask — bare, starts the step-by-step form instead",
   "/alltasks — every task in the cohort, grouped by assignee",
-  "/task <id> — full detail on one task",
-  "/backlog — overdue tasks",
-  "/blocked — blocked tasks",
-];
-
-const INTERN_HELP = [
   "/mytasks — your open tasks",
-  "/submit <id> — mark a task submitted",
-  "/blocked <id> <reason> — flag a task as blocked",
-  "/unblocked <id> — clear the blocked flag",
+  "/task <ref> — full detail on one task (ref is 23 or t23)",
+  "/update <ref> <status> — set a task's status (backlog, todo, in progress, in review, blocked, done)",
+  "/done <ref> — mark a task In review",
+  "/complete <ref> — mark a task Done",
+  "/overdue — overdue tasks",
+  "/blocked — blocked tasks",
+  "/blocked <ref> <reason> — flag a task as blocked",
+  "/unblock <ref> — restore a blocked task to its previous status",
+  "/note <ref> <text> — attach a feedback note",
+  "/edit <ref> <field> <value> — edit assignee, title, description, or duedate directly",
+  "/edit <ref> — bare, starts the field-choice form instead",
 ];
 
 const HIGHER_UP_HELP = [
-  "/assign — start the assignment wizard",
-  "/pending — review queue (Submitted tasks)",
-  "/note <id> <text> — attach a feedback note",
-  "/edit <id> — edit a task",
-  "/canceltask <id> — cancel a task",
-  "/approve <id> / /revise <id> — decide on a submitted task",
+  "/pending — review queue (tasks In review)",
   "/dashboard — get the dashboard link",
 ];
 
@@ -189,9 +205,7 @@ export function formatHelp(role: Role | undefined): string {
     ].join("\n");
   }
   const sections =
-    role === "Intern"
-      ? [...EVERYONE_HELP, ...INTERN_HELP]
-      : [...EVERYONE_HELP, ...HIGHER_UP_HELP];
+    role === "Intern" ? EVERYONE_HELP : [...EVERYONE_HELP, ...HIGHER_UP_HELP];
   return ["Commands available to you:", ...sections.map((l) => "- " + l)].join(
     "\n",
   );

@@ -1,15 +1,19 @@
 import { Bot, InlineKeyboard } from "grammy";
 import { loadRoster } from "../config/roster.js";
+import { normalizeUsername } from "../domain/roster.js";
 import { SystemClock } from "../domain/clock.js";
 import { TaskService } from "../service/taskService.js";
 import type { TaskStorePort } from "../storage/taskStorePort.js";
 import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
 import type { WizardStateStorePort } from "../storage/wizardStateStorePort.js";
-import { parseDueDate } from "../date/parseDueDate.js";
+import { comingFriday, parseDueDate } from "../date/parseDueDate.js";
+import { parseAddTaskArgs } from "./addTaskParse.js";
 import { resolveCaller } from "./callerResolution.js";
 import { WizardManager, type WizardState, type EditField } from "./wizard.js";
-import { notifyUser } from "./notify.js";
+import { notifyUser, notifyStatusChange } from "./notify.js";
 import { suggestClosestUsername } from "./usernameSuggest.js";
+import { parseTaskRef } from "./taskRef.js";
+import { parseStatusWord, VALID_STATUS_WORDS_TEXT } from "./statusParse.js";
 import {
   formatAllTasksGrouped,
   formatBacklog,
@@ -18,8 +22,9 @@ import {
   formatMyTasks,
   formatPending,
   formatTaskDetail,
+  statusLabel,
 } from "./format.js";
-import type { Caller } from "../domain/types.js";
+import type { Caller, TaskStatus } from "../domain/types.js";
 import type { Roster } from "../domain/roster.js";
 
 export interface CreateBotOptions {
@@ -31,7 +36,7 @@ export interface CreateBotOptions {
    * (PRD §7). Production code passes a `SupabaseRegistrationStore`; tests
    * pass an `InMemoryRegistrationStore`. */
   registrationStore: RegistrationStorePort;
-  /** Storage port for in-progress /assign and /edit wizard state
+  /** Storage port for in-progress bare-/addtask and bare-/edit wizard state
    * (ADR-0006). Production code passes a `SupabaseWizardStateStore`; tests
    * pass an `InMemoryWizardStateStore`. */
   wizardStateStore: WizardStateStorePort;
@@ -54,11 +59,17 @@ export interface CreateBotOptions {
   roster?: Roster;
 }
 
-const NEXT_STEP_HINT: Record<string, string> = {
-  Assigned: "Send `/task <id>` for full details.",
-  InProgress: "Send `/submit <id>` when you're done.",
-  Submitted: "It's now awaiting review.",
-  NeedsRevision: "Take another look and `/submit <id>` again when ready.",
+/** Per-status next-step hint appended to `/task <id>`'s detail reply (#27's
+ * status table). There's no more gated "you can't act on this" case — any
+ * roster member may move a task to any status — so every hint just
+ * suggests the obvious next command rather than describing a permission. */
+const NEXT_STEP_HINT: Record<TaskStatus, string> = {
+  backlog: "Send `/update <id> todo` to move it to To do status.",
+  todo: "Send `/done <id>` once you start it.",
+  in_progress: "Send `/done <id>` when you're done.",
+  in_review: "It's now awaiting review. Send `/complete <id>` to mark it Done.",
+  blocked: "Send `/unblock <id>` once it's unblocked.",
+  done: "Nice work!",
 };
 
 export interface CreatedBot {
@@ -210,10 +221,20 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   );
 
   bot.command(
-    "backlog",
+    "overdue",
     withCaller(async (ctx, caller) => {
       const result = await service.listBacklog(caller);
       await ctx.reply(result.ok ? formatBacklog(result.value) : result.error);
+    }),
+  );
+
+  // /backlog is renamed to /overdue (issue #27/#31) — "backlog" is now a
+  // real status, so a command meaning "overdue" under that name is a
+  // guaranteed misfire. No alias retained ("no installed base", #27).
+  bot.command(
+    "backlog",
+    withCaller(async (ctx) => {
+      await ctx.reply("/backlog is now /overdue.");
     }),
   );
 
@@ -234,36 +255,143 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         return;
       }
       const result = await service.getTask(caller, id);
-      await ctx.reply(result.ok ? formatTaskDetail(result.value) : result.error);
-    }),
-  );
-
-  // ---- Intern commands ---------------------------------------------------
-
-  bot.command(
-    "submit",
-    withCaller(async (ctx, caller) => {
-      const id = parseIdArg(ctx.match);
-      if (id === undefined) {
-        await ctx.reply("Usage: /submit <task_id>");
-        return;
-      }
-      const result = await service.setStatus(caller, id, "in_review");
       if (!result.ok) {
         await ctx.reply(result.error);
         return;
       }
-      await ctx.reply(`Task ${id} marked as submitted. Nice work!`);
-      const approveRevise = new InlineKeyboard()
-        .text("Approve", `decision:approve:${id}`)
-        .text("Revise", `decision:revise:${id}`);
-      await notifyUser(
-        bot,
-        registrations,
-        result.value.assignedByUsername,
-        `@${result.value.assigneeUsername} submitted Task ${id}: "${result.value.title}". Send /task ${id} for details, or tap a button below.`,
-        approveRevise,
-      );
+      await ctx.reply(`${formatTaskDetail(result.value)}\n\n${NEXT_STEP_HINT[result.value.status]}`);
+    }),
+  );
+
+  // ---- Status-setting commands (issue #27/#31 — replaces the review gate)
+
+  /** Sets `status` on `id` and applies the shared status-change notification
+   * policy (issue #27/#29): DM the assignee and creator, skipping the actor.
+   * Shared by `/update`, `/done`, and `/complete` — all three are just this
+   * with a different fixed or parsed status and reply text. */
+  async function applyStatusChange(
+    caller: Caller,
+    id: number,
+    status: TaskStatus,
+    ctx: import("grammy").Context,
+    replySuffix: string,
+  ) {
+    const result = await service.setStatus(caller, id, status);
+    if (!result.ok) {
+      await ctx.reply(result.error);
+      return;
+    }
+    await ctx.reply(`Task ${id} ${replySuffix}`);
+    await notifyStatusChange(
+      bot,
+      registrations,
+      result.value,
+      caller.username,
+      `Task ${id} ("${result.value.title}") status changed to ${statusLabel(status)} by @${caller.username}. Send /task ${id} for details.`,
+    );
+  }
+
+  const UPDATE_USAGE = `Usage: /update <ref> <status> — status is one of: ${VALID_STATUS_WORDS_TEXT}`;
+
+  bot.command(
+    "update",
+    withCaller(async (ctx, caller) => {
+      const raw = matchToString(ctx.match).trim();
+      const spaceIdx = raw.indexOf(" ");
+      const refToken = spaceIdx === -1 ? raw : raw.slice(0, spaceIdx);
+      const id = parseTaskRef(refToken);
+      if (id === undefined) {
+        await ctx.reply(UPDATE_USAGE);
+        return;
+      }
+      const statusText = spaceIdx === -1 ? "" : raw.slice(spaceIdx + 1);
+      const status = parseStatusWord(statusText);
+      if (!status) {
+        await ctx.reply(
+          `I don't recognize "${statusText.trim()}" as a status. Valid statuses: ${VALID_STATUS_WORDS_TEXT}`,
+        );
+        return;
+      }
+      await applyStatusChange(caller, id, status, ctx, `set to ${statusLabel(status)}.`);
+    }),
+  );
+
+  // Devie parity's deliberate wart (issue #27): `/done` sets `in_review`
+  // while `/update <ref> done` sets `done`. Copied on purpose — do not fix.
+  bot.command(
+    "done",
+    withCaller(async (ctx, caller) => {
+      const id = parseIdArg(ctx.match);
+      if (id === undefined) {
+        await ctx.reply("Usage: /done <ref>");
+        return;
+      }
+      await applyStatusChange(caller, id, "in_review", ctx, "marked as submitted. Nice work!");
+    }),
+  );
+
+  bot.command(
+    "complete",
+    withCaller(async (ctx, caller) => {
+      const id = parseIdArg(ctx.match);
+      if (id === undefined) {
+        await ctx.reply("Usage: /complete <ref>");
+        return;
+      }
+      await applyStatusChange(caller, id, "done", ctx, "marked Done. Nice work!");
+    }),
+  );
+
+  bot.command(
+    "unblock",
+    withCaller(async (ctx, caller) => {
+      const id = parseIdArg(ctx.match);
+      if (id === undefined) {
+        await ctx.reply("Usage: /unblock <ref>");
+        return;
+      }
+      const result = await service.clearBlocked(caller, id);
+      await ctx.reply(result.ok ? `Task ${id} is no longer blocked.` : result.error);
+    }),
+  );
+
+  // ---- Removed commands: helpful redirects, not the generic fallback ----
+  // No aliases retained ("no installed base", issue #27) — these just point
+  // whoever's muscle memory hits them at the replacement, since the dry-run
+  // exercise is exactly where that muscle memory lives (issue #31).
+
+  bot.command(
+    "submit",
+    withCaller(async (ctx) => {
+      await ctx.reply("/submit is gone — use /done <ref> instead.");
+    }),
+  );
+
+  bot.command(
+    "approve",
+    withCaller(async (ctx) => {
+      await ctx.reply("/approve is gone — use /complete <ref> instead.");
+    }),
+  );
+
+  bot.command(
+    "revise",
+    withCaller(async (ctx) => {
+      await ctx.reply("/revise is gone — use /update <ref> todo instead.");
+    }),
+  );
+
+  bot.command(
+    "canceltask",
+    withCaller(async (ctx) => {
+      await ctx.reply("/canceltask is gone — use /update <ref> backlog instead.");
+    }),
+  );
+
+  bot.command(
+    "unblocked",
+    withCaller(async (ctx) => {
+      await ctx.reply("/unblocked is gone — use /unblock <ref> instead.");
     }),
   );
 
@@ -290,27 +418,13 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         return;
       }
       await ctx.reply(`Task ${id} flagged as blocked.`);
-      const unblockKeyboard = new InlineKeyboard().text("Mark unblocked", `unblock:${id}`);
-      await notifyUser(
+      await notifyStatusChange(
         bot,
         registrations,
-        result.value.assignedByUsername,
+        result.value,
+        caller.username,
         `Task ${id} ("${result.value.title}", @${result.value.assigneeUsername}) was flagged as blocked: ${result.value.blockedReason}`,
-        unblockKeyboard,
       );
-    }),
-  );
-
-  bot.command(
-    "unblocked",
-    withCaller(async (ctx, caller) => {
-      const id = parseIdArg(ctx.match);
-      if (id === undefined) {
-        await ctx.reply("Usage: /unblocked <task_id>");
-        return;
-      }
-      const result = await service.clearBlocked(caller, id);
-      await ctx.reply(result.ok ? `Task ${id} is no longer blocked.` : result.error);
     }),
   );
 
@@ -339,171 +453,75 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }),
   );
 
-  bot.command(
-    "approve",
-    withCaller(async (ctx, caller) => {
-      const id = parseIdArg(ctx.match);
-      if (id === undefined) {
-        await ctx.reply("Usage: /approve <task_id>");
-        return;
-      }
-      await decide(caller, id, "approve", ctx);
-    }),
-  );
+  // `/approve`, `/revise`, and `/canceltask` (with its Yes/No confirmation
+  // and the `canceltask:` callback) are removed outright, not retargeted
+  // (issue #27/#31) — see the helpful-redirect commands above.
 
-  bot.command(
-    "revise",
-    withCaller(async (ctx, caller) => {
-      const id = parseIdArg(ctx.match);
-      if (id === undefined) {
-        await ctx.reply("Usage: /revise <task_id>");
-        return;
-      }
-      await decide(caller, id, "revise", ctx);
-    }),
-  );
+  // ---- /addtask (one-liner, with wizard fallback) and /edit wizard ----
 
-  async function decide(
-    caller: Caller,
-    id: number,
-    decision: "approve" | "revise",
-    ctx: import("grammy").Context,
-  ) {
-    const result =
-      decision === "approve"
-        ? await service.setStatus(caller, id, "done")
-        : await service.setStatus(caller, id, "todo");
-    if (!result.ok) {
-      await ctx.reply(result.error);
-      return;
-    }
-    await ctx.reply(
-      `Task ${id} marked ${decision === "approve" ? "Approved" : "Needs Revision"}.`,
-    );
-    const hint =
-      decision === "approve"
-        ? "Nice work!"
-        : `Take another look and \`/submit ${id}\` again when ready.`;
-    await notifyUser(
-      bot,
-      registrations,
-      result.value.assigneeUsername,
-      `Task ${id} ("${result.value.title}") was ${decision === "approve" ? "approved" : "sent back for revision"} by @${caller.username}. ${hint}`,
-    );
+  // Assignable to any roster member, not just interns (issue #27/#29).
+  function memberUsernamesInCohort(cohortId: string): string[] {
+    return roster
+      .all()
+      .filter((entry) => entry.cohortId === cohortId)
+      .map((entry) => entry.username);
   }
 
-  // ---- /canceltask (with Yes/No confirmation) ------------------------
+  function unknownRosterMemberReply(username: string, cohortId: string): string {
+    const suggestion = suggestClosestUsername(username, memberUsernamesInCohort(cohortId));
+    const suggestionText = suggestion ? ` Did you mean @${suggestion}?` : "";
+    return `@${username} isn't a known roster member in this cohort.${suggestionText}`;
+  }
 
   bot.command(
-    "canceltask",
+    "addtask",
     withCaller(async (ctx, caller) => {
-      const id = parseIdArg(ctx.match);
-      if (id === undefined) {
-        await ctx.reply("Usage: /canceltask <task_id>");
+      const raw = matchToString(ctx.match).trim();
+      if (raw.length === 0) {
+        await wizards.start(ctx.from!.id, "assign");
+        await ctx.reply(
+          "Who is this task for? Type @ to pick from Telegram's suggestions, or just send their username.",
+        );
         return;
       }
-      const found = await service.getTask(caller, id);
-      if (!found.ok) {
-        await ctx.reply(found.error);
+
+      const parsed = parseAddTaskArgs(raw, new Date());
+      if ("error" in parsed) {
+        await ctx.reply(parsed.error);
         return;
       }
-      const keyboard = new InlineKeyboard()
-        .text("Yes, cancel it", `canceltask:yes:${id}`)
-        .text("No", `canceltask:no:${id}`);
+
+      let assigneeUsername = caller.username;
+      if (parsed.assigneeUsername) {
+        const requested = parsed.assigneeUsername.replace(/^@/, "");
+        if (!roster.isMember(requested, caller.cohortId)) {
+          await ctx.reply(unknownRosterMemberReply(requested, caller.cohortId));
+          return;
+        }
+        assigneeUsername = requested;
+      }
+
+      const dueDate = parsed.dueDate?.isoDate ?? comingFriday(new Date()).isoDate;
+      const result = await service.assignTask(caller, {
+        assigneeUsername,
+        title: parsed.title,
+        dueDate,
+      });
+      if (!result.ok) {
+        await ctx.reply(`Couldn't create the task: ${result.error}`);
+        return;
+      }
       await ctx.reply(
-        `Cancel Task ${id} ("${found.value.title}")? This can't be undone.`,
-        { reply_markup: keyboard },
+        `Task ${result.value.id} created and assigned to @${result.value.assigneeUsername}, due ${result.value.dueDate}.`,
       );
-    }),
-  );
-
-  bot.callbackQuery(/^canceltask:(yes|no):(\d+)$/, async (ctx) => {
-    const userId = ctx.from.id;
-    const resolved = await requireCaller(userId);
-    if (resolved.status !== "ok") {
-      await ctx.answerCallbackQuery({ text: "Send /start first." });
-      return;
-    }
-    const [, decision, idStr] = ctx.match as unknown as [string, string, string];
-    const id = Number(idStr);
-    if (decision === "no") {
-      await ctx.answerCallbackQuery({ text: "Not cancelled." });
-      await ctx.editMessageText(`Kept Task ${id} as-is.`);
-      return;
-    }
-    const result = await service.setStatus(resolved.caller, id, "backlog");
-    await ctx.answerCallbackQuery();
-    await ctx.editMessageText(
-      result.ok ? `Task ${id} cancelled.` : result.error,
-    );
-  });
-
-  // ---- Approve/Revise inline buttons on submission notifications -------
-
-  bot.callbackQuery(/^decision:(approve|revise):(\d+)$/, async (ctx) => {
-    const userId = ctx.from.id;
-    const resolved = await requireCaller(userId);
-    if (resolved.status !== "ok" || resolved.caller.role !== "HigherUp") {
-      await ctx.answerCallbackQuery({ text: "Only higher-ups can do that." });
-      return;
-    }
-    const [, decision, idStr] = ctx.match as unknown as [string, string, string];
-    const id = Number(idStr);
-    const result =
-      decision === "approve"
-        ? await service.setStatus(resolved.caller, id, "done")
-        : await service.setStatus(resolved.caller, id, "todo");
-    await ctx.answerCallbackQuery();
-    if (!result.ok) {
-      await ctx.editMessageText(result.error);
-      return;
-    }
-    await ctx.editMessageText(
-      `Task ${id} marked ${decision === "approve" ? "Approved" : "Needs Revision"}.`,
-    );
-    const hint =
-      decision === "approve"
-        ? "Nice work!"
-        : `Take another look and \`/submit ${id}\` again when ready.`;
-    await notifyUser(
-      bot,
-      registrations,
-      result.value.assigneeUsername,
-      `Task ${id} ("${result.value.title}") was ${decision === "approve" ? "approved" : "sent back for revision"} by @${resolved.caller.username}. ${hint}`,
-    );
-  });
-
-  // ---- "Mark unblocked" inline button on blocked notifications (issue #9) -
-
-  bot.callbackQuery(/^unblock:(\d+)$/, async (ctx) => {
-    const userId = ctx.from.id;
-    const resolved = await requireCaller(userId);
-    if (resolved.status !== "ok" || resolved.caller.role !== "HigherUp") {
-      await ctx.answerCallbackQuery({ text: "Only higher-ups can do that." });
-      return;
-    }
-    const [, idStr] = ctx.match as unknown as [string, string];
-    const id = Number(idStr);
-    const result = await service.clearBlocked(resolved.caller, id);
-    await ctx.answerCallbackQuery();
-    await ctx.editMessageText(
-      result.ok ? `Task ${id} is no longer blocked.` : result.error,
-    );
-  });
-
-  // ---- Assignment wizard (/assign) and /edit wizard ------------------
-
-  bot.command(
-    "assign",
-    withCaller(async (ctx, caller) => {
-      if (caller.role !== "HigherUp") {
-        await ctx.reply("Only higher-ups can assign tasks.");
-        return;
+      if (result.value.assigneeUsername !== normalizeUsername(caller.username)) {
+        await notifyUser(
+          bot,
+          registrations,
+          result.value.assigneeUsername,
+          `You've been assigned Task ${result.value.id}: "${result.value.title}" (due ${result.value.dueDate}). Send /task ${result.value.id} for full details.`,
+        );
       }
-      await wizards.start(ctx.from!.id, "assign");
-      await ctx.reply(
-        "Who is this task for? Type @ to pick from Telegram's suggestions, or just send their username.",
-      );
     }),
   );
 
@@ -514,9 +532,11 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await ctx.reply("Only higher-ups can edit tasks.");
         return;
       }
-      const id = parseIdArg(ctx.match);
+      const { id, rest } = parseIdAndRest(ctx.match);
       if (id === undefined) {
-        await ctx.reply("Usage: /edit <task_id>");
+        await ctx.reply(
+          "Usage: /edit <task_id>, or /edit <task_id> <field> <value> — field is assignee, title, description, or duedate.",
+        );
         return;
       }
       const found = await service.getTask(caller, id);
@@ -524,17 +544,69 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await ctx.reply(found.error);
         return;
       }
-      await wizards.start(ctx.from!.id, "edit", { taskId: id });
-      const keyboard = new InlineKeyboard()
-        .text("Assignee", "editfield:assignee")
-        .text("Title", "editfield:title")
-        .row()
-        .text("Description", "editfield:description")
-        .text("Due date", "editfield:duedate");
-      await ctx.reply(
-        `Editing Task ${id} ("${found.value.title}"). Which field do you want to change?`,
-        { reply_markup: keyboard },
-      );
+
+      if (rest.length === 0) {
+        await wizards.start(ctx.from!.id, "edit", { taskId: id });
+        const keyboard = new InlineKeyboard()
+          .text("Assignee", "editfield:assignee")
+          .text("Title", "editfield:title")
+          .row()
+          .text("Description", "editfield:description")
+          .text("Due date", "editfield:duedate");
+        await ctx.reply(
+          `Editing Task ${id} ("${found.value.title}"). Which field do you want to change?`,
+          { reply_markup: keyboard },
+        );
+        return;
+      }
+
+      // Direct single-field edit: /edit <task_id> <field> <value>.
+      const spaceIdx = rest.indexOf(" ");
+      const fieldToken = spaceIdx === -1 ? rest : rest.slice(0, spaceIdx);
+      const value = (spaceIdx === -1 ? "" : rest.slice(spaceIdx + 1)).trim();
+      const field = parseEditField(fieldToken);
+      if (!field || value.length === 0) {
+        await ctx.reply(
+          "Usage: /edit <task_id> <field> <value> — field is assignee, title, description, or duedate.",
+        );
+        return;
+      }
+
+      const patch: Record<string, string> = {};
+      if (field === "assignee") {
+        const username = value.replace(/^@/, "");
+        if (!roster.isMember(username, caller.cohortId)) {
+          await ctx.reply(unknownRosterMemberReply(username, caller.cohortId));
+          return;
+        }
+        patch.assigneeUsername = username;
+      } else if (field === "title") {
+        patch.title = value;
+      } else if (field === "description") {
+        patch.description = value;
+      } else {
+        const parsedDate = parseDueDate(value, new Date());
+        if (!parsedDate) {
+          await ctx.reply(
+            'I couldn\'t understand that date. Try phrases like "next Friday", "in 3 days", or "Sept 5".',
+          );
+          return;
+        }
+        patch.dueDate = parsedDate.isoDate;
+      }
+
+      const result = await service.editTask(caller, id, patch);
+      if (!result.ok) {
+        await ctx.reply(`Couldn't save the edit: ${result.error}`);
+        return;
+      }
+      const fieldLabel: Record<EditField, string> = {
+        assignee: "assignee",
+        title: "title",
+        description: "description",
+        dueDate: "due date",
+      };
+      await ctx.reply(`Task ${id} updated — ${fieldLabel[field]} changed.`);
     }),
   );
 
@@ -648,15 +720,16 @@ export function createBot(options: CreateBotOptions): CreatedBot {
 
     if (state.step === "awaiting_assignee") {
       const username = text.replace(/^@/, "");
-      if (!roster.isIntern(username, caller.cohortId)) {
-        const internUsernames = roster
+      if (!roster.isMember(username, caller.cohortId)) {
+        // Assignable to any roster member, not just interns (issue #27/#29).
+        const memberUsernames = roster
           .all()
-          .filter((entry) => entry.role === "Intern" && entry.cohortId === caller.cohortId)
+          .filter((entry) => entry.cohortId === caller.cohortId)
           .map((entry) => entry.username);
-        const suggestion = suggestClosestUsername(username, internUsernames);
+        const suggestion = suggestClosestUsername(username, memberUsernames);
         const suggestionText = suggestion ? ` Did you mean @${suggestion}?` : "";
         await ctx.reply(
-          `@${username} isn't a known intern in this cohort.${suggestionText} Try again, or /cancel.`,
+          `@${username} isn't a known roster member in this cohort.${suggestionText} Try again, or /cancel.`,
         );
         return;
       }
@@ -683,16 +756,26 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         return;
       }
       await wizards.update(userId, { step: "awaiting_description" });
-      await ctx.reply("Description?");
+      await ctx.reply(
+        state.kind === "assign"
+          ? 'Description? (optional — send "skip" to leave it blank)'
+          : "Description?",
+      );
       return;
     }
 
     if (state.step === "awaiting_description") {
-      if (text.length === 0) {
+      // Description is optional (issue #27/#28) — the create wizard lets
+      // it be skipped; the edit wizard's description step is reached only
+      // by explicitly choosing to change it, so it stays required there.
+      const skipped = state.kind === "assign" && text.toLowerCase() === "skip";
+      if (!skipped && text.length === 0) {
         await ctx.reply("Description can't be empty. Try again, or /cancel.");
         return;
       }
-      const updated = (await wizards.update(userId, { data: { description: text } }))!;
+      const updated = (
+        await wizards.update(userId, { data: { description: skipped ? undefined : text } })
+      )!;
       if (state.kind === "edit") {
         await finishWizard(ctx, caller, userId, updated);
         return;
@@ -767,7 +850,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       const result = await service.assignTask(caller, {
         assigneeUsername: state.data.assigneeUsername!,
         title: state.data.title!,
-        description: state.data.description!,
+        description: state.data.description,
         dueDate: state.data.dueDate!,
       });
       if (!result.ok) {
@@ -816,10 +899,9 @@ function matchToString(match: CommandMatch): string {
   return typeof match === "string" ? match : (match[0] ?? "");
 }
 
+/** Accepts both `23` and `t23` (issue #27/#31's shared task-ref grammar). */
 function parseIdArg(match: CommandMatch): number | undefined {
-  const trimmed = matchToString(match).trim();
-  if (!/^\d+$/.test(trimmed)) return undefined;
-  return Number(trimmed);
+  return parseTaskRef(matchToString(match));
 }
 
 /** Page-number argument for /alltasks and /mytasks (issue #7). No argument
@@ -845,4 +927,18 @@ function parseIdAndRest(match: CommandMatch): { id: number | undefined; rest: st
   const idPart = trimmed.slice(0, spaceIdx);
   const rest = trimmed.slice(spaceIdx + 1).trim();
   return { id: parseIdArg(idPart), rest };
+}
+
+/** Field-name token accepted by `/edit <task_id> <field> <value>` — matches
+ * the same four fields as the `editfield:` callback data, so "duedate"
+ * (one word, lowercase) is the accepted spelling rather than "dueDate". */
+function parseEditField(token: string): EditField | undefined {
+  const normalized = token.toLowerCase();
+  if (normalized === "assignee") return "assignee";
+  if (normalized === "title") return "title";
+  if (normalized === "description") return "description";
+  if (normalized === "duedate" || normalized === "due-date" || normalized === "due_date") {
+    return "dueDate";
+  }
+  return undefined;
 }

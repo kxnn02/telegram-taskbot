@@ -22,7 +22,7 @@ const ACTION_SECTION_META: Record<ActionGroup, ActionSectionMeta> = {
     statusLink: "to-be-reviewed",
   },
   blocked: { label: "Blocked", ic: "lock", bg: "#E2E8F0", fg: "#1E2A56", statusLink: "blocked" },
-  overdue: { label: "Overdue", ic: "alert", bg: "#FCE3E4", fg: "#C2363B", statusLink: "overdue-backlog" },
+  overdue: { label: "Overdue", ic: "alert", bg: "#FCE3E4", fg: "#C2363B", statusLink: "overdue" },
   done: { label: "Done", ic: "check", bg: "#DEF6EA", fg: "#0E7A4B", statusLink: "done", collapsed: true },
   open: { label: "Open", ic: "spark", bg: "#E4EEFE", fg: "#1A5FCC" },
 };

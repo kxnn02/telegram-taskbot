@@ -177,7 +177,7 @@ export function TaskForm({ mode, taskId, interns, initial }: TaskFormProps) {
               onChange={(e) => setFields((f) => ({ ...f, assigneeUsername: e.target.value }))}
             >
               <option value="" disabled>
-                Choose an intern
+                Choose an assignee
               </option>
               {interns.map((username) => (
                 <option key={username} value={username}>

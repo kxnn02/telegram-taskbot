@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { TaskWithFlags } from "../service/taskService.js";
+import type { TaskStatus } from "../domain/types.js";
 import {
   formatAllTasksGrouped,
   formatApproved,
   formatBlocked,
   formatMyTasks,
+  formatTaskLine,
+  formatTaskDetail,
+  formatHelp,
+  statusLabel,
 } from "./format.js";
 
 function task(overrides: Partial<TaskWithFlags> = {}): TaskWithFlags {
@@ -110,5 +115,82 @@ describe("formatApproved", () => {
     const text = formatApproved([task({ status: "done", previousStatus: null, blockedReason: null })]);
     expect(text).toContain("#1");
     expect(text).toContain("@alice");
+  });
+});
+
+describe("statusLabel", () => {
+  it("maps every stored status to #27's display label", () => {
+    const expected: Record<TaskStatus, string> = {
+      backlog: "Backlog",
+      todo: "To do",
+      in_progress: "In progress",
+      in_review: "In review",
+      blocked: "Blocked",
+      done: "Done",
+    };
+    for (const [status, label] of Object.entries(expected)) {
+      expect(statusLabel(status as TaskStatus)).toBe(label);
+    }
+  });
+});
+
+describe("formatTaskLine", () => {
+  it("renders the display label, not the raw snake_case status", () => {
+    const text = formatTaskLine(task({ status: "in_progress", previousStatus: null, blockedReason: null }));
+    expect(text).toContain("In progress");
+    expect(text).not.toContain("in_progress");
+  });
+});
+
+describe("formatTaskDetail", () => {
+  it("renders the display label in the Status line", () => {
+    const text = formatTaskDetail(task({ status: "in_review", previousStatus: null, blockedReason: null }));
+    expect(text).toContain("Status: In review");
+  });
+});
+
+describe("formatHelp", () => {
+  it("says nothing has changed for an unregistered caller", () => {
+    expect(formatHelp(undefined)).toContain("/start");
+  });
+
+  it("doesn't reference the deleted review gate for interns", () => {
+    const text = formatHelp("Intern");
+    expect(text.toLowerCase()).not.toContain("only higher-ups");
+  });
+
+  it("doesn't reference the deleted review gate for higher-ups", () => {
+    const text = formatHelp("HigherUp");
+    expect(text.toLowerCase()).not.toContain("decide on a submitted task");
+  });
+
+  it("lists /addtask, not the removed /assign, for everyone (issue #30)", () => {
+    const internText = formatHelp("Intern");
+    expect(internText).toContain("/addtask");
+    expect(internText).not.toContain("/assign");
+
+    const higherUpText = formatHelp("HigherUp");
+    expect(higherUpText).toContain("/addtask");
+    expect(higherUpText).not.toContain("/assign");
+  });
+
+  it("describes direct /edit usage (issue #30/#31)", () => {
+    const text = formatHelp("HigherUp");
+    expect(text).toMatch(/\/edit <ref> <field> <value>/);
+  });
+
+  it("lists /update, /done, /complete, /overdue, /unblock — not the removed review-gate commands (issue #27/#31)", () => {
+    const text = formatHelp("Intern");
+    expect(text).toContain("/update");
+    expect(text).toContain("/done");
+    expect(text).toContain("/complete");
+    expect(text).toContain("/overdue");
+    expect(text).toContain("/unblock");
+    expect(text).not.toMatch(/\/submit\b/);
+    expect(text).not.toMatch(/\/approve\b/);
+    expect(text).not.toMatch(/\/revise\b/);
+    expect(text).not.toMatch(/\/canceltask\b/);
+    expect(text).not.toContain("/unblocked");
+    expect(text).not.toMatch(/\/backlog\b/);
   });
 });

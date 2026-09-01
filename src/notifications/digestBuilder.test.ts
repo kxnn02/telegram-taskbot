@@ -155,4 +155,12 @@ describe("DigestBuilder.groupDailyCounts", () => {
     const bobCounts = counts.find((c) => c.username === "bob");
     expect(bobCounts).toEqual({ username: "bob", onTrack: 0, overdue: 0, blocked: 0 });
   });
+
+  it("includes a HigherUp holding a task — assignment isn't intern-only (issue #27/#29)", async () => {
+    const { builder, service } = makeBuilder();
+    await assign(service, { assigneeUsername: "dave" });
+    const counts = await builder.groupDailyCounts(COHORT);
+    const daveCounts = counts.find((c) => c.username === "dave");
+    expect(daveCounts).toEqual({ username: "dave", onTrack: 1, overdue: 0, blocked: 0 });
+  });
 });

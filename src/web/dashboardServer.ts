@@ -444,7 +444,7 @@ interface ActionSectionMeta {
 const ACTION_SECTION_META: Record<ActionGroup, ActionSectionMeta> = {
   "needs-review": { label: "Needs your review", ic: "clock", bg: "#FEF6D6", fg: "#9A6206", statusLink: "to-be-reviewed" },
   blocked: { label: "Blocked", ic: "lock", bg: "#E2E8F0", fg: "#1E2A56", statusLink: "blocked" },
-  overdue: { label: "Overdue", ic: "alert", bg: "#FCE3E4", fg: "#C2363B", statusLink: "overdue-backlog" },
+  overdue: { label: "Overdue", ic: "alert", bg: "#FCE3E4", fg: "#C2363B", statusLink: "overdue" },
   done: { label: "Done", ic: "check", bg: "#DEF6EA", fg: "#0E7A4B", statusLink: "done", collapsed: true },
   open: { label: "Open", ic: "spark", bg: "#E4EEFE", fg: "#1A5FCC" },
 };
@@ -595,10 +595,12 @@ interface TaskFormFields {
   dueDateText: string;
 }
 
-function internOptions(roster: Roster, cohortId: string, selected: string): string {
+/** Assignee dropdown options: every roster member in the cohort, not just
+ * interns — assignment is open to the whole roster (issue #27/#29). */
+function assigneeOptions(roster: Roster, cohortId: string, selected: string): string {
   return roster
     .all()
-    .filter((e) => e.role === "Intern" && e.cohortId === cohortId)
+    .filter((e) => e.cohortId === cohortId)
     .sort((a, b) => a.username.localeCompare(b.username))
     .map(
       (e) =>
@@ -612,7 +614,7 @@ function taskFormBody(opts: {
   chipText?: string;
   formAction: string;
   fields: TaskFormFields;
-  internOptionsHtml: string;
+  assigneeOptionsHtml: string;
   submitLabel: string;
   error?: string;
 }): string {
@@ -628,8 +630,8 @@ function taskFormBody(opts: {
             <label for="assigneeUsername">Assignee</label>
             <div class="input">
               <select id="assigneeUsername" name="assigneeUsername" required>
-                <option value="" disabled${opts.fields.assigneeUsername ? "" : " selected"}>Choose an intern</option>
-                ${opts.internOptionsHtml}
+                <option value="" disabled${opts.fields.assigneeUsername ? "" : " selected"}>Choose an assignee</option>
+                ${opts.assigneeOptionsHtml}
               </select>
             </div>
           </div>
@@ -671,7 +673,7 @@ function renderCreateForm(
     heading: "New task",
     formAction: "/tasks/new",
     fields,
-    internOptionsHtml: internOptions(roster, caller.cohortId, fields.assigneeUsername),
+    assigneeOptionsHtml: assigneeOptions(roster, caller.cohortId, fields.assigneeUsername),
     submitLabel: "Continue",
     error,
   });
@@ -691,7 +693,7 @@ function renderEditForm(
     chipText: `#${taskId}`,
     formAction: `/tasks/${taskId}/edit`,
     fields,
-    internOptionsHtml: internOptions(roster, cohortId, fields.assigneeUsername),
+    assigneeOptionsHtml: assigneeOptions(roster, cohortId, fields.assigneeUsername),
     submitLabel: "Continue",
     error,
   });
