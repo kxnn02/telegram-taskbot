@@ -29,3 +29,17 @@ export function daysOverdue(task: Task, now: Date): number {
   );
   return Math.floor(today.diff(due, "days").days);
 }
+
+/** True when `task` is open (not `done`) and its due date falls within the
+ * next `days` days, inclusive of today and the horizon day, Asia/Manila-
+ * resolved — the `/deadlines` window (issue #33). An already-overdue task
+ * (due date before today) is excluded; that's `/overdue`'s job. */
+export function isDueWithinDays(task: Task, now: Date, days: number): boolean {
+  if (NOT_OVERDUE_STATUSES.has(task.status)) return false;
+  const today = DateTime.fromJSDate(now, { zone: MANILA_ZONE }).startOf("day");
+  const due = DateTime.fromISO(task.dueDate, { zone: MANILA_ZONE }).startOf(
+    "day",
+  );
+  const horizon = today.plus({ days });
+  return due >= today && due <= horizon;
+}

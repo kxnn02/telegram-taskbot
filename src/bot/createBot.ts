@@ -19,13 +19,15 @@ import {
   formatAllTasksGrouped,
   formatBacklog,
   formatBlocked,
+  formatDeadlines,
   formatHelp,
   formatMyTasks,
   formatPending,
   formatTaskDetail,
   statusLabel,
 } from "./format.js";
-import type { Caller, TaskStatus } from "../domain/types.js";
+import { buildStandup, formatStandup } from "./standup.js";
+import type { Caller, Role, TaskStatus } from "../domain/types.js";
 import type { Roster } from "../domain/roster.js";
 
 export interface CreateBotOptions {
@@ -195,16 +197,50 @@ export function createBot(options: CreateBotOptions): CreatedBot {
 
   // ---- Read-only commands ---------------------------------------------
 
+  // /alltasks is renamed /tasks (issue #27/#33), gaining @username and role
+  // filters. No alias retained ("no installed base", #27) — same pattern
+  // as /backlog -> /overdue below.
   bot.command(
     "alltasks",
+    withCaller(async (ctx) => {
+      await ctx.reply("/alltasks is now /tasks.");
+    }),
+  );
+
+  const TASKS_USAGE = "Usage: /tasks [page], /tasks @username, or /tasks intern|higherup";
+
+  bot.command(
+    "tasks",
     withCaller(async (ctx, caller) => {
-      const page = parsePageArg(ctx.match);
-      if (page === undefined) {
-        await ctx.reply("Usage: /alltasks [page]");
+      const parsed = parseTasksArgs(ctx.match);
+      if (parsed.kind === "error") {
+        await ctx.reply(TASKS_USAGE);
         return;
       }
-      const result = await service.listAllTasks(caller);
-      await ctx.reply(result.ok ? formatAllTasksGrouped(result.value, page) : result.error);
+      if (parsed.kind === "all") {
+        const result = await service.listAllTasks(caller);
+        await ctx.reply(result.ok ? formatAllTasksGrouped(result.value, parsed.page) : result.error);
+        return;
+      }
+      if (parsed.kind === "member") {
+        const result = await service.listTasksForMember(caller, parsed.username);
+        await ctx.reply(
+          result.ok
+            ? formatAllTasksGrouped(result.value, parsed.page, `@${normalizeUsername(parsed.username)}`)
+            : result.error,
+        );
+        return;
+      }
+      const result = await service.listTasksForRole(caller, parsed.role);
+      await ctx.reply(
+        result.ok
+          ? formatAllTasksGrouped(
+              result.value,
+              parsed.page,
+              parsed.role === "Intern" ? "intern" : "higherup",
+            )
+          : result.error,
+      );
     }),
   );
 
@@ -244,6 +280,22 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     withCaller(async (ctx, caller) => {
       const result = await service.listPending(caller);
       await ctx.reply(result.ok ? formatPending(result.value) : result.error);
+    }),
+  );
+
+  bot.command(
+    "deadlines",
+    withCaller(async (ctx, caller) => {
+      const result = await service.listDeadlines(caller);
+      await ctx.reply(result.ok ? formatDeadlines(result.value) : result.error);
+    }),
+  );
+
+  bot.command(
+    "standup",
+    withCaller(async (ctx, caller) => {
+      const entries = await buildStandup(service, roster, caller);
+      await ctx.reply(formatStandup(entries));
     }),
   );
 
@@ -1065,6 +1117,47 @@ function parsePageArg(match: CommandMatch): number | undefined {
   if (!/^\d+$/.test(trimmed)) return undefined;
   const page = Number(trimmed);
   return page >= 1 ? page : undefined;
+}
+
+type TasksArgs =
+  | { kind: "all"; page: number }
+  | { kind: "member"; username: string; page: number }
+  | { kind: "role"; role: Role; page: number }
+  | { kind: "error" };
+
+/** Parses `/tasks`'s single-argument grammar (issue #27/#33): a bare page
+ * number means "next page" of the unfiltered list, while `@username` or a
+ * role word (`intern`/`higherup`) is a filter, optionally followed by its
+ * own page number — `/tasks 2` must still mean page 2 of the unfiltered
+ * list (CONTEXT.md's noted parsing ambiguity), so a bare numeric first
+ * token is only ever treated as a page number, never a filter. */
+function parseTasksArgs(match: CommandMatch): TasksArgs {
+  const trimmed = matchToString(match).trim();
+  if (trimmed.length === 0) return { kind: "all", page: 1 };
+  const tokens = trimmed.split(/\s+/);
+  const [first, second] = tokens;
+
+  if (/^\d+$/.test(first!)) {
+    if (tokens.length > 1) return { kind: "error" };
+    const page = Number(first);
+    return page >= 1 ? { kind: "all", page } : { kind: "error" };
+  }
+
+  let page = 1;
+  if (second !== undefined) {
+    if (!/^\d+$/.test(second) || tokens.length > 2) return { kind: "error" };
+    const parsedPage = Number(second);
+    if (parsedPage < 1) return { kind: "error" };
+    page = parsedPage;
+  }
+
+  if (first!.startsWith("@")) {
+    return { kind: "member", username: first!.slice(1), page };
+  }
+  const roleWord = first!.toLowerCase();
+  if (roleWord === "intern") return { kind: "role", role: "Intern", page };
+  if (roleWord === "higherup") return { kind: "role", role: "HigherUp", page };
+  return { kind: "error" };
 }
 
 function parseIdAndRest(match: CommandMatch): { id: number | undefined; rest: string } {

@@ -1179,7 +1179,7 @@ describe("Notification policy on status changes (issue #27/#29)", () => {
   });
 });
 
-describe("/alltasks and /mytasks pagination (issue #7)", () => {
+describe("/tasks and /mytasks pagination (issue #7/#33)", () => {
   let roster: Roster;
   let testBot: ReturnType<typeof makeTestBot>;
 
@@ -1227,7 +1227,7 @@ describe("/alltasks and /mytasks pagination (issue #7)", () => {
     expect(text).toContain("#11");
   });
 
-  it("/alltasks with a small result set shows no pagination footer", async () => {
+  it("/tasks with no filter and a small result set shows no pagination footer", async () => {
     const result = await testBot.service.assignTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
       {
@@ -1240,23 +1240,104 @@ describe("/alltasks and /mytasks pagination (issue #7)", () => {
     if (!result.ok) throw new Error("setup failed");
     const higherUpId = nextUserId();
     await registerCaller(testBot, higherUpId, "carla");
-    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/alltasks"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/tasks"));
 
     const text = lastReplyText(testBot.calls);
     expect(text).not.toMatch(/Page \d+ of \d+/);
     expect(text).toContain("@alice:");
   });
 
-  it("/alltasks paginates and preserves grouping by assignee within a page", async () => {
+  it("/tasks 2 paginates and preserves grouping by assignee within a page", async () => {
     await assignEleven();
     const higherUpId = nextUserId();
     await registerCaller(testBot, higherUpId, "carla");
-    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/alltasks 2"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/tasks 2"));
 
     const text = lastReplyText(testBot.calls);
     expect(text).toContain("Page 2 of 2");
     expect(text).toContain("@alice:");
     expect(text).toContain("#11");
+  });
+
+  it("/tasks @username filters to that roster member's tasks", async () => {
+    await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "alice's task", dueDate: "2026-09-05" },
+    );
+    await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "bob", title: "bob's task", dueDate: "2026-09-05" },
+    );
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/tasks @alice"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("alice's task");
+    expect(text).not.toContain("bob's task");
+  });
+
+  it("/tasks @nonroster reports the username isn't a known roster member", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/tasks @nobody"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/isn't a known roster member/i);
+  });
+
+  it("/tasks intern filters to tasks assigned to interns", async () => {
+    await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "alice's task", dueDate: "2026-09-05" },
+    );
+    await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "carla", title: "carla's task", dueDate: "2026-09-05" },
+    );
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/tasks intern"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("alice's task");
+    expect(text).not.toContain("carla's task");
+  });
+
+  it("/tasks higherup filters to tasks assigned to higher-ups", async () => {
+    await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "alice's task", dueDate: "2026-09-05" },
+    );
+    await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "carla", title: "carla's task", dueDate: "2026-09-05" },
+    );
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/tasks higherup"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("carla's task");
+    expect(text).not.toContain("alice's task");
+  });
+
+  it("/tasks with an argument that's neither a page, @username, nor role word gets a usage message", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/tasks banana"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/usage/i);
+  });
+
+  it("/alltasks redirects to /tasks (issue #33 — no alias retained)", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/alltasks"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/\/alltasks is now \/tasks/i);
   });
 
   it("/mytasks with a non-numeric page argument gets a usage message", async () => {
@@ -1266,6 +1347,73 @@ describe("/alltasks and /mytasks pagination (issue #7)", () => {
 
     const text = lastReplyText(testBot.calls);
     expect(text).toMatch(/usage/i);
+  });
+});
+
+describe("/deadlines (issue #33)", () => {
+  let roster: Roster;
+  let testBot: ReturnType<typeof makeTestBot>;
+
+  beforeEach(() => {
+    roster = makeRoster();
+    testBot = makeTestBot(roster);
+  });
+
+  it("says nothing is due when there's nothing in the window", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/deadlines"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/nothing due/i);
+  });
+
+  it("lists a task due soon, cohort-wide", async () => {
+    const soon = new Date();
+    soon.setDate(soon.getDate() + 3);
+    const dueDate = soon.toISOString().slice(0, 10);
+    await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "due soon task", dueDate },
+    );
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/deadlines"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("due soon task");
+  });
+});
+
+describe("/standup (issue #33)", () => {
+  let roster: Roster;
+  let testBot: ReturnType<typeof makeTestBot>;
+
+  beforeEach(() => {
+    roster = makeRoster();
+    testBot = makeTestBot(roster);
+  });
+
+  it("includes task titles, unlike the counts-only daily/weekly digest", async () => {
+    await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Write the onboarding doc", dueDate: "2026-09-05" },
+    );
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/standup"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("Write the onboarding doc");
+  });
+
+  it("covers every roster member, even one with no tasks", async () => {
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/standup"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("@bob: no open tasks");
   });
 });
 

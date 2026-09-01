@@ -749,3 +749,146 @@ describe("concurrent writes (row_version optimistic concurrency, ADR-0006)", () 
     }
   });
 });
+
+describe("listTasksForMember (issue #33 — /tasks @username)", () => {
+  it("returns only the named member's tasks, cohort-wide regardless of caller role", async () => {
+    const { service } = makeService();
+    await assign(service, { assigneeUsername: "alice", title: "alice's task" });
+    await assign(service, { assigneeUsername: "bob", title: "bob's task" });
+
+    const result = await service.listTasksForMember(bob, "alice");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(1);
+      expect(result.value[0]!.title).toBe("alice's task");
+    }
+  });
+
+  it("accepts a leading @", async () => {
+    const { service } = makeService();
+    await assign(service, { assigneeUsername: "alice" });
+    const result = await service.listTasksForMember(carla, "@alice");
+    expect(result.ok && result.value).toHaveLength(1);
+  });
+
+  it("rejects a username that isn't on the roster in this cohort", async () => {
+    const { service } = makeService();
+    const result = await service.listTasksForMember(carla, "nobody");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/isn't a known roster member/i);
+  });
+
+  it("never leaks another cohort's tasks even when a username is shared across cohorts", async () => {
+    const { service } = makeService();
+    await assign(service, { assigneeUsername: "alice" }); // cohort-5
+    const otherCaller = caller("frank", "HigherUp", OTHER_COHORT);
+    await service.assignTask(otherCaller, {
+      assigneeUsername: "erin",
+      title: "other cohort task",
+      description: "d",
+      dueDate: "2026-09-05",
+    });
+
+    const result = await service.listTasksForMember(otherCaller, "erin");
+    expect(result.ok && result.value).toHaveLength(1);
+  });
+});
+
+describe("listTasksForRole (issue #33 — /tasks intern|higherup)", () => {
+  it("filters to tasks assigned to interns only", async () => {
+    const { service } = makeService();
+    await assign(service, { assigneeUsername: "alice" }); // Intern
+    await assign(service, { assigneeUsername: "dave" }); // HigherUp
+
+    const result = await service.listTasksForRole(carla, "Intern");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(1);
+      expect(result.value[0]!.assigneeUsername).toBe("alice");
+    }
+  });
+
+  it("filters to tasks assigned to higher-ups only", async () => {
+    const { service } = makeService();
+    await assign(service, { assigneeUsername: "alice" });
+    await assign(service, { assigneeUsername: "dave" });
+
+    const result = await service.listTasksForRole(alice, "HigherUp");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(1);
+      expect(result.value[0]!.assigneeUsername).toBe("dave");
+    }
+  });
+
+  it("scopes the role's roster resolution to the caller's own cohort", async () => {
+    const { service } = makeService();
+    await assign(service, { assigneeUsername: "alice" }); // cohort-5 Intern
+    const otherCaller = caller("frank", "HigherUp", OTHER_COHORT);
+    // erin is an Intern in the OTHER cohort — must not bleed into cohort-5's result.
+    await service.assignTask(otherCaller, {
+      assigneeUsername: "erin",
+      title: "other cohort task",
+      description: "d",
+      dueDate: "2026-09-05",
+    });
+
+    const result = await service.listTasksForRole(carla, "Intern");
+    expect(result.ok && result.value.map((t) => t.title)).toEqual([
+      "Write the onboarding doc",
+    ]);
+  });
+});
+
+describe("listDeadlines (issue #33 — /deadlines)", () => {
+  it("includes an open task due within the next 7 days", async () => {
+    const { service } = makeService(new Date("2026-08-30T02:00:00.000Z")); // 2026-08-30 Manila
+    const created = await assign(service, { dueDate: "2026-09-05" }); // 6 days out
+    if (!created.ok) throw new Error("setup failed");
+    const result = await service.listDeadlines(carla);
+    expect(result.ok && result.value.map((t) => t.id)).toContain(created.value.id);
+  });
+
+  it("excludes a done task even if its due date is within the window", async () => {
+    const { service } = makeService(new Date("2026-08-30T02:00:00.000Z"));
+    const created = await assign(service, { dueDate: "2026-09-05" });
+    if (!created.ok) throw new Error("setup failed");
+    await service.setStatus(alice, created.value.id, "done");
+    const result = await service.listDeadlines(carla);
+    expect(result.ok && result.value.find((t) => t.id === created.value.id)).toBeUndefined();
+  });
+
+  it("excludes a task due more than 7 days out", async () => {
+    const { service } = makeService(new Date("2026-08-30T02:00:00.000Z"));
+    const created = await assign(service, { dueDate: "2026-09-10" }); // 11 days out
+    if (!created.ok) throw new Error("setup failed");
+    const result = await service.listDeadlines(carla);
+    expect(result.ok && result.value.find((t) => t.id === created.value.id)).toBeUndefined();
+  });
+
+  it("excludes an already-overdue task", async () => {
+    const { service } = makeService(new Date("2026-09-10T02:00:00.000Z")); // past due
+    const created = await assign(service, { dueDate: "2026-09-05" });
+    if (!created.ok) throw new Error("setup failed");
+    const result = await service.listDeadlines(carla);
+    expect(result.ok && result.value.find((t) => t.id === created.value.id)).toBeUndefined();
+  });
+
+  it("orders soonest due date first", async () => {
+    const { service } = makeService(new Date("2026-08-30T02:00:00.000Z"));
+    const later = await assign(service, { title: "later", dueDate: "2026-09-05" });
+    const sooner = await assign(service, { title: "sooner", dueDate: "2026-09-01" });
+    if (!later.ok || !sooner.ok) throw new Error("setup failed");
+    const result = await service.listDeadlines(carla);
+    expect(result.ok && result.value.map((t) => t.id)).toEqual([
+      sooner.value.id,
+      later.value.id,
+    ]);
+  });
+
+  it("renders sensibly when nothing is due", async () => {
+    const { service } = makeService();
+    const result = await service.listDeadlines(carla);
+    expect(result.ok && result.value).toEqual([]);
+  });
+});
