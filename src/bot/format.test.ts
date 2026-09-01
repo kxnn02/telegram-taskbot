@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { TaskWithFlags } from "../service/taskService.js";
 import type { TaskStatus } from "../domain/types.js";
 import {
+  chunkMessage,
   formatAllTasksGrouped,
   formatApproved,
   formatBlocked,
   formatDeadlines,
   formatMyTasks,
+  formatPending,
   formatTaskLine,
   formatTaskDetail,
   formatHelp,
@@ -142,6 +144,24 @@ describe("formatApproved", () => {
     expect(text).toContain("#1");
     expect(text).toContain("@alice");
   });
+
+  it("heads the list with 'Marked done', not the removed review gate's 'Approved' (F14a)", () => {
+    const text = formatApproved([task({ status: "done", previousStatus: null, blockedReason: null })]);
+    expect(text).toContain("Marked done this past week:");
+    expect(text).not.toContain("Approved this past week:");
+  });
+});
+
+describe("formatPending", () => {
+  it("says nothing pending when the list is empty", () => {
+    expect(formatPending([])).toBe("Nothing pending review right now.");
+  });
+
+  it("heads the list with 'Awaiting review', not 'Awaiting your review' — it's cohort-wide, not personal (F14a)", () => {
+    const text = formatPending([task({ status: "in_review", previousStatus: "in_progress", blockedReason: null })]);
+    expect(text).toContain("Awaiting review:");
+    expect(text).not.toContain("Awaiting your review:");
+  });
 });
 
 describe("statusLabel", () => {
@@ -237,6 +257,52 @@ describe("BOT_COMMANDS / formatHelp coherence (issue #27/#35)", () => {
     const helpText = formatHelp("HigherUp");
     for (const { command } of BOT_COMMANDS) {
       expect(helpText).toContain(`/${command}`);
+    }
+  });
+});
+
+describe("chunkMessage (issue #55/F8)", () => {
+  it("text under the limit gives exactly one chunk", () => {
+    const text = "line one\nline two\nline three";
+    const chunks = chunkMessage(text);
+    expect(chunks).toEqual([text]);
+  });
+
+  it("empty string still gives one chunk", () => {
+    expect(chunkMessage("")).toEqual([""]);
+  });
+
+  it("text over the limit is split into multiple chunks, each under the limit, and rejoins with \\n to reproduce the input", () => {
+    const lines = Array.from({ length: 500 }, (_, i) => `Task #${i} — some line of text to pad it out`);
+    const text = lines.join("\n");
+
+    const chunks = chunkMessage(text, 4000);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      expect(chunk.length).toBeLessThanOrEqual(4000);
+    }
+    expect(chunks.join("\n")).toBe(text);
+  });
+
+  it("a single line longer than the limit is hard-split, never emitted oversized", () => {
+    const hugeLine = "x".repeat(10000);
+
+    const chunks = chunkMessage(hugeLine, 4000);
+
+    expect(chunks.join("")).toBe(hugeLine);
+    for (const chunk of chunks) {
+      expect(chunk.length).toBeLessThanOrEqual(4000);
+    }
+    expect(chunks.length).toBe(3); // 4000 + 4000 + 2000
+  });
+
+  it("defaults the limit to 4000, not 4096", () => {
+    const line = "x".repeat(4050);
+    const chunks = chunkMessage(line);
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      expect(chunk.length).toBeLessThanOrEqual(4000);
     }
   });
 });

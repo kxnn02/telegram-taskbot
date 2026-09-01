@@ -131,7 +131,7 @@ function transitionStatus(task: Task, newStatus: TaskStatus): void {
  * task — all scoped only by cohort, which is a tenancy boundary and stays
  * enforced everywhere below. The dashboard's higher-up-only *audience*
  * gate (who the oversight tool is for) is a separate thing and is not
- * touched here — see `getStats` and `dashboardServer.ts`.
+ * touched here — see `getStats` and `telegramLoginHandler.ts`.
  */
 export class TaskService {
   constructor(

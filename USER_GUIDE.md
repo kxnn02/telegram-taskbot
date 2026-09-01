@@ -47,6 +47,10 @@ Send bare **`/addtask`** with no text to get the old step-by-step form instead (
 description, due date) — useful if you want to add a description, since the one-line form
 doesn't have room for one.
 
+A due date in the past is accepted, not rejected — backdating a task is legitimate — but the
+reply (from `/addtask`, `/edit <id> duedate <value>`, and the step-by-step form's confirmation
+prompt) warns you with "⚠️ That due date is already in the past." so a typo doesn't go unnoticed.
+
 **Mention trigger**: in a group chat (or DM), `@`-mention the bot followed by one of `pls work
 on`, `please work on`, `add task`, `new task`, or `todo`, then the same one-line grammar as
 `/addtask`. For example:

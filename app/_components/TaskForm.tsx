@@ -6,7 +6,7 @@ import { Icon } from "./icons";
 
 /**
  * Shared create/edit task form (Phase 6.2, issue #17). A faithful port of
- * `dashboardServer.ts`'s `taskFormBody`/confirm-step flow into a Client
+ * the removed Express dashboard's `taskFormBody`/confirm-step flow into a Client
  * Component that calls the new REST mutation routes via `fetch`, per
  * ADR-0008 (REST, not Server Actions). Two-step interaction preserved from
  * the Express dashboard: due-date text is parsed server-side
