@@ -175,6 +175,8 @@ const EVERYONE_HELP = [
   "/start — register yourself against the roster",
   "/help — this list",
   "/cancel — abort an in-progress wizard",
+  "/addtask <title> [by <date>] [@username] — create a task in one line, assigned to you by default, due the coming Friday unless you give a date",
+  "/addtask — bare, starts the step-by-step form instead",
   "/alltasks — every task in the cohort, grouped by assignee",
   "/task <id> — full detail on one task",
   "/backlog — overdue tasks",
@@ -189,10 +191,10 @@ const INTERN_HELP = [
 ];
 
 const HIGHER_UP_HELP = [
-  "/assign — start the assignment wizard",
   "/pending — review queue (tasks In review)",
   "/note <id> <text> — attach a feedback note",
-  "/edit <id> — edit a task",
+  "/edit <id> <field> <value> — edit assignee, title, description, or duedate directly",
+  "/edit <id> — bare, starts the field-choice form instead",
   "/canceltask <id> — cancel a task",
   "/approve <id> / /revise <id> — mark a task Done or send it back to To do",
   "/dashboard — get the dashboard link",

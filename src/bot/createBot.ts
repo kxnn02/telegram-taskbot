@@ -1,11 +1,13 @@
 import { Bot, InlineKeyboard } from "grammy";
 import { loadRoster } from "../config/roster.js";
+import { normalizeUsername } from "../domain/roster.js";
 import { SystemClock } from "../domain/clock.js";
 import { TaskService } from "../service/taskService.js";
 import type { TaskStorePort } from "../storage/taskStorePort.js";
 import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
 import type { WizardStateStorePort } from "../storage/wizardStateStorePort.js";
-import { parseDueDate } from "../date/parseDueDate.js";
+import { comingFriday, parseDueDate } from "../date/parseDueDate.js";
+import { parseAddTaskArgs } from "./addTaskParse.js";
 import { resolveCaller } from "./callerResolution.js";
 import { WizardManager, type WizardState, type EditField } from "./wizard.js";
 import { notifyUser, notifyStatusChange } from "./notify.js";
@@ -31,7 +33,7 @@ export interface CreateBotOptions {
    * (PRD §7). Production code passes a `SupabaseRegistrationStore`; tests
    * pass an `InMemoryRegistrationStore`. */
   registrationStore: RegistrationStorePort;
-  /** Storage port for in-progress /assign and /edit wizard state
+  /** Storage port for in-progress bare-/addtask and bare-/edit wizard state
    * (ADR-0006). Production code passes a `SupabaseWizardStateStore`; tests
    * pass an `InMemoryWizardStateStore`. */
   wizardStateStore: WizardStateStorePort;
@@ -450,19 +452,71 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   // deletes — removed outright rather than retargeted (issue #27/#29).
   // `/approve`, `/revise`, and `/unblocked` remain as typed commands.
 
-  // ---- Assignment wizard (/assign) and /edit wizard ------------------
+  // ---- /addtask (one-liner, with wizard fallback) and /edit wizard ----
+
+  // Assignable to any roster member, not just interns (issue #27/#29).
+  function memberUsernamesInCohort(cohortId: string): string[] {
+    return roster
+      .all()
+      .filter((entry) => entry.cohortId === cohortId)
+      .map((entry) => entry.username);
+  }
+
+  function unknownRosterMemberReply(username: string, cohortId: string): string {
+    const suggestion = suggestClosestUsername(username, memberUsernamesInCohort(cohortId));
+    const suggestionText = suggestion ? ` Did you mean @${suggestion}?` : "";
+    return `@${username} isn't a known roster member in this cohort.${suggestionText}`;
+  }
 
   bot.command(
-    "assign",
+    "addtask",
     withCaller(async (ctx, caller) => {
-      if (caller.role !== "HigherUp") {
-        await ctx.reply("Only higher-ups can assign tasks.");
+      const raw = matchToString(ctx.match).trim();
+      if (raw.length === 0) {
+        await wizards.start(ctx.from!.id, "assign");
+        await ctx.reply(
+          "Who is this task for? Type @ to pick from Telegram's suggestions, or just send their username.",
+        );
         return;
       }
-      await wizards.start(ctx.from!.id, "assign");
+
+      const parsed = parseAddTaskArgs(raw, new Date());
+      if ("error" in parsed) {
+        await ctx.reply(parsed.error);
+        return;
+      }
+
+      let assigneeUsername = caller.username;
+      if (parsed.assigneeUsername) {
+        const requested = parsed.assigneeUsername.replace(/^@/, "");
+        if (!roster.isMember(requested, caller.cohortId)) {
+          await ctx.reply(unknownRosterMemberReply(requested, caller.cohortId));
+          return;
+        }
+        assigneeUsername = requested;
+      }
+
+      const dueDate = parsed.dueDate?.isoDate ?? comingFriday(new Date()).isoDate;
+      const result = await service.assignTask(caller, {
+        assigneeUsername,
+        title: parsed.title,
+        dueDate,
+      });
+      if (!result.ok) {
+        await ctx.reply(`Couldn't create the task: ${result.error}`);
+        return;
+      }
       await ctx.reply(
-        "Who is this task for? Type @ to pick from Telegram's suggestions, or just send their username.",
+        `Task ${result.value.id} created and assigned to @${result.value.assigneeUsername}, due ${result.value.dueDate}.`,
       );
+      if (result.value.assigneeUsername !== normalizeUsername(caller.username)) {
+        await notifyUser(
+          bot,
+          registrations,
+          result.value.assigneeUsername,
+          `You've been assigned Task ${result.value.id}: "${result.value.title}" (due ${result.value.dueDate}). Send /task ${result.value.id} for full details.`,
+        );
+      }
     }),
   );
 
@@ -473,9 +527,11 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await ctx.reply("Only higher-ups can edit tasks.");
         return;
       }
-      const id = parseIdArg(ctx.match);
+      const { id, rest } = parseIdAndRest(ctx.match);
       if (id === undefined) {
-        await ctx.reply("Usage: /edit <task_id>");
+        await ctx.reply(
+          "Usage: /edit <task_id>, or /edit <task_id> <field> <value> — field is assignee, title, description, or duedate.",
+        );
         return;
       }
       const found = await service.getTask(caller, id);
@@ -483,17 +539,69 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await ctx.reply(found.error);
         return;
       }
-      await wizards.start(ctx.from!.id, "edit", { taskId: id });
-      const keyboard = new InlineKeyboard()
-        .text("Assignee", "editfield:assignee")
-        .text("Title", "editfield:title")
-        .row()
-        .text("Description", "editfield:description")
-        .text("Due date", "editfield:duedate");
-      await ctx.reply(
-        `Editing Task ${id} ("${found.value.title}"). Which field do you want to change?`,
-        { reply_markup: keyboard },
-      );
+
+      if (rest.length === 0) {
+        await wizards.start(ctx.from!.id, "edit", { taskId: id });
+        const keyboard = new InlineKeyboard()
+          .text("Assignee", "editfield:assignee")
+          .text("Title", "editfield:title")
+          .row()
+          .text("Description", "editfield:description")
+          .text("Due date", "editfield:duedate");
+        await ctx.reply(
+          `Editing Task ${id} ("${found.value.title}"). Which field do you want to change?`,
+          { reply_markup: keyboard },
+        );
+        return;
+      }
+
+      // Direct single-field edit: /edit <task_id> <field> <value>.
+      const spaceIdx = rest.indexOf(" ");
+      const fieldToken = spaceIdx === -1 ? rest : rest.slice(0, spaceIdx);
+      const value = (spaceIdx === -1 ? "" : rest.slice(spaceIdx + 1)).trim();
+      const field = parseEditField(fieldToken);
+      if (!field || value.length === 0) {
+        await ctx.reply(
+          "Usage: /edit <task_id> <field> <value> — field is assignee, title, description, or duedate.",
+        );
+        return;
+      }
+
+      const patch: Record<string, string> = {};
+      if (field === "assignee") {
+        const username = value.replace(/^@/, "");
+        if (!roster.isMember(username, caller.cohortId)) {
+          await ctx.reply(unknownRosterMemberReply(username, caller.cohortId));
+          return;
+        }
+        patch.assigneeUsername = username;
+      } else if (field === "title") {
+        patch.title = value;
+      } else if (field === "description") {
+        patch.description = value;
+      } else {
+        const parsedDate = parseDueDate(value, new Date());
+        if (!parsedDate) {
+          await ctx.reply(
+            'I couldn\'t understand that date. Try phrases like "next Friday", "in 3 days", or "Sept 5".',
+          );
+          return;
+        }
+        patch.dueDate = parsedDate.isoDate;
+      }
+
+      const result = await service.editTask(caller, id, patch);
+      if (!result.ok) {
+        await ctx.reply(`Couldn't save the edit: ${result.error}`);
+        return;
+      }
+      const fieldLabel: Record<EditField, string> = {
+        assignee: "assignee",
+        title: "title",
+        description: "description",
+        dueDate: "due date",
+      };
+      await ctx.reply(`Task ${id} updated — ${fieldLabel[field]} changed.`);
     }),
   );
 
@@ -643,16 +751,26 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         return;
       }
       await wizards.update(userId, { step: "awaiting_description" });
-      await ctx.reply("Description?");
+      await ctx.reply(
+        state.kind === "assign"
+          ? 'Description? (optional — send "skip" to leave it blank)'
+          : "Description?",
+      );
       return;
     }
 
     if (state.step === "awaiting_description") {
-      if (text.length === 0) {
+      // Description is optional (issue #27/#28) — the create wizard lets
+      // it be skipped; the edit wizard's description step is reached only
+      // by explicitly choosing to change it, so it stays required there.
+      const skipped = state.kind === "assign" && text.toLowerCase() === "skip";
+      if (!skipped && text.length === 0) {
         await ctx.reply("Description can't be empty. Try again, or /cancel.");
         return;
       }
-      const updated = (await wizards.update(userId, { data: { description: text } }))!;
+      const updated = (
+        await wizards.update(userId, { data: { description: skipped ? undefined : text } })
+      )!;
       if (state.kind === "edit") {
         await finishWizard(ctx, caller, userId, updated);
         return;
@@ -727,7 +845,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       const result = await service.assignTask(caller, {
         assigneeUsername: state.data.assigneeUsername!,
         title: state.data.title!,
-        description: state.data.description!,
+        description: state.data.description,
         dueDate: state.data.dueDate!,
       });
       if (!result.ok) {
@@ -805,4 +923,18 @@ function parseIdAndRest(match: CommandMatch): { id: number | undefined; rest: st
   const idPart = trimmed.slice(0, spaceIdx);
   const rest = trimmed.slice(spaceIdx + 1).trim();
   return { id: parseIdArg(idPart), rest };
+}
+
+/** Field-name token accepted by `/edit <task_id> <field> <value>` — matches
+ * the same four fields as the `editfield:` callback data, so "duedate"
+ * (one word, lowercase) is the accepted spelling rather than "dueDate". */
+function parseEditField(token: string): EditField | undefined {
+  const normalized = token.toLowerCase();
+  if (normalized === "assignee") return "assignee";
+  if (normalized === "title") return "title";
+  if (normalized === "description") return "description";
+  if (normalized === "duedate" || normalized === "due-date" || normalized === "due_date") {
+    return "dueDate";
+  }
+  return undefined;
 }

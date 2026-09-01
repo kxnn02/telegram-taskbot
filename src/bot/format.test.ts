@@ -163,4 +163,19 @@ describe("formatHelp", () => {
     const text = formatHelp("HigherUp");
     expect(text.toLowerCase()).not.toContain("decide on a submitted task");
   });
+
+  it("lists /addtask, not the removed /assign, for everyone (issue #30)", () => {
+    const internText = formatHelp("Intern");
+    expect(internText).toContain("/addtask");
+    expect(internText).not.toContain("/assign");
+
+    const higherUpText = formatHelp("HigherUp");
+    expect(higherUpText).toContain("/addtask");
+    expect(higherUpText).not.toContain("/assign");
+  });
+
+  it("describes direct /edit usage for higher-ups (issue #30)", () => {
+    const text = formatHelp("HigherUp");
+    expect(text).toMatch(/\/edit <id> <field> <value>/);
+  });
 });
