@@ -246,10 +246,16 @@ export class TaskService {
       authorUsername: normalizeUsername(caller.username),
       createdAt: now,
     };
-    await this.store.insertNote(task.cohortId, task.id, note);
     task.notes = [...task.notes, note];
     task.updatedAt = now;
-    return this.persist(task);
+    const result = await this.persist(task);
+    if (!result.ok) return result;
+    // Accepted consequence: if insertNote throws after persist succeeds,
+    // updatedAt is bumped with no note stored — worse than losing the note
+    // update, but strictly better than the old ordering, since it fails
+    // loudly instead of silently duplicating the note on every retry.
+    await this.store.insertNote(task.cohortId, task.id, note);
+    return ok({ ...result.value, notes: task.notes });
   }
 
   /** Sets a task to `blocked` and records an optional reason — the

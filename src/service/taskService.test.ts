@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { InMemoryTaskStore } from "../storage/inMemoryTaskStore.js";
 import { FixedClock } from "../domain/clock.js";
 import { Roster } from "../domain/roster.js";
@@ -283,6 +283,35 @@ describe("addNote", () => {
     if (!created.ok) throw new Error("setup failed");
     const result = await service.addNote(carla, created.value.id, "   ");
     expect(result.ok).toBe(false);
+  });
+
+  it("does not store the note when persist reports a conflict (issue #59/H2)", async () => {
+    const { service, store } = makeService();
+    const created = await assign(service);
+    if (!created.ok) throw new Error("setup failed");
+    const insertNoteSpy = vi.spyOn(store, "insertNote");
+    vi.spyOn(store, "updateTask").mockResolvedValue({ outcome: "conflict" });
+
+    const result = await service.addNote(alice, created.value.id, "first attempt");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/changed by someone else/i);
+    expect(insertNoteSpy).not.toHaveBeenCalled();
+  });
+
+  it("leaves zero notes stored after two failed retries against a conflicting store (issue #59/H2)", async () => {
+    const { service, store } = makeService();
+    const created = await assign(service);
+    if (!created.ok) throw new Error("setup failed");
+    vi.spyOn(store, "updateTask").mockResolvedValue({ outcome: "conflict" });
+
+    await service.addNote(alice, created.value.id, "first attempt");
+    await service.addNote(alice, created.value.id, "first attempt");
+
+    vi.restoreAllMocks();
+    const stored = await service.getTask(alice, created.value.id);
+    expect(stored.ok).toBe(true);
+    if (stored.ok) expect(stored.value.notes).toHaveLength(0);
   });
 });
 
