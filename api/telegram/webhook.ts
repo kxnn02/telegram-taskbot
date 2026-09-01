@@ -43,6 +43,7 @@ async function buildDeps(): Promise<WebhookHandlerDeps> {
   if (!activeCohortId) {
     throw new Error("ACTIVE_COHORT_ID is not set.");
   }
+  console.log("DIAGNOSTIC activeCohortId =", JSON.stringify(activeCohortId));
 
   const supabase = createSupabaseClient();
   const roster = await loadRosterFromStore(new SupabaseRosterStore(supabase));
