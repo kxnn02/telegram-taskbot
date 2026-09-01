@@ -17,6 +17,7 @@ import { parseTaskRef } from "./taskRef.js";
 import { parseStatusWord, VALID_STATUS_WORDS_TEXT } from "./statusParse.js";
 import { parseRefListItems, parseUpdateItems, type BatchItem } from "./updateBatch.js";
 import {
+  chunkMessage,
   formatAllTasksGrouped,
   formatBacklog,
   formatBlocked,
@@ -270,6 +271,15 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     };
   }
 
+  /** Sends `text` as one or more Telegram-sized messages (issue #55/F8):
+   * several unbounded list commands could otherwise throw
+   * `Bad Request: message is too long`. */
+  async function replyChunked(ctx: import("grammy").Context, text: string): Promise<void> {
+    for (const chunk of chunkMessage(text)) {
+      await ctx.reply(chunk);
+    }
+  }
+
   // ---- Read-only commands ---------------------------------------------
 
   // /alltasks is renamed /tasks (issue #27/#33), gaining @username and role
@@ -294,12 +304,13 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       }
       if (parsed.kind === "all") {
         const result = await service.listAllTasks(caller);
-        await ctx.reply(result.ok ? formatAllTasksGrouped(result.value, parsed.page) : result.error);
+        await replyChunked(ctx, result.ok ? formatAllTasksGrouped(result.value, parsed.page) : result.error);
         return;
       }
       if (parsed.kind === "member") {
         const result = await service.listTasksForMember(caller, parsed.username);
-        await ctx.reply(
+        await replyChunked(
+          ctx,
           result.ok
             ? formatAllTasksGrouped(result.value, parsed.page, `@${normalizeUsername(parsed.username)}`)
             : result.error,
@@ -307,7 +318,8 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         return;
       }
       const result = await service.listTasksForRole(caller, parsed.role);
-      await ctx.reply(
+      await replyChunked(
+        ctx,
         result.ok
           ? formatAllTasksGrouped(
               result.value,
@@ -328,7 +340,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         return;
       }
       const result = await service.listMyTasks(caller);
-      await ctx.reply(result.ok ? formatMyTasks(result.value, page) : result.error);
+      await replyChunked(ctx, result.ok ? formatMyTasks(result.value, page) : result.error);
     }),
   );
 
@@ -336,7 +348,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     "overdue",
     withCaller(async (ctx, caller) => {
       const result = await service.listBacklog(caller);
-      await ctx.reply(result.ok ? formatBacklog(result.value) : result.error);
+      await replyChunked(ctx, result.ok ? formatBacklog(result.value) : result.error);
     }),
   );
 
@@ -354,7 +366,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     "pending",
     withCaller(async (ctx, caller) => {
       const result = await service.listPending(caller);
-      await ctx.reply(result.ok ? formatPending(result.value) : result.error);
+      await replyChunked(ctx, result.ok ? formatPending(result.value) : result.error);
     }),
   );
 
@@ -362,7 +374,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     "deadlines",
     withCaller(async (ctx, caller) => {
       const result = await service.listDeadlines(caller);
-      await ctx.reply(result.ok ? formatDeadlines(result.value) : result.error);
+      await replyChunked(ctx, result.ok ? formatDeadlines(result.value) : result.error);
     }),
   );
 
@@ -370,7 +382,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     "standup",
     withCaller(async (ctx, caller) => {
       const report = await buildStandup(service, caller, clock.now());
-      await ctx.reply(formatStandup(report));
+      await replyChunked(ctx, formatStandup(report));
     }),
   );
 
@@ -387,7 +399,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await ctx.reply(result.error);
         return;
       }
-      await ctx.reply(`${formatTaskDetail(result.value)}\n\n${NEXT_STEP_HINT[result.value.status]}`);
+      await replyChunked(ctx, `${formatTaskDetail(result.value)}\n\n${NEXT_STEP_HINT[result.value.status]}`);
     }),
   );
 
@@ -420,7 +432,6 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   }
 
   const UPDATE_USAGE = `Usage: /update <ref> <status> — status is one of: ${VALID_STATUS_WORDS_TEXT}`;
-  const TELEGRAM_MESSAGE_LIMIT = 4096;
 
   interface BatchOutcome {
     label: string;
@@ -469,25 +480,6 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     return outcomes;
   }
 
-  /** Splits a per-item reply into Telegram-sized chunks (issue #32
-   * acceptance: a large batch must chunk or summarise, never silently
-   * truncate) rather than one long string that could exceed the 4096-char
-   * message limit. */
-  function chunkBatchReply(header: string, lines: string[]): string[] {
-    const chunks: string[] = [];
-    let current = header;
-    for (const line of lines) {
-      if (current.length + 1 + line.length > TELEGRAM_MESSAGE_LIMIT - 100) {
-        chunks.push(current);
-        current = line;
-      } else {
-        current += "\n" + line;
-      }
-    }
-    chunks.push(current);
-    return chunks;
-  }
-
   /** Notification collapsing (issue #27/#32) — the sharpest edge in the
    * spec: a naive per-item loop would fire one DM per task, so a
    * `/update t21,...,t40 done` aimed at one assignee would send them
@@ -528,7 +520,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       const successCount = outcomes.filter((o) => o.ok).length;
       const lines = outcomes.map((o) => (o.ok ? `${o.label} ✓ ${o.message}` : `${o.label} ✗ ${o.message}`));
       const header = `${successCount}/${outcomes.length} updated.`;
-      for (const chunk of chunkBatchReply(header, lines)) {
+      for (const chunk of chunkMessage([header, ...lines].join("\n"))) {
         await ctx.reply(chunk);
       }
     }
@@ -680,7 +672,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     withCaller(async (ctx, caller) => {
       if (matchToString(ctx.match).trim().length === 0) {
         const result = await service.listBlocked(caller);
-        await ctx.reply(result.ok ? formatBlocked(result.value) : result.error);
+        await replyChunked(ctx, result.ok ? formatBlocked(result.value) : result.error);
         return;
       }
       const { id, rest } = parseIdAndRest(ctx.match);

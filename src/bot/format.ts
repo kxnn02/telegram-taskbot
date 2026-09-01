@@ -256,6 +256,43 @@ const HELP_SECTIONS: { heading: string; lines: string[] }[] = [
   },
 ];
 
+/** Splits a reply into Telegram-sized chunks (issue #55/F8): several
+ * unbounded list commands (/standup, /task, /pending, /overdue, /blocked,
+ * /deadlines) could otherwise exceed the 4096-character message limit and
+ * throw `Bad Request: message is too long`. `limit` defaults to 4000, not
+ * 4096, to leave headroom for Telegram's own overhead. The single shared
+ * implementation for every chunked reply, including the `/update` batch
+ * summary — one rule, one place. */
+export function chunkMessage(text: string, limit = 4000): string[] {
+  const chunks: string[] = [];
+  let current = "";
+
+  function flush() {
+    if (current.length > 0) chunks.push(current);
+    current = "";
+  }
+
+  for (const line of text.split("\n")) {
+    if (line.length > limit) {
+      flush();
+      for (let i = 0; i < line.length; i += limit) {
+        chunks.push(line.slice(i, i + limit));
+      }
+      continue;
+    }
+    const candidate = current.length === 0 ? line : `${current}\n${line}`;
+    if (candidate.length > limit) {
+      flush();
+      current = line;
+    } else {
+      current = candidate;
+    }
+  }
+  flush();
+
+  return chunks.length > 0 ? chunks : [""];
+}
+
 export function formatHelp(role: Role | undefined): string {
   if (!role) {
     return [
