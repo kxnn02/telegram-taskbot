@@ -930,7 +930,9 @@ describe("mention trigger: @bot pls work on <title> (issue #34)", () => {
       groupMessageUpdate(internId, "alice", GROUP_CHAT_ID, "@test_bot how's it going"),
     );
 
-    expect(lastReplyText(testBot.calls)).toMatch(/addtask/i);
+    expect(lastReplyText(testBot.calls)).toBe(
+      "Did you mean to create a task? Try: @test_bot add task <title>",
+    );
     const list = await testBot.service.listAllTasks({
       username: "alice",
       role: "Intern",
@@ -1005,6 +1007,66 @@ describe("mention trigger: @bot pls work on <title> (issue #34)", () => {
     await testBot.bot.handleUpdate(
       groupMessageUpdate(internId, "alice", GROUP_CHAT_ID, "just chatting about nothing in particular"),
     );
+
+    expect(testBot.calls).toHaveLength(0);
+  });
+
+  it("does not reply to a casual embedded mention with no intent phrase (issue #52, F7)", async () => {
+    const internId = nextUserId();
+    await registerCaller(testBot, internId, "alice");
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(internId, "alice", GROUP_CHAT_ID, "thanks @test_bot !"),
+    );
+
+    expect(testBot.calls).toHaveLength(0);
+  });
+});
+
+describe("group chat does not answer other bots' commands or bare unknown commands (issue #52, F6)", () => {
+  let roster: Roster;
+  let testBot: ReturnType<typeof makeTestBot>;
+  const GROUP_CHAT_ID = -100;
+
+  beforeEach(() => {
+    roster = makeRoster();
+    testBot = makeTestBot(roster);
+  });
+
+  it("does not reply to a slash command explicitly addressed to another bot", async () => {
+    const internId = nextUserId();
+    await registerCaller(testBot, internId, "alice");
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(internId, "alice", GROUP_CHAT_ID, "/poll@other_bot What's for lunch?"),
+    );
+
+    expect(testBot.calls).toHaveLength(0);
+  });
+
+  it("does not reply to an unknown command with no @target in a group", async () => {
+    const internId = nextUserId();
+    await registerCaller(testBot, internId, "alice");
+
+    await testBot.bot.handleUpdate(groupMessageUpdate(internId, "alice", GROUP_CHAT_ID, "/nonsense"));
+
+    expect(testBot.calls).toHaveLength(0);
+  });
+
+  it("still replies to an unknown command with no @target in a DM (unchanged behaviour)", async () => {
+    const userId = nextUserId();
+    await registerCaller(testBot, userId, "alice");
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, userId, "/nonsense"));
+
+    expect(lastReplyText(testBot.calls)).toBe("Not sure what you mean — try /help");
+  });
+
+  it("does not reply to an unknown command explicitly addressed to another bot, even in a DM", async () => {
+    const userId = nextUserId();
+    await registerCaller(testBot, userId, "alice");
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, userId, "/nonsense@other_bot"));
 
     expect(testBot.calls).toHaveLength(0);
   });

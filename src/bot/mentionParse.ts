@@ -23,9 +23,13 @@ function escapeRegExp(value: string): string {
  * `args` for `parseAddTaskArgs` to parse (issue #30's grammar) — mention
  * triggers use exactly the same title/date/assignee grammar as `/addtask`.
  *
- * Returns `{ kind: "none" }` when there is no mention at all — the caller
- * must do nothing in that case, silently, since with privacy mode off this
- * runs against every group message.
+ * Returns `{ kind: "none" }` when there is no mention at all, or when the
+ * mention is embedded mid-message with no recognised intent phrase after
+ * it (e.g. "thanks @bot !") — the caller must do nothing in that case,
+ * silently, since with privacy mode off this runs against every group
+ * message. `{ kind: "unrecognized" }` is reserved for a mention that leads
+ * the (trimmed) message, so a reply is only sent when the message reads as
+ * addressed to the bot.
  */
 export function parseMentionTrigger(text: string, botUsername: string): MentionTrigger {
   const mentionRe = new RegExp(`(?:^|\\s)@${escapeRegExp(botUsername)}(?=\\s|$|[^\\w])`, "i");
@@ -40,7 +44,9 @@ export function parseMentionTrigger(text: string, botUsername: string): MentionT
     (p) => lower === p || lower.startsWith(`${p} `),
   );
   if (!phrase) {
-    return { kind: "unrecognized" };
+    const leadingMatch = mentionRe.exec(text.trim());
+    const isLeading = leadingMatch !== null && leadingMatch.index === 0;
+    return isLeading ? { kind: "unrecognized" } : { kind: "none" };
   }
 
   const args = after.slice(phrase.length).trim();
