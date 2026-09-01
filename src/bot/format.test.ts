@@ -8,6 +8,7 @@ import {
   formatBlocked,
   formatDeadlines,
   formatMyTasks,
+  formatPending,
   formatTaskLine,
   formatTaskDetail,
   formatHelp,
@@ -142,6 +143,24 @@ describe("formatApproved", () => {
     const text = formatApproved([task({ status: "done", previousStatus: null, blockedReason: null })]);
     expect(text).toContain("#1");
     expect(text).toContain("@alice");
+  });
+
+  it("heads the list with 'Marked done', not the removed review gate's 'Approved' (F14a)", () => {
+    const text = formatApproved([task({ status: "done", previousStatus: null, blockedReason: null })]);
+    expect(text).toContain("Marked done this past week:");
+    expect(text).not.toContain("Approved this past week:");
+  });
+});
+
+describe("formatPending", () => {
+  it("says nothing pending when the list is empty", () => {
+    expect(formatPending([])).toBe("Nothing pending review right now.");
+  });
+
+  it("heads the list with 'Awaiting review', not 'Awaiting your review' — it's cohort-wide, not personal (F14a)", () => {
+    const text = formatPending([task({ status: "in_review", previousStatus: "in_progress", blockedReason: null })]);
+    expect(text).toContain("Awaiting review:");
+    expect(text).not.toContain("Awaiting your review:");
   });
 });
 
