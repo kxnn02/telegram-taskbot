@@ -59,7 +59,7 @@ export interface CreateBotOptions {
  * roster member may move a task to any status — so every hint just
  * suggests the obvious next command rather than describing a permission. */
 const NEXT_STEP_HINT: Record<TaskStatus, string> = {
-  backlog: "Send `/update <id> todo` to bring it back into play.",
+  backlog: "Send `/revise <id>` to move it to To do status.",
   todo: "Send `/submit <id>` once you start it.",
   in_progress: "Send `/submit <id>` when you're done.",
   in_review: "It's now awaiting review.",
