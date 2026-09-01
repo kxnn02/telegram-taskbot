@@ -194,7 +194,7 @@ describe("GET / (oversight view)", () => {
     expect(res.text).toContain("bob");
   });
 
-  it("filters to the overdue-backlog status group via query param", async () => {
+  it("filters to the overdue status group via query param", async () => {
     const { app, service } = makeApp();
     await service.assignTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
@@ -208,7 +208,7 @@ describe("GET / (oversight view)", () => {
     const login = await loginAs(app, "carla");
     const cookie = sessionCookieFrom(login);
 
-    const res = await request(app).get("/?status=overdue-backlog").set("Cookie", cookie);
+    const res = await request(app).get("/?status=overdue").set("Cookie", cookie);
     expect(res.status).toBe(200);
     expect(res.text).toContain("Overdue task");
     expect(res.text).not.toContain("Not overdue task");
@@ -270,13 +270,14 @@ describe("GET /tasks/new", () => {
     expect(res.headers.location).toBe("/login");
   });
 
-  it("shows a creation form listing the cohort's known interns as assignee options", async () => {
+  it("shows a creation form listing every roster member — not just interns — as assignee options (issue #27/#29)", async () => {
     const { app } = makeApp();
     const cookie = await loginCookie(app);
     const res = await request(app).get("/tasks/new").set("Cookie", cookie);
     expect(res.status).toBe(200);
     expect(res.text).toContain("alice");
     expect(res.text).toContain("bob");
+    expect(res.text).toContain("dave");
     expect(res.text).toMatch(/<form[^>]*method="post"[^>]*action="\/tasks\/new"/i);
   });
 });
@@ -624,7 +625,7 @@ describe("GET / — action grouping (default, group=action)", () => {
       { assigneeUsername: "bob", title: "Overdue task", description: "d", dueDate: "2026-08-01" },
     );
     const cookie = await loginCookie(app);
-    const res = await request(app).get("/?status=overdue-backlog").set("Cookie", cookie);
+    const res = await request(app).get("/?status=overdue").set("Cookie", cookie);
     expect(res.status).toBe(200);
     expect(res.text).toContain("Overdue task");
     expect(res.text).not.toContain("Not overdue task");

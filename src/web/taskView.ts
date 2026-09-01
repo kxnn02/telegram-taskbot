@@ -9,14 +9,14 @@ import type { TaskWithFlags } from "../service/taskService.js";
  * criteria).
  */
 
-export type StatusGroup = "done" | "to-be-reviewed" | "blocked" | "overdue-backlog";
+/** `overdue-backlog` was renamed to `overdue` (issue #27/#29): `backlog`
+ * became a real status name, so the old value collided with it — the same
+ * naming collision #31 resolves for the `/backlog` command by renaming it
+ * to `/overdue`, resolved here the same way. These are user-visible
+ * dashboard URL query-string values (`?status=`). */
+export type StatusGroup = "done" | "to-be-reviewed" | "blocked" | "overdue";
 
-export const STATUS_GROUPS: StatusGroup[] = [
-  "done",
-  "to-be-reviewed",
-  "blocked",
-  "overdue-backlog",
-];
+export const STATUS_GROUPS: StatusGroup[] = ["done", "to-be-reviewed", "blocked", "overdue"];
 
 export function groupByAssignee(
   tasks: TaskWithFlags[],
@@ -78,7 +78,7 @@ export function filterByStatusGroup(
       return tasks.filter((t) => t.status === "in_review");
     case "blocked":
       return tasks.filter((t) => t.status === "blocked");
-    case "overdue-backlog":
+    case "overdue":
       return tasks.filter((t) => t.overdue);
     case undefined:
       return tasks;
