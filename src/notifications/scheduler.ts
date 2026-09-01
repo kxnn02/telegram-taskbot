@@ -52,7 +52,7 @@ function schedulerCaller(cohortId: string): Caller {
 /** Best-effort DM send, mirroring src/bot/notify.ts's notifyUser: silently
  * no-ops if the recipient never ran /start, and never throws on delivery
  * failure (e.g. the user blocked the bot). */
-async function sendDM(
+export async function sendDM(
   bot: NotifierBot,
   registrations: RegistrationStorePort,
   username: string,
