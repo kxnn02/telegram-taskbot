@@ -1,5 +1,22 @@
 import type { TaskWithFlags } from "../service/taskService.js";
-import type { Role } from "../domain/types.js";
+import type { Role, TaskStatus } from "../domain/types.js";
+
+/** Display labels for the six free-set statuses (#27's normative status
+ * table) — the only place this vocabulary is spelled out for user-facing
+ * text, so every formatter below renders this instead of the raw
+ * snake_case stored value. */
+const STATUS_LABELS: Record<TaskStatus, string> = {
+  backlog: "Backlog",
+  todo: "To do",
+  in_progress: "In progress",
+  in_review: "In review",
+  blocked: "Blocked",
+  done: "Done",
+};
+
+export function statusLabel(status: TaskStatus): string {
+  return STATUS_LABELS[status];
+}
 
 /** Tasks per page for the paginated list commands (/alltasks, /mytasks) —
  * issue #7. A command-argument page number was chosen over inline
@@ -39,7 +56,7 @@ export function formatTaskLine(task: TaskWithFlags): string {
   if (task.overdue) flags.push(`OVERDUE ${task.daysOverdue}d`);
   if (task.status === "blocked") flags.push("BLOCKED");
   const flagText = flags.length > 0 ? ` [${flags.join(", ")}]` : "";
-  return `#${task.id} ${task.title} — ${task.status} (due ${task.dueDate})${flagText}`;
+  return `#${task.id} ${task.title} — ${statusLabel(task.status)} (due ${task.dueDate})${flagText}`;
 }
 
 export function formatMyTasks(tasks: TaskWithFlags[], page = 1): string {
@@ -142,7 +159,7 @@ export function formatTaskDetail(task: TaskWithFlags): string {
 
   return [
     `Task ${task.id}: ${task.title}`,
-    `Status: ${task.status}${flagLine}`,
+    `Status: ${statusLabel(task.status)}${flagLine}`,
     `Assignee: @${task.assigneeUsername}`,
     `Assigned by: @${task.assignedByUsername}`,
     `Due: ${task.dueDate}`,
@@ -173,11 +190,11 @@ const INTERN_HELP = [
 
 const HIGHER_UP_HELP = [
   "/assign — start the assignment wizard",
-  "/pending — review queue (Submitted tasks)",
+  "/pending — review queue (tasks In review)",
   "/note <id> <text> — attach a feedback note",
   "/edit <id> — edit a task",
   "/canceltask <id> — cancel a task",
-  "/approve <id> / /revise <id> — decide on a submitted task",
+  "/approve <id> / /revise <id> — mark a task Done or send it back to To do",
   "/dashboard — get the dashboard link",
 ];
 
