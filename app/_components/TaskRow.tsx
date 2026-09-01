@@ -1,13 +1,14 @@
 import { DateTime } from "luxon";
 import type { TaskWithFlags } from "../../src/service/taskService";
 import { initialsFor } from "../../src/web/layout";
+import { RowActions } from "./RowActions";
 import { StatusBadge } from "./StatusBadge";
 
 /**
- * Faithful port of dashboardServer.ts's actionRow/internRow, minus the
- * trailing "Edit" action cell — task mutation (create/edit/approve) is
- * explicitly out of scope for this read-only slice (Phase 6.2), so the
- * whole actions column is dropped rather than rendered as an inert button.
+ * Faithful port of dashboardServer.ts's actionRow/internRow. Phase 6.1
+ * dropped the trailing actions cell entirely (mutations were out of scope
+ * for that read-only slice); Phase 6.2 brings it back as `RowActions`, a
+ * Client Component that calls the new REST mutation routes.
  */
 
 function dueLabel(dueDate: string): string {
@@ -48,6 +49,9 @@ export function ActionRow({ task }: { task: TaskWithFlags }) {
         <StatusBadge status={task.status} />
       </td>
       <DueCell task={task} />
+      <td style={{ width: 168 }}>
+        <RowActions task={task} />
+      </td>
     </tr>
   );
 }
@@ -66,6 +70,9 @@ export function InternRow({ task }: { task: TaskWithFlags }) {
         <StatusBadge status={task.status} />
       </td>
       <DueCell task={task} />
+      <td style={{ width: 168 }}>
+        <RowActions task={task} />
+      </td>
     </tr>
   );
 }

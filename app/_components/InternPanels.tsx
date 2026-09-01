@@ -38,6 +38,7 @@ export function InternPanels({ tasks }: { tasks: TaskWithFlags[] }) {
                 <th>Task</th>
                 <th>Status</th>
                 <th>Due</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>

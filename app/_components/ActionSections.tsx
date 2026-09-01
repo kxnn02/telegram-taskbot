@@ -62,6 +62,7 @@ function Section({ meta, tasks }: { meta: ActionSectionMeta; tasks: TaskWithFlag
               <th>Intern</th>
               <th>Status</th>
               <th>Due</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
