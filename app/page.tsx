@@ -4,6 +4,7 @@ import type { Caller } from "../src/domain/types";
 import { verifySession } from "../src/web/sessionCookie";
 import { getDashboardDeps } from "../src/web/nextDashboardDeps";
 import { loadOversightView } from "../src/web/oversightData";
+import { Icon } from "./_components/icons";
 import { DashboardShell } from "./_components/Shell";
 import { Controls } from "./_components/Controls";
 import { StatusChips } from "./_components/StatusChips";
@@ -12,13 +13,14 @@ import { InternPanels } from "./_components/InternPanels";
 import { MessageCard } from "./_components/MessageCard";
 
 /**
- * The read-only oversight view (Phase 6.1, issue #17 — step 4). Session
- * check + data-fetching/filtering are delegated to already-tested pure
- * functions (`verifySession`, `loadOversightView`); this Server Component
- * is a thin render layer on top, same split as `api/telegram/webhook.ts`
- * vs `webhookHandler.ts`. No create/edit/approve here — that's Phase 6.2 —
- * so the "New task" button and per-row Edit action from the Express
- * dashboard are both intentionally dropped, not stubbed.
+ * The oversight view (Phase 6.1 read-only base, issue #17 — step 4; the
+ * "New task" button and per-row edit/approve/revise actions restored in
+ * Phase 6.2). Session check + data-fetching/filtering are delegated to
+ * already-tested pure functions (`verifySession`, `loadOversightView`);
+ * this Server Component is a thin render layer on top, same split as
+ * `api/telegram/webhook.ts` vs `webhookHandler.ts`. Mutations themselves
+ * live behind the new REST routes under `app/api/tasks/**` (ADR-0008), only
+ * linked to / triggered from here.
  */
 
 const SESSION_COOKIE = "session";
@@ -64,8 +66,15 @@ export default async function OversightPage({
   const { tasks, allTasks, groupMode, statusGroup, assignee } = result.value;
   const assignees = [...new Set(allTasks.map((t) => t.assigneeUsername))].sort();
 
+  const newTaskBtn = (
+    <a className="btn primary" href="/tasks/new">
+      <Icon name="plus" size={17} />
+      <span>New task</span>
+    </a>
+  );
+
   return (
-    <DashboardShell active="tasks" title="Task oversight" caller={caller}>
+    <DashboardShell active="tasks" title="Task oversight" actions={newTaskBtn} caller={caller}>
       <Controls groupMode={groupMode} assignees={assignees} activeAssignee={assignee} />
       {groupMode === "intern" ? <StatusChips activeStatus={statusGroup} /> : null}
       {groupMode === "action" ? <ActionSections tasks={tasks} /> : <InternPanels tasks={tasks} />}
