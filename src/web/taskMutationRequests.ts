@@ -1,4 +1,5 @@
 import type { AssignTaskInput, EditTaskInput } from "../service/taskService.js";
+import type { TaskStatus } from "../domain/types.js";
 
 /**
  * Request-parsing/validation for the Next.js task-mutation API routes
@@ -71,11 +72,26 @@ const EDIT_TASK_FIELDS: Array<keyof EditTaskInput> = [
   "dueDate",
 ];
 
-export function parseEditTaskRequest(body: unknown): ParsedRequest<EditTaskInput> {
+const VALID_STATUSES: TaskStatus[] = [
+  "backlog",
+  "todo",
+  "in_progress",
+  "in_review",
+  "blocked",
+  "done",
+];
+
+/** `EditTaskInput` plus an optional `status` — kept separate from
+ * `TaskService.EditTaskInput` itself (untouched here, per stage 1a) since a
+ * status change is dispatched through `TaskService.setStatus` rather than
+ * `editTask` (issue #27/#29's PATCH extension). */
+export type EditTaskRequestBody = EditTaskInput & { status?: TaskStatus };
+
+export function parseEditTaskRequest(body: unknown): ParsedRequest<EditTaskRequestBody> {
   const record = asRecord(body);
   if (!record) return fail("Request body must be a JSON object.");
 
-  const patch: EditTaskInput = {};
+  const patch: EditTaskRequestBody = {};
   for (const field of EDIT_TASK_FIELDS) {
     if (!(field in record)) continue;
     const value = record[field];
@@ -83,6 +99,13 @@ export function parseEditTaskRequest(body: unknown): ParsedRequest<EditTaskInput
       return fail(`"${field}" must be a string if provided.`);
     }
     patch[field] = value;
+  }
+  if ("status" in record) {
+    const value = record.status;
+    if (typeof value !== "string" || !VALID_STATUSES.includes(value as TaskStatus)) {
+      return fail(`"status" must be one of ${VALID_STATUSES.join(", ")}.`);
+    }
+    patch.status = value as TaskStatus;
   }
   return { ok: true, value: patch };
 }
