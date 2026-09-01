@@ -1,5 +1,5 @@
 import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
-import type { Roster } from "../domain/roster.js";
+import { normalizeUsername, type Roster } from "../domain/roster.js";
 import type { Caller } from "../domain/types.js";
 
 export type ResolveResult =
@@ -37,6 +37,6 @@ export async function resolveCaller(
 
   return {
     status: "ok",
-    caller: { username: entry.username, role: entry.role, cohortId: entry.cohortId },
+    caller: { username: normalizeUsername(entry.username), role: entry.role, cohortId: entry.cohortId },
   };
 }

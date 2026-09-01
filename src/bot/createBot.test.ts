@@ -1528,6 +1528,138 @@ describe("Notification policy on status changes (issue #27/#29)", () => {
   });
 });
 
+describe("Stage 5: notification correctness (issue #54, findings F4/F5/F13)", () => {
+  let roster: Roster;
+  let testBot: ReturnType<typeof makeTestBot>;
+
+  beforeEach(() => {
+    roster = makeRoster();
+    testBot = makeTestBot(roster);
+  });
+
+  function sentDMs(actingChatId: number): string[] {
+    return testBot.calls
+      .filter((c) => c.method === "sendMessage" && Number(c.payload.chat_id) !== actingChatId)
+      .map((c) => String(c.payload.chat_id));
+  }
+
+  it("a roster username with capital-letter casing doesn't self-DM (F4) — completing your own task sends only the reply", async () => {
+    const mixedCaseRoster = new Roster([
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { username: "Alice", role: "Intern", cohortId: COHORT },
+    ]);
+    const mixedCaseBot = makeTestBot(mixedCaseRoster);
+    const aliceId = nextUserId();
+    await registerCaller(mixedCaseBot, aliceId, "alice");
+
+    const task = await mixedCaseBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Ship it", description: "d", dueDate: "2026-09-05" },
+    );
+    if (!task.ok) throw new Error("setup failed");
+
+    await mixedCaseBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, `/complete ${task.value.id}`));
+
+    const sendMessageCalls = mixedCaseBot.calls.filter((c) => c.method === "sendMessage");
+    expect(sendMessageCalls).toHaveLength(1);
+    expect(Number(sendMessageCalls[0]?.payload.chat_id)).toBe(aliceId);
+  });
+
+  it("a command whose notification lookup throws still replies with its normal success text (F5)", async () => {
+    const { calls, transformer } = makeFakeTransformer();
+    const bot = new Bot("TEST_TOKEN", { botInfo: FAKE_BOT_INFO });
+    bot.api.config.use(transformer);
+    const brokenRegistrations: RegistrationStorePort = {
+      register: async (userId, username) => {
+        await underlying.register(userId, username);
+      },
+      findUsername: async (userId) => underlying.findUsername(userId),
+      findTelegramId: async () => {
+        throw new Error("duplicate rows for username — .maybeSingle() failure");
+      },
+    };
+    const underlying = new InMemoryRegistrationStore();
+    const created = createBot({
+      token: "TEST_TOKEN",
+      taskStore: new InMemoryTaskStore(),
+      registrationStore: brokenRegistrations,
+      wizardStateStore: new InMemoryWizardStateStore(),
+      activeCohortId: COHORT,
+      dashboardUrl: "http://localhost:1234",
+      bot,
+      roster,
+    });
+
+    const carlaId = nextUserId();
+    await underlying.register(carlaId, "carla");
+    const task = await created.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Ship it", description: "d", dueDate: "2026-09-05" },
+    );
+    if (!task.ok) throw new Error("setup failed");
+
+    await created.bot.handleUpdate(messageUpdate(carlaId, carlaId, `/blocked ${task.value.id} stuck`));
+
+    expect(lastReplyText(calls)).toMatch(/flagged as blocked/i);
+  });
+
+  it("/addtask ... @bob where bob has never run /start warns in the reply (F13)", async () => {
+    const carlaId = nextUserId();
+    await registerCaller(testBot, carlaId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(carlaId, carlaId, "/addtask ship it @bob"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/hasn't sent \/start yet/i);
+  });
+
+  it("/addtask ... @bob where bob has registered does not warn, and bob gets a DM (F13)", async () => {
+    const carlaId = nextUserId();
+    await registerCaller(testBot, carlaId, "carla");
+    const bobId = nextUserId();
+    await registerCaller(testBot, bobId, "bob");
+
+    await testBot.bot.handleUpdate(messageUpdate(carlaId, carlaId, "/addtask ship it @bob"));
+
+    expect(lastReplyText(testBot.calls)).not.toMatch(/hasn't sent \/start yet/i);
+    expect(sentDMs(carlaId)).toContain(String(bobId));
+  });
+
+  it("/addtask ... self-assigned does not warn, even though no DM is sent (F13)", async () => {
+    const carlaId = nextUserId();
+    await registerCaller(testBot, carlaId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(carlaId, carlaId, "/addtask ship it"));
+
+    expect(lastReplyText(testBot.calls)).not.toMatch(/hasn't sent \/start yet/i);
+  });
+
+  it("bulk /update t1,t2 done still collapses to one summary DM per recipient (regression guard on #32)", async () => {
+    const carlaId = nextUserId();
+    await registerCaller(testBot, carlaId, "carla");
+    const bobId = nextUserId();
+    await registerCaller(testBot, bobId, "bob");
+
+    const t1 = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "bob", title: "Task 1", description: "d", dueDate: "2026-09-05" },
+    );
+    const t2 = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "bob", title: "Task 2", description: "d", dueDate: "2026-09-05" },
+    );
+    if (!t1.ok || !t2.ok) throw new Error("setup failed");
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(carlaId, carlaId, `/update t${t1.value.id},t${t2.value.id} done`),
+    );
+
+    const dmsToBob = testBot.calls.filter(
+      (c) => c.method === "sendMessage" && Number(c.payload.chat_id) === bobId,
+    );
+    expect(dmsToBob).toHaveLength(1);
+  });
+});
+
 describe("/tasks and /mytasks pagination (issue #7/#33)", () => {
   let roster: Roster;
   let testBot: ReturnType<typeof makeTestBot>;

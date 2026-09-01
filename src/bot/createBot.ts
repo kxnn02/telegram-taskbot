@@ -782,17 +782,19 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       await ctx.reply(`Couldn't create the task: ${result.error}`);
       return;
     }
-    await ctx.reply(
-      `Task ${result.value.id} created and assigned to @${result.value.assigneeUsername}, due ${result.value.dueDate}.`,
-    );
+    let reply = `Task ${result.value.id} created and assigned to @${result.value.assigneeUsername}, due ${result.value.dueDate}.`;
     if (result.value.assigneeUsername !== normalizeUsername(caller.username)) {
-      await notifyUser(
+      const notified = await notifyUser(
         bot,
         registrations,
         result.value.assigneeUsername,
         `You've been assigned Task ${result.value.id}: "${result.value.title}" (due ${result.value.dueDate}). Send /task ${result.value.id} for full details.`,
       );
+      if (!notified) {
+        reply += `\nHeads-up: @${result.value.assigneeUsername} hasn't sent /start yet, so I couldn't notify them.`;
+      }
     }
+    await ctx.reply(reply);
   }
 
   bot.command(
@@ -1183,13 +1185,17 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await ctx.reply(`Couldn't create the task: ${result.error}`);
         return;
       }
-      await ctx.reply(`Task ${result.value.id} created and assigned to @${result.value.assigneeUsername}.`);
-      await notifyUser(
+      let reply = `Task ${result.value.id} created and assigned to @${result.value.assigneeUsername}.`;
+      const notified = await notifyUser(
         bot,
         registrations,
         result.value.assigneeUsername,
         `You've been assigned Task ${result.value.id}: "${result.value.title}" (due ${result.value.dueDate}). Send /task ${result.value.id} for full details, /submit ${result.value.id} when done.`,
       );
+      if (!notified && result.value.assigneeUsername !== normalizeUsername(caller.username)) {
+        reply += `\nHeads-up: @${result.value.assigneeUsername} hasn't sent /start yet, so I couldn't notify them.`;
+      }
+      await ctx.reply(reply);
       return;
     }
 
