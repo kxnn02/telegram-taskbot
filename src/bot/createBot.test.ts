@@ -292,6 +292,34 @@ describe("/edit wizard field picker", () => {
     }
   });
 
+  it("the wizard's due-date confirm prompt warns when the parsed date is in the past (F10)", async () => {
+    const taskId = await seedTask();
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/edit ${taskId}`));
+    await testBot.bot.handleUpdate(callbackUpdate(higherUpId, higherUpId, "editfield:duedate"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "Jan 5 2020"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/save this\?/i);
+    expect(text).toContain("⚠️ That due date is already in the past.");
+  });
+
+  it("the wizard's due-date confirm prompt does not warn for a future date (F10)", async () => {
+    const taskId = await seedTask();
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/edit ${taskId}`));
+    await testBot.bot.handleUpdate(callbackUpdate(higherUpId, higherUpId, "editfield:duedate"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "Dec 25 2026"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/save this\?/i);
+    expect(text).not.toContain("already in the past");
+  });
+
   it("tapping Assignee with a higher-up's username reassigns to them — assignment isn't intern-only (issue #27/#29)", async () => {
     const taskId = await seedTask();
     const higherUpId = nextUserId();
@@ -510,6 +538,45 @@ describe("direct /edit <task_id> <field> <value> (issue #30)", () => {
     );
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value.dueDate).toBe("2026-09-20");
+  });
+
+  it("warns when the direct duedate edit resolves to a past date (F10)", async () => {
+    const taskId = await seedTask();
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(higherUpId, higherUpId, `/edit ${taskId} duedate Jan 5 2020`),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("⚠️ That due date is already in the past.");
+  });
+
+  it("does not warn when the direct duedate edit resolves to a future date (F10)", async () => {
+    const taskId = await seedTask();
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(higherUpId, higherUpId, `/edit ${taskId} duedate Sept 20`),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).not.toContain("already in the past");
+  });
+
+  it("does not warn when editing a non-duedate field (F10)", async () => {
+    const taskId = await seedTask();
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(higherUpId, higherUpId, `/edit ${taskId} title Brand new title`),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).not.toContain("already in the past");
   });
 
   it("rejects a due-date value chrono cannot parse, with usage help rather than silently defaulting", async () => {
@@ -967,6 +1034,26 @@ describe("direct /addtask one-liner (issue #27/#30)", () => {
 
     const text = lastReplyText(testBot.calls);
     expect(text).toMatch(/created/i);
+  });
+
+  it("warns when the resolved due date is already in the past (F10)", async () => {
+    const internId = nextUserId();
+    await registerCaller(testBot, internId, "alice");
+
+    await addtask(internId, "retro writeup by Jan 5 2020");
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("⚠️ That due date is already in the past.");
+  });
+
+  it("does not warn when the resolved due date is in the future (F10)", async () => {
+    const internId = nextUserId();
+    await registerCaller(testBot, internId, "alice");
+
+    await addtask(internId, "fix the login by Sept 5");
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).not.toContain("already in the past");
   });
 
   describe("the coming-Friday default, Asia/Manila", () => {
