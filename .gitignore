@@ -7,3 +7,5 @@ roster.local.json
 *.sqlite-journal
 *.db
 coverage/
+.vercel
+.env*
