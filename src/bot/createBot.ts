@@ -1199,7 +1199,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         bot,
         registrations,
         result.value.assigneeUsername,
-        `You've been assigned Task ${result.value.id}: "${result.value.title}" (due ${result.value.dueDate}). Send /task ${result.value.id} for full details, /submit ${result.value.id} when done.`,
+        `You've been assigned Task ${result.value.id}: "${result.value.title}" (due ${result.value.dueDate}). Send /task ${result.value.id} for full details, /done ${result.value.id} when you're ready for review.`,
       );
       if (!notified && result.value.assigneeUsername !== normalizeUsername(caller.username)) {
         reply += `\nHeads-up: @${result.value.assigneeUsername} hasn't sent /start yet, so I couldn't notify them.`;

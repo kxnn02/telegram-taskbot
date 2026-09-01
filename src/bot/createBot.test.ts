@@ -749,6 +749,28 @@ describe("bare /addtask falls back to the step-by-step wizard (issue #30)", () =
     expect(await testBot.wizards.has(higherUpId)).toBe(true);
   });
 
+  it("the assignment DM points to /done, not the removed /submit (F11)", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "alice"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "Ship the feature"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "skip"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "in 5 days"));
+    await testBot.bot.handleUpdate(callbackUpdate(higherUpId, higherUpId, "duedate:yes"));
+
+    const dmToAlice = testBot.calls.find(
+      (c) => c.method === "sendMessage" && Number(c.payload.chat_id) === aliceId,
+    );
+    expect(dmToAlice?.payload.text).toContain("/done");
+    expect(dmToAlice?.payload.text).not.toContain("/submit");
+  });
+
   it("can assign to a HigherUp — assignment is no longer intern-only (issue #27/#29)", async () => {
     const roster = makeRoster();
     const testBot = makeTestBot(roster);
