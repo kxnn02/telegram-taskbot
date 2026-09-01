@@ -1,19 +1,22 @@
 ﻿# PRD: DevCon PH Cohort 5 Task Bot
 
 > **Partly superseded — read [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md)
-> alongside this document.** The bot's commands are becoming direct one-liners, and its six gated
-> statuses are being replaced by six free-set ones matching **Devie**, another DevCon bot this
-> cohort's higher-ups already use. That deletes the submit → review → approve workflow this PRD is
-> built around. Specifically superseded: **§4 Task Lifecycle**, **§5 Telegram Bot — Commands**, the
-> role split in **§2 Users & Roles**, and the notification triggers in **§8**. The `status` field in
-> **§3** changes values. §6, §7, §9-§12 are unaffected.
+> alongside this document.** The bot's commands became direct one-liners, and its six gated
+> statuses were replaced by six free-set ones matching **Devie**, another DevCon bot this
+> cohort's higher-ups already use. That deleted the submit → review → approve workflow this PRD
+> was originally built around. Specifically superseded: **§4 Task Lifecycle**,
+> **§5 Telegram Bot — Commands**, the role split in **§2 Users & Roles**, and the notification
+> triggers in **§8**. The `status` field in **§3** changes values. §6 and §12 each carry one small
+> inline correction (marked in place) for a UX convention or example that referenced a
+> now-removed command; the rest of §6, plus §7, §9-§12, are otherwise unaffected.
 >
-> **Not implemented yet** — the behaviour described below is still the behaviour that exists. The
-> full rewrite of these sections is tracked as
-> [#35](https://github.com/kxnn02/telegram-taskbot/issues/35), under spec
-> [#27](https://github.com/kxnn02/telegram-taskbot/issues/27). See also the re-platform ADRs
-> (0001-0008) and `CONTEXT.md`, which cover a separate pending change to the stack rather than the
-> product.
+> **Implemented** ([#35](https://github.com/kxnn02/telegram-taskbot/issues/35), the last of stages
+> [#28](https://github.com/kxnn02/telegram-taskbot/issues/28)-#35 under spec
+> [#27](https://github.com/kxnn02/telegram-taskbot/issues/27)) — the superseded sections below no
+> longer describe the bot's actual behaviour; each carries an inline note pointing to the current
+> behaviour, and the original text is kept below it as the historical record of v1's design. See
+> also the re-platform ADRs (0001-0008) and `CONTEXT.md`, which cover a separate, now-unblocked
+> change to the stack rather than the product.
 
 ## 1. Overview
 
@@ -33,6 +36,16 @@ higher-ups to see everything at a glance.
 compromising correctness.
 
 ## 2. Users & Roles
+
+> **Superseded by [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md), implemented.**
+> The role split below described v1's gated permission model. It no longer applies: any
+> registered roster member — Intern or Higher-up — may create a task, assign it to anyone else
+> on the roster, read every task in the cohort, and set any status on any task. **`/edit` is the
+> one command still restricted to `HigherUp`.** There is no other role check left anywhere in
+> `TaskService` or `createBot.ts`. The rest of this section (role assignment via the roster
+> config, and the roster's shared use for the dashboard's Telegram Login Widget) is unaffected —
+> only the permission table and the three notes below it are superseded. The rest of this
+> section is kept below as the historical record of v1's design.
 
 | Role | Description | Permissions |
 |---|---|---|
@@ -74,7 +87,7 @@ the chosen assignee against the intern/higher-up config split, not left to conve
 | assignee | Telegram user, required — must be an Intern (validated against the roster, §2, §7) |
 | assigned_by | Telegram user (higher-up who created it) |
 | due_date | Required |
-| status | See §4 |
+| status | See §4. **Superseded values (ADR-0009, implemented)**: `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done` — replacing the `Assigned`/`InProgress`/`Submitted`/`Approved`/`NeedsRevision`/`Cancelled` values described in §4 below. `blocked` is now one of these six status values, not the separate boolean flag §3's `blocked` row below describes. |
 | notes | Free-text feedback log from higher-ups (via `/note`) |
 | blocked | Boolean + reason text, set via `/blocked` (§5). A flag, not a status — can coexist
   with any lifecycle status. |
@@ -83,6 +96,35 @@ the chosen assignee against the intern/higher-up config split, not left to conve
 No priority levels, no attachments/proof-of-work, no subtasks in v1.
 
 ## 4. Task Lifecycle
+
+> **Superseded by [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md), implemented.**
+> The gated lifecycle below (`Assigned -> In Progress -> Submitted -> Approved`/`Needs Revision`)
+> is gone. Six free-set statuses replace it — `backlog`, `todo`, `in_progress`, `in_review`,
+> `blocked`, `done` — and **any registered roster member may set any status on any task in their
+> own cohort**, with no legal-transition check and no role gate (`/edit` stays the one
+> exception, per §2). `in_review` and `done` are the direct descendants of `Submitted` and
+> `Approved` — the review queue (`/pending`), the submission/status-change notifications, and the
+> weekly digest all survive by retargeting onto these two statuses, not by deletion.
+>
+> Four regressions were accepted knowingly, in exchange for matching the tool the cohort's
+> higher-ups already use daily (**Devie**):
+> - **`Cancelled` is gone.** There is no way to mark a task abandoned; the nearest "parked"
+>   meaning is `/update <ref> backlog`.
+> - **`NeedsRevision` is gone.** Sending work back is `/update <ref> todo` plus a `/note`. "Came
+>   back from review" is no longer distinguishable from "not started."
+> - **The Approved edit-lock is gone.** A `done` task is editable and reopenable via `/edit` or
+>   `/update <ref> <status>` at any time.
+> - **Self-approval is possible by design.** Any roster member — including the assignee — can
+>   set their own task to `done`. "Done" is a claim, not a verified fact.
+>
+> **Blocked becomes a status, not a flag.** `/blocked <ref> <reason>` (§5) now transitions a task
+> into the `blocked` status rather than setting an orthogonal boolean, and stashes the prior
+> status in `previous_status` so `/unblock <ref>` (replacing `/unblocked`) has a defined restore
+> target. Overdue stays a derived flag, unchanged — see the "Overdue visibility" note below,
+> which is otherwise unaffected by this ADR.
+>
+> The rest of this section — the original lifecycle diagram and per-status notes — is kept below
+> as the historical record of v1's design.
 
 ```
 Assigned -> In Progress -> Submitted -> Approved
@@ -129,6 +171,30 @@ immediate notification to the assigning higher-up (§8) rather than waiting for 
 visibility to be noticed. Shown alongside the overdue flag wherever tasks are listed.
 
 ## 5. Telegram Bot — Commands
+
+> **Superseded by [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md), implemented.**
+> Full current command grammar is documented in `USER_GUIDE.md` and reconciled with `/help`'s
+> output (`src/bot/format.ts`); this note is a summary, not the source of truth. The commands
+> below are removed outright, with no alias — a caller typing one gets a one-line redirect to
+> the replacement, not a generic "unknown command" fallback: `/submit` → `/done`, `/approve` →
+> `/complete`, `/revise` → `/update <ref> todo`, `/canceltask` → `/update <ref> backlog`,
+> `/unblocked` → `/unblock`, `/alltasks` → `/tasks`, `/backlog` → `/overdue` (the word "backlog"
+> now names a status, so the old meaning of "overdue work" needed a different command name).
+> `/assign`'s fixed four-step wizard is replaced by **`/addtask <title> [by <date>]
+> [@username]`**, a one-line create command open to any roster member (not interns-only) with
+> the wizard retained as the fallback when `/addtask` is sent bare. `/edit` gains a direct
+> `/edit <ref> <field> <value>` form alongside its existing wizard, and is the one command still
+> restricted to `HigherUp` (§2). `/update <ref> <status>` is new: a generic status setter,
+> replacing `/submit`/`/approve`/`/revise`/`/canceltask`'s individual gated transitions, open to
+> anyone and accepting a comma- or newline-separated batch of refs for a bulk update. `/done` and
+> `/complete` are fixed-status shortcuts onto the same mechanism — `/done` sets `in_review`,
+> `/complete` sets `done`, a deliberate wart copied from Devie rather than fixed (`/update <ref>
+> done` sets `done`, so the word "done" means different things as a command name versus an
+> argument). A new `@`-mention trigger (`@<bot> pls work on ...`) reuses `/addtask`'s exact
+> grammar so a task can be created straight out of ordinary group chatter. The
+> Approve/Revise/Mark-unblocked inline buttons are removed along with the review gate they
+> encoded; only the due-date-confirmation Yes/No buttons and `/edit`'s field-choice menu buttons
+> remain. The rest of this section is kept below as the historical record of v1's design.
 
 Slash commands for everything except confirmations and binary decisions, which use inline
 buttons (§6) — cheap to add since they're just an attachment on a message the bot already
@@ -211,9 +277,10 @@ details carry a lot of the actual "is this easy to use" experience — they're c
 explicitly rather than left to whatever falls out of implementation.
 
 - **Task IDs are simple sequential integers** (Task 1, 2, 3...), scoped per cohort — not UUIDs.
-  Short and easy to type/remember/say out loud in a chat command like `/submit 12`.
+  Short and easy to type/remember/say out loud in a chat command like `/task 12` (or, per
+  ADR-0009, `/done 12`).
 - **Actionable notifications**: every notification states the concrete next step, not just the
-  fact — e.g. an assignment notification includes "Send `/task 12` for full details, `/submit
+  fact — e.g. an assignment notification includes "Send `/task 12` for full details, `/done
   12` when done," not just "You've been assigned a task." ("Send," not "Reply" — this isn't
   Telegram's reply-to-message feature, just the next command to type.)
 - **Friendly empty and error states**: `/mytasks` with nothing pending says something like "You
@@ -234,13 +301,13 @@ explicitly rather than left to whatever falls out of implementation.
   minutes of inactivity, with a gentle message ("that assignment timed out, run `/assign` again
   when ready") rather than lingering indefinitely and risking a stale step being misinterpreted
   later.
-- **Confirm before destructive action**: `/canceltask <task_id>` shows the task's title with
-  Yes/No inline buttons before acting — consistent with the confirm-before-save pattern already
-  used for due-date parsing (§5), and cheap insurance against a mistyped task ID cancelling the
-  wrong thing irreversibly.
-- **Buttons scope**: inline buttons are used only for confirmations (Yes/No) and the
-  Approve/Revise decision — never for browsing or listing, where typed commands and IDs remain
-  simpler and more direct.
+- **Confirm before destructive action** *(superseded — [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md), implemented)*:
+  `/canceltask` is gone, so this confirmation no longer exists. There is no destructive
+  "cancel a task" action left in v2's command set — see §4's accepted losses.
+- **Buttons scope** *(superseded — [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md), implemented)*:
+  the Approve/Revise decision and the Mark-unblocked button are both gone along with the review
+  gate they encoded. Inline buttons now exist only for the due-date-confirmation Yes/No prompt
+  and `/edit`'s field-choice menu — never for browsing or listing, unchanged.
 
 **Group chat command support (revised from initial DM-only design)**: commands, including the
 assignment/edit wizards, work directly inside the cohort's group chat, not just in DM — a
@@ -277,6 +344,17 @@ remains the organization's normal communication channel; it's simply no longer p
 system resolves identity.
 
 ## 8. Notifications (proactive, via DM)
+
+> **Partly superseded by [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md),
+> implemented.** "On submission" and "on approve/needs-revision decision" below collapse into
+> one generic trigger: **on any status change** (`/update`, `/done`, `/complete`, or a bulk
+> update), both the assignee and whoever originally assigned the task get a DM naming the new
+> status — except whoever made the change, who obviously already knows. A bulk update collapses
+> this to **one summary DM per recipient**, not one per task, even when many of a single
+> recipient's tasks changed in the same command. "On assignment" and "on `/note` added" are
+> unaffected. Due-date reminders, overdue crossing, the daily standup, and the weekly digest
+> (below) are all unaffected — see CONTEXT.md's note that the digest's counts-only guarantee in
+> particular was never in scope for this ADR.
 
 - On assignment → notify the intern.
 - On submission → notify the higher-up who assigned that task (not all higher-ups).
@@ -341,7 +419,7 @@ Built so a future cohort can reuse the system by swapping config (e.g. group cha
 code changes. Cohort 5 is the first deployment, not a one-off hardcoded build.
 
 **Data lifecycle across cohorts**: every task is tagged with a cohort identifier. When a new
-cohort's config is activated, `/alltasks`, `/mytasks`, `/pending`, and the dashboard default to
+cohort's config is activated, `/tasks` (formerly `/alltasks`), `/mytasks`, `/pending`, and the dashboard default to
 showing **only the current cohort's data** — this keeps the current cohort's view clean and
 uncluttered rather than mixing in a prior cohort's history. Past cohort data is not deleted,
 just not surfaced by default, so it remains available directly in the database if ever needed.
@@ -385,10 +463,14 @@ just not surfaced by default, so it remains available directly in the database i
   for user confirmation before saving (§5), to offset the ambiguity risk of free-text dates.
 - **Concurrency**: last-write-wins for concurrent edits to the same task. No conflict
   resolution UI — acceptable given only a handful of higher-ups editing occasionally.
-- **Dashboard/bot parity**: the dashboard enforces the exact same rules as the bot (any
-  higher-up can act on any task, assignees must be interns, edit locked after Approved,
-  current-cohort-only by default) — it is not a separate rule set, just a different interface
-  onto the same backend.
+- **Dashboard/bot parity**: the dashboard enforces the exact same rules as the bot — it is not a
+  separate rule set, just a different interface onto the same backend. *(Superseded parenthetical
+  — [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md): the "any higher-up can act on
+  any task, assignees must be interns, edit locked after Approved" example list described v1's
+  gated rules; current-cohort-only-by-default is the only part of that example still accurate.
+  See §2/§4 for what replaced it. This parity principle is scheduled to reach the dashboard in
+  Phase 6.3, [#17](https://github.com/kxnn02/telegram-taskbot/issues/17), which is blocked on
+  this ADR shipping first.)*
 
 ## 13. Open Items to Resolve During Implementation
 

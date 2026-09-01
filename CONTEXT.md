@@ -41,8 +41,9 @@ up the codebase later.
 - **Registration** — the one-time link between a Telegram user id and a roster username, created
   by `/start`. A roster entry can exist before someone has registered; an unregistered roster
   member is told to `/start` first.
-- **Overdue-crossing** — the moment a task's due date passes while it's still open (not
-  Approved/Cancelled). Notified exactly once via `overdue_notifications` bookkeeping, not
+- **Overdue-crossing** — the moment a task's due date passes while it's still open (not `done` —
+  see `isOverdue`, `src/domain/overdue.ts`; ADR-0009 dropped the old Approved/Cancelled wording
+  along with those statuses). Notified exactly once via `overdue_notifications` bookkeeping, not
   re-sent on every subsequent overdue check.
 - **Counts-only** — the digest/group-summary convention of reporting numbers (e.g. "3 due today,
   1 overdue") without task titles, descriptions, or per-task detail. See the privacy decision
@@ -96,6 +97,11 @@ kept private, and the group chat's *proactive* daily/weekly digest still stays c
 below) since that restraint was never about read access.
 
 ### Digests stay counts-only even with full group read access
+
+> **Unaffected by [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md).** This decision
+> survives the command/status redesign untouched — ADR-0009's own "Consequences" section says so
+> explicitly. Called out here, visibly, rather than left to be inferred from the absence of a
+> supersede banner.
 
 The daily/weekly group digest (`src/notifications/digestFormat.ts`) reports only per-intern
 counts (on-track / overdue / blocked), never task titles or descriptions — even though the bot

@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import "dotenv/config";
-import { createBot } from "../../src/bot/createBot.js";
+import { createBot, registerBotCommands } from "../../src/bot/createBot.js";
 import { createSupabaseClient } from "../../src/storage/supabaseClient.js";
 import { SupabaseTaskStore } from "../../src/storage/supabaseTaskStore.js";
 import { SupabaseRegistrationStore } from "../../src/storage/supabaseRegistrationStore.js";
@@ -61,6 +61,9 @@ async function buildDeps(): Promise<WebhookHandlerDeps> {
   // once so grammy has its own bot info (id, username, etc.) cached before
   // handleUpdate is ever called.
   await bot.init();
+  // Cheap and idempotent — runs once per cold Lambda start, not per
+  // request, since buildDeps() is memoized via depsPromise below.
+  await registerBotCommands(bot);
 
   const processedUpdates = new SupabaseProcessedUpdatesStore(supabase);
 
