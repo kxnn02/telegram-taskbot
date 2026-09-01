@@ -200,32 +200,60 @@ export function formatTaskDetail(task: TaskWithFlags): string {
 // direct-edit form is the sole exception (still restricted to higher-ups,
 // issue #27/#31), so it's called out inline instead of living in its own
 // role-specific section the way the pre-#27 help text split things.
-const EVERYONE_HELP = [
-  "/start — register yourself against the roster",
-  "/help — this list",
-  "/cancel — abort an in-progress wizard",
-  "/addtask <title> [by <date>] [@username] — create a task in one line, assigned to you by default, due the coming Friday unless you give a date",
-  "/addtask — bare, starts the step-by-step form instead",
-  "@-mention the bot with a task description — same as /addtask, works in group chats too",
-  "/tasks [page] — every task in the cohort, grouped by assignee",
-  "/tasks @username — filter to one member's tasks",
-  "/tasks intern|higherup — filter to tasks assigned to that role",
-  "/mytasks — your open tasks",
-  "/task <ref> — full detail on one task (ref is 23 or t23)",
-  "/update <ref> <status> — set a task's status (backlog, todo, in progress, in review, blocked, done); also takes a comma-separated list of refs for a bulk update",
-  "/done <ref> — mark a task In review",
-  "/complete <ref> — mark a task Done",
-  "/overdue — overdue tasks",
-  "/pending — review queue (tasks In review)",
-  "/deadlines — open tasks due in the next 7 days, soonest first",
-  "/standup — on-demand standup report for the cohort",
-  "/blocked — blocked tasks",
-  "/blocked <ref> <reason> — flag a task as blocked",
-  "/unblock <ref> — restore a blocked task to its previous status",
-  "/note <ref> <text> — attach a feedback note",
-  "/edit <ref> <field> <value> — edit assignee, title, description, or duedate directly (restricted to higher-ups)",
-  "/edit <ref> — bare, starts the field-choice form instead (restricted to higher-ups)",
-  "/dashboard — get the dashboard link",
+const HELP_SECTIONS: { heading: string; lines: string[] }[] = [
+  {
+    heading: "📋 View",
+    lines: [
+      "/tasks — browse tasks by member (paginated)",
+      "/tasks @username — filter by member",
+      "/mytasks — your open tasks",
+      "/task <ref> — full detail on one task (ref is 23 or t23)",
+      "/deadlines — show upcoming deadlines",
+      "/standup — send the standup report",
+      "/overdue — overdue tasks",
+      "/pending — review queue (tasks in review)",
+      "/blocked — blocked tasks",
+      "/dashboard — get the dashboard link",
+    ],
+  },
+  {
+    heading: "➕ Create",
+    lines: [
+      "/addtask <title> — add a task (defaults to the coming Friday)",
+      "/addtask <title> by Friday — add a task with a specific deadline",
+      "/addtask <title> @username — add a task and assign it to someone",
+      "/addtask — bare, starts the step-by-step form instead",
+      '@-mention the bot, "pls work on <title>" — same as /addtask, works in group chats too',
+      '@-mention the bot, "add task <title> @username" — tag + assign in one go',
+    ],
+  },
+  {
+    heading: "✏️ Update",
+    lines: [
+      "/done <ref> — mark as in review (e.g. /done 23)",
+      "/done t21,t22,t23 — bulk mark as in review",
+      "/complete <ref> — mark as done (e.g. /complete 23)",
+      "/complete t21,t22,t23 — bulk mark as done",
+      "/update <ref> <status> — single update",
+      "/update t21,t22,t23 done — bulk shared status",
+      "/update t21 done, t22 review, t23 inprogress — bulk mixed status",
+      "/update, one ref+status per line — bulk multiline",
+      "Statuses: backlog · todo · in progress · in review · blocked · done",
+      "/blocked <ref> <reason> — flag a task as blocked",
+      "/unblock <ref> — restore a blocked task to its previous status",
+      "/note <ref> <text> — attach a feedback note",
+      "/edit <ref> <field> <value> — edit assignee, title, description, or duedate directly (restricted to higher-ups)",
+      "/edit <ref> — bare, starts the field-choice form instead (restricted to higher-ups)",
+    ],
+  },
+  {
+    heading: "⚙️ Other",
+    lines: [
+      "/start — register yourself against the roster",
+      "/help — this list",
+      "/cancel — abort an in-progress wizard",
+    ],
+  },
 ];
 
 export function formatHelp(role: Role | undefined): string {
@@ -235,7 +263,15 @@ export function formatHelp(role: Role | undefined): string {
       "Run /start to link your Telegram account to the roster.",
     ].join("\n");
   }
-  return ["Commands available to you:", ...EVERYONE_HELP.map((l) => "- " + l)].join(
-    "\n",
-  );
+  return [
+    "Available Commands",
+    "",
+    ...HELP_SECTIONS.flatMap((section) => [
+      section.heading,
+      ...section.lines,
+      "",
+    ]),
+  ]
+    .join("\n")
+    .trimEnd();
 }
