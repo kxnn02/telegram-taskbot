@@ -178,25 +178,22 @@ const EVERYONE_HELP = [
   "/addtask <title> [by <date>] [@username] — create a task in one line, assigned to you by default, due the coming Friday unless you give a date",
   "/addtask — bare, starts the step-by-step form instead",
   "/alltasks — every task in the cohort, grouped by assignee",
-  "/task <id> — full detail on one task",
-  "/backlog — overdue tasks",
-  "/blocked — blocked tasks",
-];
-
-const INTERN_HELP = [
   "/mytasks — your open tasks",
-  "/submit <id> — mark a task submitted",
-  "/blocked <id> <reason> — flag a task as blocked",
-  "/unblocked <id> — clear the blocked flag",
+  "/task <ref> — full detail on one task (ref is 23 or t23)",
+  "/update <ref> <status> — set a task's status (backlog, todo, in progress, in review, blocked, done)",
+  "/done <ref> — mark a task In review",
+  "/complete <ref> — mark a task Done",
+  "/overdue — overdue tasks",
+  "/blocked — blocked tasks",
+  "/blocked <ref> <reason> — flag a task as blocked",
+  "/unblock <ref> — restore a blocked task to its previous status",
+  "/note <ref> <text> — attach a feedback note",
+  "/edit <ref> <field> <value> — edit assignee, title, description, or duedate directly",
+  "/edit <ref> — bare, starts the field-choice form instead",
 ];
 
 const HIGHER_UP_HELP = [
   "/pending — review queue (tasks In review)",
-  "/note <id> <text> — attach a feedback note",
-  "/edit <id> <field> <value> — edit assignee, title, description, or duedate directly",
-  "/edit <id> — bare, starts the field-choice form instead",
-  "/canceltask <id> — cancel a task",
-  "/approve <id> / /revise <id> — mark a task Done or send it back to To do",
   "/dashboard — get the dashboard link",
 ];
 
@@ -208,9 +205,7 @@ export function formatHelp(role: Role | undefined): string {
     ].join("\n");
   }
   const sections =
-    role === "Intern"
-      ? [...EVERYONE_HELP, ...INTERN_HELP]
-      : [...EVERYONE_HELP, ...HIGHER_UP_HELP];
+    role === "Intern" ? EVERYONE_HELP : [...EVERYONE_HELP, ...HIGHER_UP_HELP];
   return ["Commands available to you:", ...sections.map((l) => "- " + l)].join(
     "\n",
   );

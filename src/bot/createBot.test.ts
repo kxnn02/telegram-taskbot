@@ -522,73 +522,35 @@ describe("direct /edit <task_id> <field> <value> (issue #30)", () => {
   });
 });
 
-describe("/canceltask confirm callback retargets to the free-set status model (#28)", () => {
-  it("confirming cancellation sets the task's status to backlog, not a removed Cancelled status", async () => {
+describe("Review-gate commands are removed with a helpful redirect, not the generic fallback (issue #27/#31)", () => {
+  it.each([
+    ["/submit", "/done"],
+    ["/approve", "/complete"],
+    ["/revise", "/update"],
+    ["/canceltask", "/update"],
+    ["/unblocked", "/unblock"],
+  ] as const)("%s replies pointing at %s instead of 'Not sure what you mean'", async (removed, replacement) => {
     const roster = makeRoster();
     const testBot = makeTestBot(roster);
     const higherUpId = nextUserId();
     await registerCaller(testBot, higherUpId, "carla");
-    const assignResult = await testBot.service.assignTask(
-      { username: "carla", role: "HigherUp", cohortId: COHORT },
-      {
-        assigneeUsername: "alice",
-        title: "Task to cancel",
-        description: "Some description",
-        dueDate: "2026-09-05",
-      },
-    );
-    if (!assignResult.ok) throw new Error("setup failed: " + assignResult.error);
-    const taskId = assignResult.value.id;
 
-    await testBot.bot.handleUpdate(
-      messageUpdate(higherUpId, higherUpId, `/canceltask ${taskId}`),
-    );
-    await testBot.bot.handleUpdate(
-      callbackUpdate(higherUpId, higherUpId, `canceltask:yes:${taskId}`),
-    );
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `${removed} 1`));
 
-    const getResult = await testBot.service.getTask(
-      { username: "carla", role: "HigherUp", cohortId: COHORT },
-      taskId,
-    );
-    expect(getResult.ok).toBe(true);
-    if (getResult.ok) {
-      expect(getResult.value.status).toBe("backlog");
-    }
+    const text = lastReplyText(testBot.calls);
+    expect(text).not.toMatch(/not sure what you mean/i);
+    expect(text).toContain(replacement);
   });
 
-  it("declining the confirmation ('No') leaves the task's status unchanged", async () => {
+  it("no inline keyboard is offered for the removed /canceltask — the confirm flow it drove is gone too", async () => {
     const roster = makeRoster();
     const testBot = makeTestBot(roster);
     const higherUpId = nextUserId();
     await registerCaller(testBot, higherUpId, "carla");
-    const assignResult = await testBot.service.assignTask(
-      { username: "carla", role: "HigherUp", cohortId: COHORT },
-      {
-        assigneeUsername: "alice",
-        title: "Task to keep",
-        description: "Some description",
-        dueDate: "2026-09-05",
-      },
-    );
-    if (!assignResult.ok) throw new Error("setup failed: " + assignResult.error);
-    const taskId = assignResult.value.id;
 
-    await testBot.bot.handleUpdate(
-      messageUpdate(higherUpId, higherUpId, `/canceltask ${taskId}`),
-    );
-    await testBot.bot.handleUpdate(
-      callbackUpdate(higherUpId, higherUpId, `canceltask:no:${taskId}`),
-    );
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/canceltask 1"));
 
-    const getResult = await testBot.service.getTask(
-      { username: "carla", role: "HigherUp", cohortId: COHORT },
-      taskId,
-    );
-    expect(getResult.ok).toBe(true);
-    if (getResult.ok) {
-      expect(getResult.value.status).toBe("todo");
-    }
+    expect(lastKeyboardCallbackData(testBot.calls)).toEqual([]);
   });
 });
 
@@ -1057,10 +1019,10 @@ describe("Blocked notifications have no inline buttons — the review gate they 
     expect(result.ok && result.value.status).toBe("blocked");
   });
 
-  it("the existing /unblocked <task_id> typed command still works unchanged", async () => {
+  it("/unblock <task_id> restores the previous status (renamed from /unblocked, issue #31)", async () => {
     const { taskId, higherUpId } = await seedBlockedTask();
 
-    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/unblocked ${taskId}`));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/unblock ${taskId}`));
 
     const result = await testBot.service.getTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
@@ -1069,10 +1031,22 @@ describe("Blocked notifications have no inline buttons — the review gate they 
     expect(result.ok && result.value.status).not.toBe("blocked");
     expect(lastReplyText(testBot.calls)).toMatch(/no longer blocked/i);
   });
+
+  it("/unblock also accepts a t-prefixed task ref", async () => {
+    const { taskId, higherUpId } = await seedBlockedTask();
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/unblock t${taskId}`));
+
+    const result = await testBot.service.getTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      taskId,
+    );
+    expect(result.ok && result.value.status).not.toBe("blocked");
+  });
 });
 
-describe("/task <id> appends a per-status next-step hint (issue #27/#29)", () => {
-  it("hints at /submit for a todo task", async () => {
+describe("/task <id> appends a per-status next-step hint (issue #27/#29/#31)", () => {
+  it("hints at /done for a todo task", async () => {
     const roster = makeRoster();
     const testBot = makeTestBot(roster);
     const higherUpId = nextUserId();
@@ -1086,7 +1060,23 @@ describe("/task <id> appends a per-status next-step hint (issue #27/#29)", () =>
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/task ${task.value.id}`));
     const text = lastReplyText(testBot.calls);
     expect(text).toContain("Status: To do");
-    expect(text).toMatch(/\/submit/);
+    expect(text).toMatch(/\/done/);
+  });
+
+  it("also accepts a t-prefixed ref (/task t<id>), issue #31's shared ref parser", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const task = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Ship it", description: "d", dueDate: "2026-09-05" },
+    );
+    if (!task.ok) throw new Error("setup failed");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/task t${task.value.id}`));
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("Status: To do");
   });
 
   it("hints 'Nice work!' for a done task", async () => {
@@ -1162,7 +1152,7 @@ describe("Notification policy on status changes (issue #27/#29)", () => {
     );
     if (!task.ok) throw new Error("setup failed");
 
-    await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, `/submit ${task.value.id}`));
+    await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, `/done ${task.value.id}`));
 
     const dms = sentDMs(aliceId);
     expect(dms).not.toContain(String(aliceId));
@@ -1182,7 +1172,7 @@ describe("Notification policy on status changes (issue #27/#29)", () => {
     );
     if (!task.ok) throw new Error("setup failed");
 
-    await testBot.bot.handleUpdate(messageUpdate(bobId, bobId, `/approve ${task.value.id}`));
+    await testBot.bot.handleUpdate(messageUpdate(bobId, bobId, `/complete ${task.value.id}`));
 
     const dms = sentDMs(bobId);
     expect(dms.filter((id) => id === String(carlaId))).toHaveLength(1);
@@ -1276,6 +1266,194 @@ describe("/alltasks and /mytasks pagination (issue #7)", () => {
 
     const text = lastReplyText(testBot.calls);
     expect(text).toMatch(/usage/i);
+  });
+});
+
+describe("/update <ref> <status> — generic status setter (issue #27/#31)", () => {
+  let roster: Roster;
+  let testBot: ReturnType<typeof makeTestBot>;
+
+  beforeEach(() => {
+    roster = makeRoster();
+    testBot = makeTestBot(roster);
+  });
+
+  async function seedTask(): Promise<{ taskId: number; higherUpId: number; aliceId: number }> {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    const task = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Ship it", description: "d", dueDate: "2026-09-05" },
+    );
+    if (!task.ok) throw new Error("setup failed");
+    return { taskId: task.value.id, higherUpId, aliceId };
+  }
+
+  it("sets the status named by a bare numeric ref", async () => {
+    const { taskId, higherUpId } = await seedTask();
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/update ${taskId} in progress`));
+
+    const result = await testBot.service.getTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      taskId,
+    );
+    expect(result.ok && result.value.status).toBe("in_progress");
+  });
+
+  it("also accepts a t-prefixed ref", async () => {
+    const { taskId, higherUpId } = await seedTask();
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/update t${taskId} done`));
+
+    const result = await testBot.service.getTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      taskId,
+    );
+    expect(result.ok && result.value.status).toBe("done");
+  });
+
+  it("/update <ref> blocked sets the status with a null reason and does not reject (issue #27)", async () => {
+    const { taskId, higherUpId } = await seedTask();
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/update ${taskId} blocked`));
+
+    const result = await testBot.service.getTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      taskId,
+    );
+    expect(result.ok && result.value.status).toBe("blocked");
+    expect(result.ok && result.value.blockedReason).toBeNull();
+  });
+
+  it("an unrecognised status word replies with the list of valid ones, not a generic error", async () => {
+    const { taskId, higherUpId } = await seedTask();
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/update ${taskId} finished`));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/backlog/);
+    expect(text).toMatch(/todo/);
+    expect(text).toMatch(/in progress/);
+    expect(text).toMatch(/in review/);
+    expect(text).toMatch(/blocked/);
+    expect(text).toMatch(/done/);
+  });
+
+  it("an invalid ref gets a usage message", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/update abc done"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/usage/i);
+  });
+
+  it("notifies the assignee and creator, skipping the actor", async () => {
+    const { taskId, higherUpId, aliceId } = await seedTask();
+    const bobId = nextUserId();
+    await registerCaller(testBot, bobId, "bob");
+
+    await testBot.bot.handleUpdate(messageUpdate(bobId, bobId, `/update ${taskId} done`));
+
+    const dms = testBot.calls
+      .filter((c) => c.method === "sendMessage" && Number(c.payload.chat_id) !== bobId)
+      .map((c) => Number(c.payload.chat_id));
+    expect(dms).toContain(aliceId);
+    expect(dms).toContain(higherUpId);
+    expect(dms).not.toContain(bobId);
+  });
+});
+
+describe("/done and /complete — Devie's deliberate wart (issue #27/#31)", () => {
+  let roster: Roster;
+  let testBot: ReturnType<typeof makeTestBot>;
+
+  beforeEach(() => {
+    roster = makeRoster();
+    testBot = makeTestBot(roster);
+  });
+
+  async function seedTask(): Promise<number> {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const task = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Ship it", description: "d", dueDate: "2026-09-05" },
+    );
+    if (!task.ok) throw new Error("setup failed");
+    return task.value.id;
+  }
+
+  // Pinned deliberately per issue #27/#31: `/done` sets `in_review` while
+  // `/update <ref> done` sets `done`. Both are intended — this test exists
+  // so a future reader doesn't "fix" one of them.
+  it("/done <ref> sets in_review, NOT done", async () => {
+    const taskId = await seedTask();
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/done ${taskId}`));
+
+    const result = await testBot.service.getTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      taskId,
+    );
+    expect(result.ok && result.value.status).toBe("in_review");
+  });
+
+  it("/complete <ref> sets done", async () => {
+    const taskId = await seedTask();
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/complete ${taskId}`));
+
+    const result = await testBot.service.getTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      taskId,
+    );
+    expect(result.ok && result.value.status).toBe("done");
+  });
+
+  it("/update <ref> done also sets done — distinct from /done's in_review", async () => {
+    const taskId = await seedTask();
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/update ${taskId} done`));
+
+    const result = await testBot.service.getTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      taskId,
+    );
+    expect(result.ok && result.value.status).toBe("done");
+  });
+});
+
+describe("/overdue replaces /backlog (issue #27/#31 — no alias retained)", () => {
+  it("/overdue lists overdue tasks", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const task = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Overdue thing", description: "d", dueDate: "2020-01-01" },
+    );
+    if (!task.ok) throw new Error("setup failed");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/overdue"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("Overdue thing");
+  });
+
+  it("/backlog no longer exists as the overdue-list command — it does not fall through to the generic 'not sure' reply", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/backlog"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).not.toMatch(/not sure what you mean/i);
+    expect(text).toContain("/overdue");
   });
 });
 
