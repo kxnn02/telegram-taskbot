@@ -61,6 +61,7 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--fg1);-webkit-
 a{color:var(--primary);text-decoration:none}
 a:hover{color:var(--primary-dark)}
 .app{display:flex;min-height:100vh}
+.tg-login-widget iframe{border:0;background:transparent}
 
 .sidebar{width:256px;flex:none;background:linear-gradient(185deg,var(--navy),var(--navy-deep));color:#fff;display:flex;flex-direction:column;padding:22px 16px}
 .brand{display:flex;align-items:center;gap:10px;padding:4px 8px 22px}

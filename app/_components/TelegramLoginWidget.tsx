@@ -17,6 +17,13 @@ import { useEffect, useRef } from "react";
  * imperatively from an effect, which only runs after hydration has already
  * settled — so React never sees the iframe show up mid-hydration and never
  * tries to reconcile it away.
+ *
+ * `data-radius` is set to match the card's `--radius-lg` so the button reads
+ * as part of the same design system rather than Telegram's own default
+ * shape. The `.tg-login-widget iframe` rule in styles.ts's CSS removes the
+ * browser's default iframe border — without it, every browser draws a
+ * visible inset border around Telegram's injected iframe since the widget
+ * script itself never sets `border: 0` on it.
  */
 export interface TelegramLoginWidgetProps {
   botUsername: string;
@@ -35,6 +42,7 @@ export function TelegramLoginWidget({ botUsername, authUrl }: TelegramLoginWidge
     script.src = "https://telegram.org/js/telegram-widget.js?22";
     script.setAttribute("data-telegram-login", botUsername);
     script.setAttribute("data-size", "large");
+    script.setAttribute("data-radius", "18");
     script.setAttribute("data-auth-url", authUrl);
     script.setAttribute("data-request-access", "write");
     container.appendChild(script);
@@ -44,5 +52,11 @@ export function TelegramLoginWidget({ botUsername, authUrl }: TelegramLoginWidge
     };
   }, [botUsername, authUrl]);
 
-  return <div ref={containerRef} style={{ display: "flex", justifyContent: "center" }} />;
+  return (
+    <div
+      ref={containerRef}
+      className="tg-login-widget"
+      style={{ display: "flex", justifyContent: "center" }}
+    />
+  );
 }
