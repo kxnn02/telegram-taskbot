@@ -3,8 +3,9 @@ import type { Task } from "../domain/types.js";
 import { MANILA_ZONE } from "../domain/overdue.js";
 
 /**
- * Pure query: tasks Approved within the trailing 7 days, for the weekly
- * Monday higher-up digest (PRD §8 — "what was Approved in the past week").
+ * Pure query: tasks marked `done` within the trailing 7 days, for the
+ * weekly Monday higher-up digest (PRD §8 — "what was Approved in the past
+ * week", retargeted to `done` per issue #27/#28).
  */
 export function approvedInPastWeek<T extends Task>(tasks: T[], now: Date): T[] {
   const cutoff = DateTime.fromJSDate(now, { zone: MANILA_ZONE }).minus({
@@ -12,7 +13,7 @@ export function approvedInPastWeek<T extends Task>(tasks: T[], now: Date): T[] {
   });
   return tasks.filter(
     (task) =>
-      task.status === "Approved" &&
+      task.status === "done" &&
       DateTime.fromISO(task.updatedAt, { zone: MANILA_ZONE }) >= cutoff,
   );
 }

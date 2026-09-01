@@ -109,8 +109,8 @@ export class DigestBuilder {
         const result = await this.deps.service.listMyTasks(caller);
         const tasks = result.ok ? result.value : [];
         const overdue = tasks.filter((t) => t.overdue).length;
-        const blocked = tasks.filter((t) => t.blocked).length;
-        const onTrack = tasks.filter((t) => !t.overdue && !t.blocked).length;
+        const blocked = tasks.filter((t) => t.status === "blocked").length;
+        const onTrack = tasks.filter((t) => !t.overdue && t.status !== "blocked").length;
         return { username: entry.username, onTrack, overdue, blocked };
       }),
     );

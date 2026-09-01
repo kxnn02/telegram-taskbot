@@ -3,13 +3,19 @@
 
 export type Role = "Intern" | "HigherUp";
 
+/**
+ * The six free-set statuses (ADR-0009 / issue #27's normative status
+ * table), replacing the old gated Assigned/InProgress/Submitted/Approved/
+ * NeedsRevision/Cancelled lifecycle. Any roster member may set any of these
+ * on any task in their own cohort — there is no legal-transition check.
+ */
 export type TaskStatus =
-  | "Assigned"
-  | "InProgress"
-  | "Submitted"
-  | "Approved"
-  | "NeedsRevision"
-  | "Cancelled";
+  | "backlog"
+  | "todo"
+  | "in_progress"
+  | "in_review"
+  | "blocked"
+  | "done";
 
 export interface Note {
   text: string;
@@ -21,13 +27,20 @@ export interface Task {
   id: number; // sequential, scoped per cohort
   cohortId: string;
   title: string;
-  description: string;
-  assigneeUsername: string; // must resolve to an Intern in the roster
-  assignedByUsername: string; // higher-up who created it
+  description?: string; // optional (issue #27/#28) — fillable later via /edit or /note
+  assigneeUsername: string; // any roster member, not just an Intern (issue #27)
+  assignedByUsername: string; // whoever created it
   dueDate: string; // ISO date (yyyy-MM-dd), Asia/Manila-resolved
   status: TaskStatus;
   notes: Note[];
-  blocked: boolean;
+  /** The status a task was in immediately before its most recent
+   * transition into `blocked`, so `/unblock` has a defined restore target.
+   * Written only on entry to `blocked`; cleared on every exit from
+   * `blocked` (whether via `clearBlocked` or a plain `setStatus`); never
+   * overwritten by re-blocking an already-blocked task (issue #27's
+   * previous_status lifecycle rules). `null` when the task isn't currently
+   * blocked, or was never blocked. */
+  previousStatus: TaskStatus | null;
   blockedReason: string | null;
   createdAt: string;
   updatedAt: string;

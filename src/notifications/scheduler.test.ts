@@ -142,7 +142,7 @@ describe("runDailyDigest", () => {
     const { deps, service, bot } = await makeDeps();
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
-    await service.submitTask(alice, created.value.id);
+    await service.setStatus(alice, created.value.id, "in_review");
 
     const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
     await runDailyDigest(deps, digestBuilder, COHORT);

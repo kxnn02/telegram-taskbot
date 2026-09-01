@@ -14,9 +14,9 @@ function task(overrides: Partial<Task> = {}): Task {
     assigneeUsername: "alice",
     assignedByUsername: "carla",
     dueDate: "2026-09-05",
-    status: "InProgress",
+    status: "in_progress",
     notes: [],
-    blocked: false,
+    previousStatus: null,
     blockedReason: null,
     createdAt: "2026-09-01T00:00:00.000Z",
     updatedAt: "2026-09-01T00:00:00.000Z",
@@ -40,23 +40,28 @@ describe("findDueTomorrow", () => {
     expect(result).toHaveLength(0);
   });
 
-  it("excludes a task that's already Submitted", () => {
-    const result = findDueTomorrow([task({ id: 4, status: "Submitted" })], NOW);
+  it("excludes a task that's already in_review", () => {
+    const result = findDueTomorrow([task({ id: 4, status: "in_review" })], NOW);
     expect(result).toHaveLength(0);
   });
 
-  it("excludes a task that's already Approved", () => {
-    const result = findDueTomorrow([task({ id: 5, status: "Approved" })], NOW);
+  it("excludes a task that's already done", () => {
+    const result = findDueTomorrow([task({ id: 5, status: "done" })], NOW);
     expect(result).toHaveLength(0);
   });
 
-  it("excludes a Cancelled task", () => {
-    const result = findDueTomorrow([task({ id: 6, status: "Cancelled" })], NOW);
+  it("excludes a backlog task", () => {
+    const result = findDueTomorrow([task({ id: 6, status: "backlog" })], NOW);
     expect(result).toHaveLength(0);
   });
 
-  it("includes a NeedsRevision task due tomorrow", () => {
-    const result = findDueTomorrow([task({ id: 7, status: "NeedsRevision" })], NOW);
+  it("excludes a blocked task — nothing left to remind about while it's blocked", () => {
+    const result = findDueTomorrow([task({ id: 7, status: "blocked" })], NOW);
+    expect(result).toHaveLength(0);
+  });
+
+  it("includes a todo task due tomorrow", () => {
+    const result = findDueTomorrow([task({ id: 8, status: "todo" })], NOW);
     expect(result).toHaveLength(1);
   });
 });

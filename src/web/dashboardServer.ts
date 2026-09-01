@@ -207,11 +207,9 @@ export function createDashboardServer(options: CreateDashboardServerOptions): Ex
   });
 
   // ---- Task editing (issue #4) ---------------------------------------
-  // Mirrors the bot's /edit rule: any higher-up can edit any task (not just
-  // ones they personally assigned), locked once Approved — both enforced by
-  // TaskService.editTask itself, re-checked at confirm time in case the
-  // task's status changed between the form load and the save (PRD §12,
-  // last-write-wins concurrency).
+  // Mirrors the bot's /edit rule: any roster member can edit any task in
+  // the cohort, at any status — the old Approved edit-lock is gone
+  // (issue #27/#28). Enforced by TaskService.editTask itself.
 
   app.get("/tasks/:id/edit", requireSession, async (req, res) => {
     const caller = (req as Request & { caller: Caller }).caller;
@@ -221,19 +219,6 @@ export function createDashboardServer(options: CreateDashboardServerOptions): Ex
       res.status(404).type("html").send(renderMessagePage("Task not found", found.error, "/"));
       return;
     }
-    if (found.value.status === "Approved") {
-      res
-        .status(200)
-        .type("html")
-        .send(
-          renderMessagePage(
-            "Task locked",
-            `Task ${id} is Approved and locked from further edits, same as the bot's /edit rule.`,
-            "/",
-          ),
-        );
-      return;
-    }
     res
       .status(200)
       .type("html")
@@ -241,7 +226,7 @@ export function createDashboardServer(options: CreateDashboardServerOptions): Ex
         renderEditForm(options.roster, caller, found.value.cohortId, id, {
           assigneeUsername: found.value.assigneeUsername,
           title: found.value.title,
-          description: found.value.description,
+          description: found.value.description ?? "",
           dueDateText: found.value.dueDate,
         }),
       );
@@ -364,12 +349,12 @@ const STATUS_META: Record<
   TaskWithFlags["status"],
   { kind: BadgeKind; bg: string; fg: string; ic: Parameters<typeof icon>[0]; label: string }
 > = {
-  Assigned: { kind: "tag", bg: "", fg: "", ic: "hourglass", label: "Assigned" },
-  InProgress: { kind: "badge", bg: "#E4EEFE", fg: "#1A5FCC", ic: "spark", label: "In progress" },
-  Submitted: { kind: "badge", bg: "#FEF6D6", fg: "#9A6206", ic: "clock", label: "Submitted" },
-  Approved: { kind: "badge", bg: "#DEF6EA", fg: "#0E7A4B", ic: "check", label: "Approved" },
-  NeedsRevision: { kind: "badge", bg: "#FCE3E4", fg: "#C2363B", ic: "pen", label: "Needs revision" },
-  Cancelled: { kind: "tag", bg: "", fg: "", ic: "alert", label: "Cancelled" },
+  backlog: { kind: "tag", bg: "", fg: "", ic: "hourglass", label: "Backlog" },
+  todo: { kind: "tag", bg: "", fg: "", ic: "hourglass", label: "To do" },
+  in_progress: { kind: "badge", bg: "#E4EEFE", fg: "#1A5FCC", ic: "spark", label: "In progress" },
+  in_review: { kind: "badge", bg: "#FEF6D6", fg: "#9A6206", ic: "clock", label: "In review" },
+  blocked: { kind: "badge", bg: "#FCE3E4", fg: "#C2363B", ic: "alert", label: "Blocked" },
+  done: { kind: "badge", bg: "#DEF6EA", fg: "#0E7A4B", ic: "check", label: "Done" },
 };
 
 function statusBadge(status: TaskWithFlags["status"]): string {
@@ -388,7 +373,6 @@ function dueLabel(dueDate: string): string {
 // ---- Task rows ---------------------------------------------------------
 
 function editActionCell(t: TaskWithFlags): string {
-  if (t.status === "Approved") return "";
   return `<a class="btn secondary sm" href="/tasks/${t.id}/edit">${icon("pen", 14)}<span>Edit</span></a>`;
 }
 

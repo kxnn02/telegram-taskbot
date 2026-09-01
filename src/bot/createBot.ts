@@ -248,7 +248,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await ctx.reply("Usage: /submit <task_id>");
         return;
       }
-      const result = await service.submitTask(caller, id);
+      const result = await service.setStatus(caller, id, "in_review");
       if (!result.ok) {
         await ctx.reply(result.error);
         return;
@@ -371,8 +371,8 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   ) {
     const result =
       decision === "approve"
-        ? await service.approveTask(caller, id)
-        : await service.reviseTask(caller, id);
+        ? await service.setStatus(caller, id, "done")
+        : await service.setStatus(caller, id, "todo");
     if (!result.ok) {
       await ctx.reply(result.error);
       return;
@@ -431,7 +431,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       await ctx.editMessageText(`Kept Task ${id} as-is.`);
       return;
     }
-    const result = await service.cancelTask(resolved.caller, id);
+    const result = await service.setStatus(resolved.caller, id, "backlog");
     await ctx.answerCallbackQuery();
     await ctx.editMessageText(
       result.ok ? `Task ${id} cancelled.` : result.error,
@@ -451,8 +451,8 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     const id = Number(idStr);
     const result =
       decision === "approve"
-        ? await service.approveTask(resolved.caller, id)
-        : await service.reviseTask(resolved.caller, id);
+        ? await service.setStatus(resolved.caller, id, "done")
+        : await service.setStatus(resolved.caller, id, "todo");
     await ctx.answerCallbackQuery();
     if (!result.ok) {
       await ctx.editMessageText(result.error);
@@ -524,12 +524,6 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await ctx.reply(found.error);
         return;
       }
-      if (found.value.status === "Approved") {
-        await ctx.reply(
-          `Task ${id} is already Approved and is locked from further edits.`,
-        );
-        return;
-      }
       await wizards.start(ctx.from!.id, "edit", { taskId: id });
       const keyboard = new InlineKeyboard()
         .text("Assignee", "editfield:assignee")
@@ -595,7 +589,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         data: { editField: "description" },
       });
       await ctx.editMessageText(
-        `Task ${task.id}'s current description is "${task.description}". New description:`,
+        `Task ${task.id}'s current description is "${task.description ?? "(none)"}". New description:`,
       );
       return;
     }

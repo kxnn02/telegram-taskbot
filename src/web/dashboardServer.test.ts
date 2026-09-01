@@ -342,10 +342,10 @@ describe("POST /tasks/new/confirm", () => {
     const all = await service.listAllTasks({ username: "carla", role: "HigherUp", cohortId: COHORT });
     expect(all.ok && all.value).toHaveLength(1);
     expect(all.ok && all.value[0]?.assigneeUsername).toBe("alice");
-    expect(all.ok && all.value[0]?.status).toBe("Assigned");
+    expect(all.ok && all.value[0]?.status).toBe("todo");
   });
 
-  it("rejects assigning to someone who isn't a known intern, via the same TaskService rule the bot uses", async () => {
+  it("allows assigning to a higher-up — assignment is open to any roster member, not just interns", async () => {
     const { app, service } = makeApp();
     const cookie = await loginCookie(app);
     const res = await request(app)
@@ -353,13 +353,31 @@ describe("POST /tasks/new/confirm", () => {
       .set("Cookie", cookie)
       .type("form")
       .send({
-        assigneeUsername: "carla", // a higher-up, not an intern
+        assigneeUsername: "carla", // a higher-up
+        title: "Assignable to anyone now",
+        description: "d",
+        dueDate: "2026-09-05",
+      });
+    expect(res.status).toBe(302);
+    const all = await service.listAllTasks({ username: "carla", role: "HigherUp", cohortId: COHORT });
+    expect(all.ok && all.value.find((t) => t.assigneeUsername === "carla")).toBeDefined();
+  });
+
+  it("rejects assigning to someone off the roster entirely, via the same TaskService rule the bot uses", async () => {
+    const { app, service } = makeApp();
+    const cookie = await loginCookie(app);
+    const res = await request(app)
+      .post("/tasks/new/confirm")
+      .set("Cookie", cookie)
+      .type("form")
+      .send({
+        assigneeUsername: "ghost",
         title: "Bad assignment",
         description: "d",
         dueDate: "2026-09-05",
       });
     expect(res.status).toBe(400);
-    expect(res.text).toContain("isn&#39;t a known intern");
+    expect(res.text).toContain("isn&#39;t a known roster member");
     const all = await service.listAllTasks({ username: "carla", role: "HigherUp", cohortId: COHORT });
     expect(all.ok && all.value).toHaveLength(0);
   });
@@ -381,7 +399,7 @@ describe("GET /tasks/:id/edit", () => {
     expect(res.text).toMatch(/<form[^>]*action="\/tasks\/\d+\/edit"/i);
   });
 
-  it("shows a locked message instead of a form once the task is Approved, without editing it", async () => {
+  it("still shows an editable form once the task is done — the Approved edit-lock is gone (issue #27/#28)", async () => {
     const { app, service } = makeApp();
     const caller = { username: "carla", role: "HigherUp" as const, cohortId: COHORT };
     const created = await service.assignTask(caller, {
@@ -391,14 +409,13 @@ describe("GET /tasks/:id/edit", () => {
       dueDate: "2026-09-05",
     });
     if (!created.ok) throw new Error("setup failed");
-    await service.submitTask({ username: "alice", role: "Intern", cohortId: COHORT }, created.value.id);
-    await service.approveTask(caller, created.value.id);
+    await service.setStatus({ username: "alice", role: "Intern", cohortId: COHORT }, created.value.id, "in_review");
+    await service.setStatus(caller, created.value.id, "done");
     const cookie = await loginCookie(app);
 
     const res = await request(app).get(`/tasks/${created.value.id}/edit`).set("Cookie", cookie);
     expect(res.status).toBe(200);
-    expect(res.text.toLowerCase()).toContain("locked");
-    expect(res.text).not.toMatch(/<form[^>]*action="\/tasks\/\d+\/edit"/i);
+    expect(res.text).toMatch(/<form[^>]*action="\/tasks\/\d+\/edit"/i);
   });
 
   it("404s for a task id that doesn't exist", async () => {
@@ -450,7 +467,7 @@ describe("POST /tasks/:id/edit and /tasks/:id/edit/confirm", () => {
     expect(all.ok && all.value[0]?.dueDate).toBe("2026-09-10");
   });
 
-  it("refuses to save an edit once the task has become Approved (checked again at confirm time)", async () => {
+  it("still saves an edit after the task has become done — reopening/editing a done task is allowed (issue #27/#28)", async () => {
     const { app, service } = makeApp();
     const caller = { username: "carla", role: "HigherUp" as const, cohortId: COHORT };
     const created = await service.assignTask(caller, {
@@ -462,9 +479,9 @@ describe("POST /tasks/:id/edit and /tasks/:id/edit/confirm", () => {
     if (!created.ok) throw new Error("setup failed");
     const cookie = await loginCookie(app);
 
-    // Someone approves the task after the edit form was loaded but before confirm.
-    await service.submitTask({ username: "alice", role: "Intern", cohortId: COHORT }, created.value.id);
-    await service.approveTask(caller, created.value.id);
+    // The task is marked done after the edit form was loaded but before confirm.
+    await service.setStatus({ username: "alice", role: "Intern", cohortId: COHORT }, created.value.id, "in_review");
+    await service.setStatus(caller, created.value.id, "done");
 
     const res = await request(app)
       .post(`/tasks/${created.value.id}/edit/confirm`)
@@ -472,15 +489,14 @@ describe("POST /tasks/:id/edit and /tasks/:id/edit/confirm", () => {
       .type("form")
       .send({
         assigneeUsername: "alice",
-        title: "Sneaky post-approval edit",
+        title: "Edited after done",
         description: "d",
         dueDate: "2026-09-06",
       });
-    expect(res.status).toBe(400);
-    expect(res.text).toContain("locked from further edits");
+    expect(res.status).toBe(302);
 
     const stored = await service.getTask(caller, created.value.id);
-    expect(stored.ok && stored.value.title).toBe("Write the onboarding doc");
+    expect(stored.ok && stored.value.title).toBe("Edited after done");
   });
 });
 
@@ -502,8 +518,8 @@ describe("GET /stats", () => {
       dueDate: "2026-09-05",
     });
     if (!t1.ok) throw new Error("setup failed");
-    await service.submitTask({ username: "alice", role: "Intern", cohortId: COHORT }, t1.value.id);
-    await service.approveTask(caller, t1.value.id);
+    await service.setStatus({ username: "alice", role: "Intern", cohortId: COHORT }, t1.value.id, "in_review");
+    await service.setStatus(caller, t1.value.id, "done");
 
     const cookie = await loginCookie(app);
     const res = await request(app).get("/stats").set("Cookie", cookie);
@@ -539,7 +555,7 @@ describe("GET / — action grouping (default, group=action)", () => {
       dueDate: "2026-08-01", // well before NOW, so overdue
     });
     if (!created.ok) throw new Error("setup failed");
-    await service.submitTask({ username: "alice", role: "Intern", cohortId: COHORT }, created.value.id);
+    await service.setStatus({ username: "alice", role: "Intern", cohortId: COHORT }, created.value.id, "in_review");
 
     const cookie = await loginCookie(app);
     const res = await request(app).get("/").set("Cookie", cookie);
@@ -564,8 +580,8 @@ describe("GET / — action grouping (default, group=action)", () => {
       dueDate: "2026-09-05",
     });
     if (!created.ok) throw new Error("setup failed");
-    await service.submitTask({ username: "alice", role: "Intern", cohortId: COHORT }, created.value.id);
-    await service.approveTask(caller, created.value.id);
+    await service.setStatus({ username: "alice", role: "Intern", cohortId: COHORT }, created.value.id, "in_review");
+    await service.setStatus(caller, created.value.id, "done");
 
     const cookie = await loginCookie(app);
     const res = await request(app).get("/").set("Cookie", cookie);
@@ -573,7 +589,7 @@ describe("GET / — action grouping (default, group=action)", () => {
     expect(res.text).not.toContain("A completed task title xyz");
   });
 
-  it("gives Approved tasks no Edit action even in the Done section context", async () => {
+  it("gives every task an Edit action, including in the Done section context", async () => {
     const { app, service } = makeApp();
     const caller = { username: "carla", role: "HigherUp" as const, cohortId: COHORT };
     const created = await service.assignTask(caller, {

@@ -2,10 +2,16 @@ import { DateTime } from "luxon";
 import type { Task } from "../domain/types.js";
 import { MANILA_ZONE } from "../domain/overdue.js";
 
-/** Statuses for which a "due tomorrow" reminder is still meaningful — once a
- * task is Submitted/Approved/Cancelled there's nothing left to remind the
- * intern to do. */
-const REMINDABLE_STATUSES = new Set(["Assigned", "InProgress", "NeedsRevision"]);
+/** Statuses for which a "due tomorrow" reminder is still meaningful (issue
+ * #27/#28's status retarget): `todo`/`in_progress` are still being worked;
+ * `in_review`/`done`/`backlog` have moved past "still to do", and `blocked`
+ * has nothing actionable to remind about until it's unblocked. This is a
+ * one-to-one mapping of the old Assigned/InProgress/NeedsRevision set, with
+ * one deliberate behavior change: a task blocked while Assigned/InProgress
+ * no longer gets reminded (it didn't have its own status before, so it
+ * rode along with whichever of those it was in — now that `blocked` is its
+ * own status, it's excluded like the rest of the non-active statuses). */
+const REMINDABLE_STATUSES = new Set(["todo", "in_progress"]);
 
 /**
  * Pure query: tasks due exactly tomorrow, Asia/Manila-resolved (PRD §8 —

@@ -6,12 +6,12 @@ interface TaskRow {
   id: number;
   cohort_id: string;
   title: string;
-  description: string;
+  description: string | null;
   assignee_username: string;
   assigned_by_username: string;
   due_date: string;
   status: TaskStatus;
-  blocked: boolean;
+  previous_status: TaskStatus | null;
   blocked_reason: string | null;
   row_version: number;
   created_at: string;
@@ -82,12 +82,12 @@ export class SupabaseTaskStore implements TaskStorePort {
       .from("tasks")
       .update({
         title: task.title,
-        description: task.description,
+        description: task.description ?? null,
         assignee_username: task.assigneeUsername,
         assigned_by_username: task.assignedByUsername,
         due_date: task.dueDate,
         status: task.status,
-        blocked: task.blocked,
+        previous_status: task.previousStatus,
         blocked_reason: task.blockedReason,
         updated_at: task.updatedAt,
         row_version: task.rowVersion + 1,
@@ -181,12 +181,12 @@ function toInsertRow(task: Task) {
     id: task.id,
     cohort_id: task.cohortId,
     title: task.title,
-    description: task.description,
+    description: task.description ?? null,
     assignee_username: task.assigneeUsername,
     assigned_by_username: task.assignedByUsername,
     due_date: task.dueDate,
     status: task.status,
-    blocked: task.blocked,
+    previous_status: task.previousStatus,
     blocked_reason: task.blockedReason,
     created_at: task.createdAt,
     updated_at: task.updatedAt,
@@ -198,13 +198,13 @@ function toRecord(row: TaskRow, notes: Note[]): TaskRecord {
     id: row.id,
     cohortId: row.cohort_id,
     title: row.title,
-    description: row.description,
+    description: row.description ?? undefined,
     assigneeUsername: row.assignee_username,
     assignedByUsername: row.assigned_by_username,
     dueDate: row.due_date,
     status: row.status,
     notes,
-    blocked: row.blocked,
+    previousStatus: row.previous_status,
     blockedReason: row.blocked_reason,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
