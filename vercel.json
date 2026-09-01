@@ -1,4 +1,13 @@
 {
-  "buildCommand": "echo 'No app build needed for this deployment — only /api serverless functions are deployed here (Phase 3, issue #14). The Next.js app build lands in Phase 6.'",
-  "outputDirectory": "public"
+  "buildCommand": "npm run build:next",
+  "crons": [
+    {
+      "path": "/api/jobs/keep-alive",
+      "schedule": "0 4 * * 1,4"
+    },
+    {
+      "path": "/api/jobs/weekly-backup",
+      "schedule": "0 4 * * 0"
+    }
+  ]
 }

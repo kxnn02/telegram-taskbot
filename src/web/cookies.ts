@@ -1,7 +1,8 @@
 /**
  * Minimal cookie parsing/serialization, kept dependency-free since the
- * dashboard's only cookie is an opaque session id (see sessionStore.ts) —
- * not worth pulling in a cookie-parsing library for this.
+ * dashboard's only cookie is a signed, self-contained session value (see
+ * sessionCookie.ts) — not worth pulling in a cookie-parsing library for
+ * this.
  */
 
 export function parseCookies(header: string | undefined): Record<string, string> {

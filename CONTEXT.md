@@ -109,27 +109,30 @@ The Login Widget choice itself is **unaffected** by the re-platform — `telegra
 verification is pure and carries across, and it stays strictly better than the shared admin
 password Cohort 4's dashboard uses, since it is per-person and roster-authorized.
 
-> **Resolved by [ADR-0008](./docs/adr/0008-dashboard-sessions-and-mutations.md).** Sessions move
-> from the in-memory `Map` below to a signed, stateless cookie reusing this same HMAC pattern —
-> no session table needed. Dashboard mutations in the Next.js rewrite use REST-style API routes,
-> not Server Actions; see ADR-0008 for why.
+> **Resolved, implemented ([ADR-0008](./docs/adr/0008-dashboard-sessions-and-mutations.md), issue
+> #16 / Phase 5).** Sessions are a signed, stateless cookie (`src/web/sessionCookie.ts`) reusing
+> `telegramAuth.ts`'s HMAC-SHA256-plus-timing-safe-compare pattern with its own `SESSION_SECRET` —
+> the old in-memory `Map` (`src/web/sessionStore.ts`) is gone. Username/role/cohortId and an
+> expiry live inside the cookie itself, so no session table or server-side revocation exists;
+> `/logout` just clears the cookie (nothing left to destroy server-side). Dashboard mutations in
+> the future Next.js rewrite (Phase 6 / issue #17) will use REST-style API routes, not Server
+> Actions — see ADR-0008 for why.
 
-**Known limitation, now resolved (see above)**: sessions are stored in an in-memory `Map` in the
-one running dashboard process (`src/web/sessionStore.ts`), not externally. This is fine for a
-single always-on process but is incompatible with a serverless deploy target (stateless
-per-request instances don't share memory). Also: the session cookie is marked `Secure`, so it
-only persists over real HTTPS, not plain `http://localhost` — see the README's local-testing
-section for the tunnel workaround.
+Session cookies are still marked `Secure`, so they only persist over real HTTPS, not plain
+`http://localhost` — see the README's local-testing section for the tunnel workaround.
 
 ### Scheduling: node-cron in-process, not an external job system
 
-> **Superseded by [ADR-0001](./docs/adr/0001-replatform-to-vercel-supabase.md).** Scheduling moves
-> to `pg_cron` + `pg_net` inside Supabase, calling authenticated endpoints. The four job bodies
-> (`runOverdueCrossingCheck`, `runDueSoonReminderCheck`, `runDailyDigest`, `runWeeklyDigest`) are
-> already exported independently of the cron wiring and carry across unchanged — accidentally the
-> most portable code in the repo. See
-> [ADR-0007](./docs/adr/0007-scheduled-jobs-and-operational-tasks.md) for the two new operational
-> jobs (keep-alive, weekly backup) and the digest/webhook idempotency this introduces.
+> **Superseded, implemented ([ADR-0001](./docs/adr/0001-replatform-to-vercel-supabase.md) /
+> [ADR-0007](./docs/adr/0007-scheduled-jobs-and-operational-tasks.md), issue #15).** Scheduling
+> now runs on Supabase `pg_cron` + `pg_net` calling the four `/api/jobs/*` notification-job
+> endpoints (`src/jobs/notificationJobs.ts` wraps the same `runOverdueCrossingCheck`/
+> `runDueSoonReminderCheck`/`runDailyDigest`/`runWeeklyDigest` bodies below, unchanged, scoped to
+> one cohort per call), plus two pure-SQL `pg_cron` cleanup jobs (wizard-state, dedup-table) and
+> two Vercel-Cron jobs (`keep-alive`, `weekly-backup`) that must survive a paused Supabase project.
+> `startScheduler`/`node-cron` are gone entirely — see ADR-0007's "Implementation notes" for the
+> judgment calls made along the way (single-cohort binding, the two-header-scheme split, the
+> error-DM throttle window).
 
 Due-date reminders, overdue-crossing checks, and the daily/weekly digests run as `node-cron` jobs
 inside the same long-lived bot process, all resolved against Asia/Manila time. For an ~8-person
