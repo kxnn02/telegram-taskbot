@@ -45,7 +45,8 @@ async function buildDeps(): Promise<WebhookHandlerDeps> {
   }
 
   const supabase = createSupabaseClient();
-  const roster = await loadRosterFromStore(new SupabaseRosterStore(supabase));
+  const rosterStore = new SupabaseRosterStore(supabase);
+  const roster = await loadRosterFromStore(rosterStore);
 
   const { bot } = createBot({
     token,
@@ -71,6 +72,7 @@ async function buildDeps(): Promise<WebhookHandlerDeps> {
     bot,
     expectedSecret: secret,
     claimUpdate: (updateId: number) => processedUpdates.claim(updateId),
+    refreshRoster: async () => roster.replaceAll(await rosterStore.listAll()),
   };
 }
 

@@ -92,4 +92,57 @@ describe("handleTelegramWebhook", () => {
     expect(result.status).toBe(400);
     expect(deps.claimUpdate).not.toHaveBeenCalled();
   });
+
+  describe("refreshRoster", () => {
+    it("is called exactly once on a claimed update, before handleUpdate", async () => {
+      const calls: string[] = [];
+      const refreshRoster = vi.fn(async () => {
+        calls.push("refreshRoster");
+      });
+      const deps = makeDeps({ refreshRoster });
+      deps.handleUpdate.mockImplementation(async () => {
+        calls.push("handleUpdate");
+      });
+      const result = await handleTelegramWebhook(deps, {
+        headers: { "x-telegram-bot-api-secret-token": SECRET },
+        body: makeUpdate(42),
+      });
+      expect(result.status).toBe(200);
+      expect(refreshRoster).toHaveBeenCalledTimes(1);
+      expect(calls).toEqual(["refreshRoster", "handleUpdate"]);
+    });
+
+    it("is not called when the secret check fails", async () => {
+      const refreshRoster = vi.fn(async () => {});
+      const deps = makeDeps({ refreshRoster });
+      const result = await handleTelegramWebhook(deps, {
+        headers: {},
+        body: makeUpdate(1),
+      });
+      expect(result.status).toBe(401);
+      expect(refreshRoster).not.toHaveBeenCalled();
+    });
+
+    it("is not called when claimUpdate reports a duplicate", async () => {
+      const refreshRoster = vi.fn(async () => {});
+      const deps = makeDeps({ refreshRoster, claimUpdate: vi.fn(async () => false) });
+      const result = await handleTelegramWebhook(deps, {
+        headers: { "x-telegram-bot-api-secret-token": SECRET },
+        body: makeUpdate(42),
+      });
+      expect(result.status).toBe(200);
+      expect(refreshRoster).not.toHaveBeenCalled();
+      expect(deps.handleUpdate).not.toHaveBeenCalled();
+    });
+
+    it("a handler with refreshRoster omitted still works", async () => {
+      const deps = makeDeps();
+      const result = await handleTelegramWebhook(deps, {
+        headers: { "x-telegram-bot-api-secret-token": SECRET },
+        body: makeUpdate(42),
+      });
+      expect(result.status).toBe(200);
+      expect(deps.handleUpdate).toHaveBeenCalled();
+    });
+  });
 });
