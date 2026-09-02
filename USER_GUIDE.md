@@ -78,6 +78,7 @@ switching to a slash command.
 | `/standup` | An on-demand version of the daily standup report, cohort-wide, whenever you want it. |
 | `/dashboard` | Sends the link to the web dashboard. |
 | `/cancel` | Cancels whatever multi-step form (wizard) you're in the middle of. |
+| `/whoami` | Shows which roster username, role, and cohort the bot has you registered as. |
 
 ## Changing a task's status
 

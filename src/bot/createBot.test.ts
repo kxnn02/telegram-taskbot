@@ -2145,6 +2145,53 @@ describe("/dashboard is gated like every other data command (issue #65, finding 
   });
 });
 
+describe("/whoami (issue #66, finding H16)", () => {
+  let roster: Roster;
+  let testBot: ReturnType<typeof makeTestBot>;
+
+  beforeEach(() => {
+    roster = makeRoster();
+    testBot = makeTestBot(roster);
+  });
+
+  it("tells a registered intern their roster username, role, and cohort", async () => {
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/whoami"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toBe("You're @alice, an intern in cohort-5.");
+  });
+
+  it("tells a registered higher-up their roster username, role, and cohort", async () => {
+    const carlaId = nextUserId();
+    await registerCaller(testBot, carlaId, "carla");
+    await testBot.bot.handleUpdate(messageUpdate(carlaId, carlaId, "/whoami"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toBe("You're @carla, a higher-up in cohort-5.");
+  });
+
+  it("an unregistered user gets the standard not-registered reply, not a new string", async () => {
+    const strangerId = nextUserId();
+    await testBot.bot.handleUpdate(messageUpdate(strangerId, strangerId, "/whoami"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toBe("Send /start first so I know who you are.");
+  });
+
+  it("is registered in BOT_COMMANDS and mentioned in /help", async () => {
+    const { BOT_COMMANDS } = await import("./createBot.js");
+    expect(BOT_COMMANDS.some((c) => c.command === "whoami")).toBe(true);
+
+    const carlaId = nextUserId();
+    await registerCaller(testBot, carlaId, "carla");
+    await testBot.bot.handleUpdate(messageUpdate(carlaId, carlaId, "/help"));
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("/whoami");
+  });
+});
+
 describe("/deadlines (issue #33)", () => {
   let roster: Roster;
   let testBot: ReturnType<typeof makeTestBot>;

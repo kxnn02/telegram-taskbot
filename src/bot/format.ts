@@ -222,6 +222,7 @@ const HELP_SECTIONS: { heading: string; lines: string[] }[] = [
     lines: [
       "/tasks — browse tasks by member (paginated)",
       "/tasks @username — filter by member",
+      "/tasks intern | /tasks higherup — filter by role",
       "/mytasks — your open tasks",
       "/task <ref> — full detail on one task (ref is 23 or t23)",
       "/deadlines — show upcoming deadlines",
@@ -268,6 +269,7 @@ const HELP_SECTIONS: { heading: string; lines: string[] }[] = [
       "/start — register yourself against the roster",
       "/help — this list",
       "/cancel — abort an in-progress wizard",
+      "/whoami — show who the bot thinks you are",
     ],
   },
 ];

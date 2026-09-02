@@ -307,6 +307,12 @@ describe("formatHelp", () => {
   it("has one section, not a role split — HigherUp and Intern see the same commands bar /edit's note (issue #27/#35)", () => {
     expect(formatHelp("Intern")).toBe(formatHelp("HigherUp"));
   });
+
+  it("mentions the /tasks role filter that the command menu advertises (issue #66/H18)", () => {
+    const text = formatHelp("Intern");
+    expect(text).toContain("/tasks intern");
+    expect(text).toContain("/tasks higherup");
+  });
 });
 
 describe("BOT_COMMANDS / formatHelp coherence (issue #27/#35)", () => {
