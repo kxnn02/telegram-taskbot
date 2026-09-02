@@ -8,9 +8,11 @@ import { parseCreateTaskRequest } from "../../../src/web/taskMutationRequests";
  * Task creation (Phase 6.2, issue #17 — REST mutation, not a Server Action,
  * per ADR-0008). Deliberately thin: body-shape parsing lives in
  * `taskMutationRequests.ts` (unit-tested directly), the actual business
- * rules (non-empty fields, valid due date, assignee must be a known intern,
- * higher-up-only) all live in and are enforced by
- * `TaskService.assignTask` — this route never reimplements any of them.
+ * rules (non-empty fields, valid due date, assignee must be a known roster
+ * member) all live in and are enforced by `TaskService.assignTask` — this
+ * route never reimplements any of them. Open to any roster member, not
+ * higher-up-only (ADR-0009 / issue #28): any caller may create a task and
+ * assign it to anyone in the cohort, same as the bot's `/addtask`.
  */
 export async function POST(request: NextRequest) {
   const deps = await getDashboardDeps();

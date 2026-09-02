@@ -64,7 +64,7 @@ async function main() {
   if (!existsSync(rosterPath)) {
     throw new Error(
       `${rosterPath} not found — this script reads real roster entries from it. ` +
-        "See roster.config.json for the expected shape.",
+        "See docs/adr/0010-group-gated-registration-and-roster-management.md for the roster row shape.",
     );
   }
   const parsed = JSON.parse(readFileSync(rosterPath, "utf-8")) as RosterConfigFile;

@@ -5,6 +5,8 @@ import { Roster } from "../domain/roster.js";
 import { InMemoryTaskStore } from "../storage/inMemoryTaskStore.js";
 import { InMemoryRegistrationStore } from "../storage/inMemoryRegistrationStore.js";
 import { InMemoryWizardStateStore } from "../storage/inMemoryWizardStateStore.js";
+import { InMemoryCohortStore } from "../storage/inMemoryCohortStore.js";
+import { InMemoryRosterStore } from "../storage/inMemoryRosterStore.js";
 import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
 import { createBot, type CreatedBot } from "./createBot.js";
 
@@ -97,6 +99,8 @@ function makeTestBot(roster: Roster, activeCohortId: string = COHORT) {
     taskStore: new InMemoryTaskStore(),
     registrationStore: new InMemoryRegistrationStore(),
     wizardStateStore: new InMemoryWizardStateStore(),
+    cohorts: new InMemoryCohortStore(),
+    rosterStore: new InMemoryRosterStore(),
     activeCohortId,
     dashboardUrl: "http://localhost:1234",
     bot,
@@ -1831,6 +1835,8 @@ describe("Stage 5: notification correctness (issue #54, findings F4/F5/F13)", ()
       taskStore: new InMemoryTaskStore(),
       registrationStore: brokenRegistrations,
       wizardStateStore: new InMemoryWizardStateStore(),
+      cohorts: new InMemoryCohortStore(),
+      rosterStore: new InMemoryRosterStore(),
       activeCohortId: COHORT,
       dashboardUrl: "http://localhost:1234",
       bot,
@@ -2860,6 +2866,365 @@ describe("Cohort binding closes the reused-account ambiguity (dry-run isolation 
   });
 });
 
+describe("Group-gated /start creates its own roster row (R3/#88)", () => {
+  // Membership outcome per Telegram user id, consulted by a fake
+  // getChatMember transformer below — "present" unless a test says
+  // otherwise. "unavailable" simulates getChatMember throwing.
+  type MembershipKind = "present" | "absent" | "unavailable";
+
+  function makeMembershipTransformer(membership: Map<number, MembershipKind>) {
+    const calls: RecordedCall[] = [];
+    let messageId = 5000;
+    const transformer: Transformer = async (_prev, method, payload) => {
+      calls.push({ method, payload: (payload ?? {}) as Record<string, unknown> });
+      const p = (payload ?? {}) as Record<string, unknown>;
+      if (method === "getChatMember") {
+        const userId = Number(p.user_id);
+        const kind = membership.get(userId) ?? "present";
+        if (kind === "unavailable") {
+          throw new Error("simulated Telegram outage");
+        }
+        const status = kind === "present" ? "member" : "left";
+        return {
+          ok: true,
+          result: { status, user: { id: userId, is_bot: false, first_name: "Test" } },
+        } as never;
+      }
+      if (method === "sendMessage" || method === "editMessageText") {
+        const text = (p.text as string) ?? "";
+        return {
+          ok: true,
+          result: {
+            message_id: (p.message_id as number) ?? messageId++,
+            date: Math.floor(Date.now() / 1000),
+            chat: { id: Number(p.chat_id) || 1, type: "private" },
+            text,
+          },
+        } as never;
+      }
+      return { ok: true, result: true } as never;
+    };
+    return { calls, transformer };
+  }
+
+  function makeStartTestBot(opts: {
+    roster: Roster;
+    rosterStore?: InMemoryRosterStore;
+    groupChatId?: string;
+    membership?: Map<number, MembershipKind>;
+  }) {
+    const membership = opts.membership ?? new Map();
+    const { calls, transformer } = makeMembershipTransformer(membership);
+    const bot = new Bot("TEST_TOKEN", { botInfo: FAKE_BOT_INFO });
+    bot.api.config.use(transformer);
+    const cohorts = new InMemoryCohortStore(
+      opts.groupChatId !== undefined ? { [COHORT]: opts.groupChatId } : {},
+    );
+    const rosterStore = opts.rosterStore ?? new InMemoryRosterStore();
+    const created = createBot({
+      token: "TEST_TOKEN",
+      taskStore: new InMemoryTaskStore(),
+      registrationStore: new InMemoryRegistrationStore(),
+      wizardStateStore: new InMemoryWizardStateStore(),
+      cohorts,
+      rosterStore,
+      activeCohortId: COHORT,
+      dashboardUrl: "http://localhost:1234",
+      bot,
+      roster: opts.roster,
+    });
+    return { ...created, calls, rosterStore, membership };
+  }
+
+  function startUpdate(userId: number, username: string, chatId: number = userId): Update {
+    return {
+      update_id: updateIdSeq++,
+      message: {
+        message_id: messageIdSeq++,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: chatId, type: "private" },
+        from: { id: userId, is_bot: false, first_name: "Test", username },
+        text: "/start",
+        entities: [{ type: "bot_command", offset: 0, length: 6 }],
+      },
+    } as Update;
+  }
+
+  function startRoleCallbackUpdate(
+    userId: number,
+    username: string,
+    chatId: number,
+    data: "startrole:intern" | "startrole:higherup",
+  ): Update {
+    return {
+      update_id: updateIdSeq++,
+      callback_query: {
+        id: String(updateIdSeq),
+        from: { id: userId, is_bot: false, first_name: "Test", username },
+        chat_instance: "1",
+        data,
+        message: {
+          message_id: messageIdSeq++,
+          date: Math.floor(Date.now() / 1000),
+          chat: { id: chatId, type: "private" },
+          text: "placeholder",
+        },
+      },
+    } as Update;
+  }
+
+  async function rosterFromStore(store: InMemoryRosterStore): Promise<Roster> {
+    return new Roster(await store.listAll());
+  }
+
+  // ---- Decision-table rows -------------------------------------------
+
+  it("row 1: roster row exists + cohort has a higher-up -> registers, reports existing role, no buttons (group check not performed)", async () => {
+    const rosterStore = new InMemoryRosterStore();
+    await rosterStore.upsert({ username: "carla", role: "HigherUp", cohortId: COHORT }, "carla");
+    await rosterStore.upsert({ username: "dave", role: "Intern", cohortId: COHORT }, "carla");
+    const roster = await rosterFromStore(rosterStore);
+    const testBot = makeStartTestBot({ roster, rosterStore, groupChatId: "-100" });
+    const daveId = nextUserId();
+
+    await testBot.bot.handleUpdate(startUpdate(daveId, "dave"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/an intern/i);
+    expect(lastKeyboardCallbackData(testBot.calls)).toEqual([]);
+    expect(testBot.calls.some((c) => c.method === "getChatMember")).toBe(false);
+    expect(await testBot.registrations.findUsername(daveId)).toBe("dave");
+  });
+
+  it("row 2: roster row exists + no higher-up yet + present -> offers the role buttons", async () => {
+    const rosterStore = new InMemoryRosterStore();
+    await rosterStore.upsert({ username: "dave", role: "Intern", cohortId: COHORT }, "dave");
+    const roster = await rosterFromStore(rosterStore);
+    const daveId = nextUserId();
+    const testBot = makeStartTestBot({
+      roster,
+      rosterStore,
+      groupChatId: "-100",
+      membership: new Map([[daveId, "present"]]),
+    });
+
+    await testBot.bot.handleUpdate(startUpdate(daveId, "dave"));
+
+    expect(lastKeyboardCallbackData(testBot.calls).sort()).toEqual(
+      ["startrole:higherup", "startrole:intern"].sort(),
+    );
+    expect(await testBot.registrations.findUsername(daveId)).toBeUndefined();
+  });
+
+  it("row 3: roster row exists + no higher-up yet + absent -> registers, reports existing role, no buttons", async () => {
+    const rosterStore = new InMemoryRosterStore();
+    await rosterStore.upsert({ username: "dave", role: "Intern", cohortId: COHORT }, "dave");
+    const roster = await rosterFromStore(rosterStore);
+    const daveId = nextUserId();
+    const testBot = makeStartTestBot({
+      roster,
+      rosterStore,
+      groupChatId: "-100",
+      membership: new Map([[daveId, "absent"]]),
+    });
+
+    await testBot.bot.handleUpdate(startUpdate(daveId, "dave"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/an intern/i);
+    expect(lastKeyboardCallbackData(testBot.calls)).toEqual([]);
+    expect(await testBot.registrations.findUsername(daveId)).toBe("dave");
+  });
+
+  it("row 4: roster row exists + no higher-up yet + unavailable -> registers, reports existing role, no buttons", async () => {
+    const rosterStore = new InMemoryRosterStore();
+    await rosterStore.upsert({ username: "dave", role: "Intern", cohortId: COHORT }, "dave");
+    const roster = await rosterFromStore(rosterStore);
+    const daveId = nextUserId();
+    const testBot = makeStartTestBot({
+      roster,
+      rosterStore,
+      groupChatId: "-100",
+      membership: new Map([[daveId, "unavailable"]]),
+    });
+
+    await testBot.bot.handleUpdate(startUpdate(daveId, "dave"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/an intern/i);
+    expect(lastKeyboardCallbackData(testBot.calls)).toEqual([]);
+    expect(await testBot.registrations.findUsername(daveId)).toBe("dave");
+  });
+
+  it("row 5: no roster row + present -> offers the role buttons", async () => {
+    const rosterStore = new InMemoryRosterStore();
+    const roster = await rosterFromStore(rosterStore);
+    const erinId = nextUserId();
+    const testBot = makeStartTestBot({
+      roster,
+      rosterStore,
+      groupChatId: "-100",
+      membership: new Map([[erinId, "present"]]),
+    });
+
+    await testBot.bot.handleUpdate(startUpdate(erinId, "erin"));
+
+    expect(lastKeyboardCallbackData(testBot.calls).sort()).toEqual(
+      ["startrole:higherup", "startrole:intern"].sort(),
+    );
+    expect(await testBot.registrations.findUsername(erinId)).toBeUndefined();
+    expect(await rosterStore.listAll()).toEqual([]);
+  });
+
+  it("row 6: no roster row + absent -> tells them this bot is for the cohort's group members, creates nothing", async () => {
+    const rosterStore = new InMemoryRosterStore();
+    const roster = await rosterFromStore(rosterStore);
+    const erinId = nextUserId();
+    const testBot = makeStartTestBot({
+      roster,
+      rosterStore,
+      groupChatId: "-100",
+      membership: new Map([[erinId, "absent"]]),
+    });
+
+    await testBot.bot.handleUpdate(startUpdate(erinId, "erin"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/cohort's telegram group members/i);
+    expect(lastKeyboardCallbackData(testBot.calls)).toEqual([]);
+    expect(await testBot.registrations.findUsername(erinId)).toBeUndefined();
+    expect(await rosterStore.listAll()).toEqual([]);
+  });
+
+  it("row 7 (the fallback): no roster row + unavailable -> today's exact dead-end message, creates nothing", async () => {
+    // No groupChatId configured at all — the real production gap this
+    // ticket must not reopen (cohorts.group_chat_id is NULL today).
+    const rosterStore = new InMemoryRosterStore();
+    const roster = await rosterFromStore(rosterStore);
+    const erinId = nextUserId();
+    const testBot = makeStartTestBot({ roster, rosterStore }); // no groupChatId
+
+    await testBot.bot.handleUpdate(startUpdate(erinId, "erin"));
+
+    expect(lastReplyText(testBot.calls)).toBe(
+      "You're not on the roster yet — contact a higher-up to get added.",
+    );
+    expect(lastKeyboardCallbackData(testBot.calls)).toEqual([]);
+    expect(await testBot.registrations.findUsername(erinId)).toBeUndefined();
+    expect(await rosterStore.listAll()).toEqual([]);
+  });
+
+  // ---- The role buttons --------------------------------------------------
+
+  it("tapping Higher-up when the cohort already has a higher-up is refused and writes nothing, even for a tapper with an existing row (re-checked, not just at /start)", async () => {
+    const rosterStore = new InMemoryRosterStore();
+    await rosterStore.upsert({ username: "carla", role: "HigherUp", cohortId: COHORT }, "carla");
+    await rosterStore.upsert({ username: "dave", role: "Intern", cohortId: COHORT }, "dave");
+    const roster = await rosterFromStore(rosterStore);
+    const daveId = nextUserId();
+    const testBot = makeStartTestBot({
+      roster,
+      rosterStore,
+      groupChatId: "-100",
+      membership: new Map([[daveId, "present"]]),
+    });
+
+    await testBot.bot.handleUpdate(
+      startRoleCallbackUpdate(daveId, "dave", daveId, "startrole:higherup"),
+    );
+
+    const answerCall = [...testBot.calls].reverse().find((c) => c.method === "answerCallbackQuery");
+    expect(answerCall?.payload.text).toMatch(/already registered/i);
+    expect((await rosterStore.listAll()).find((e) => e.username === "dave")?.role).toBe("Intern");
+    expect(await testBot.registrations.findUsername(daveId)).toBeUndefined();
+  });
+
+  it("tapping Higher-up when the cohort has zero higher-ups succeeds", async () => {
+    const rosterStore = new InMemoryRosterStore();
+    const roster = await rosterFromStore(rosterStore);
+    const erinId = nextUserId();
+    const testBot = makeStartTestBot({
+      roster,
+      rosterStore,
+      groupChatId: "-100",
+      membership: new Map([[erinId, "present"]]),
+    });
+
+    await testBot.bot.handleUpdate(
+      startRoleCallbackUpdate(erinId, "erin", erinId, "startrole:higherup"),
+    );
+
+    const entries = await rosterStore.listAll();
+    expect(entries.find((e) => e.username === "erin")?.role).toBe("HigherUp");
+    expect(await testBot.registrations.findUsername(erinId)).toBe("erin");
+    expect(lastReplyText(testBot.calls)).toMatch(/a higher-up/i);
+    expect(testBot.roster.find("erin", COHORT)?.role).toBe("HigherUp");
+  });
+
+  it("a tap from a user who is absent from the group writes nothing", async () => {
+    const rosterStore = new InMemoryRosterStore();
+    const roster = await rosterFromStore(rosterStore);
+    const erinId = nextUserId();
+    const testBot = makeStartTestBot({
+      roster,
+      rosterStore,
+      groupChatId: "-100",
+      membership: new Map([[erinId, "absent"]]),
+    });
+
+    await testBot.bot.handleUpdate(
+      startRoleCallbackUpdate(erinId, "erin", erinId, "startrole:intern"),
+    );
+
+    expect(await rosterStore.listAll()).toEqual([]);
+    expect(await testBot.registrations.findUsername(erinId)).toBeUndefined();
+  });
+
+  it("the row written carries role_set_by equal to the registering user's own username", async () => {
+    const rosterStore = new InMemoryRosterStore();
+    const roster = await rosterFromStore(rosterStore);
+    const erinId = nextUserId();
+    const testBot = makeStartTestBot({
+      roster,
+      rosterStore,
+      groupChatId: "-100",
+      membership: new Map([[erinId, "present"]]),
+    });
+
+    await testBot.bot.handleUpdate(
+      startRoleCallbackUpdate(erinId, "erin", erinId, "startrole:intern"),
+    );
+
+    expect(rosterStore.setByOf(COHORT, "erin")).toBe("erin");
+  });
+
+  it("a second /start after registering reports the existing role and offers no buttons", async () => {
+    const rosterStore = new InMemoryRosterStore();
+    const roster = await rosterFromStore(rosterStore);
+    const erinId = nextUserId();
+    const testBot = makeStartTestBot({
+      roster,
+      rosterStore,
+      groupChatId: "-100",
+      membership: new Map([[erinId, "present"]]),
+    });
+
+    await testBot.bot.handleUpdate(
+      startRoleCallbackUpdate(erinId, "erin", erinId, "startrole:higherup"),
+    );
+    const getChatMemberCallsAfterTap = testBot.calls.filter(
+      (c) => c.method === "getChatMember",
+    ).length;
+
+    await testBot.bot.handleUpdate(startUpdate(erinId, "erin"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/a higher-up/i);
+    expect(lastKeyboardCallbackData(testBot.calls)).toEqual([]);
+    // Group check not performed on this second /start (hasHigherUp is now
+    // true — row 1 of the decision table), so no new getChatMember calls
+    // beyond the one the button tap itself made.
+    expect(
+      testBot.calls.filter((c) => c.method === "getChatMember").length,
+    ).toBe(getChatMemberCallsAfterTap);
+  });
+});
+
 describe("Stage 1: outermost error-guard middleware (issue #49/#50, finding F1)", () => {
   const ERROR_GUARD_TEXT = "Something went wrong on my end";
 
@@ -2879,6 +3244,8 @@ describe("Stage 1: outermost error-guard middleware (issue #49/#50, finding F1)"
       taskStore: new InMemoryTaskStore(),
       registrationStore,
       wizardStateStore: new InMemoryWizardStateStore(),
+      cohorts: new InMemoryCohortStore(),
+      rosterStore: new InMemoryRosterStore(),
       activeCohortId: COHORT,
       dashboardUrl: "http://localhost:1234",
       bot,
@@ -2934,6 +3301,8 @@ describe("Stage 1: outermost error-guard middleware (issue #49/#50, finding F1)"
       taskStore: new InMemoryTaskStore(),
       registrationStore,
       wizardStateStore: new InMemoryWizardStateStore(),
+      cohorts: new InMemoryCohortStore(),
+      rosterStore: new InMemoryRosterStore(),
       activeCohortId: COHORT,
       dashboardUrl: "http://localhost:1234",
       bot,
@@ -3246,5 +3615,439 @@ describe("Edited commands are acknowledged, never executed (issue #65, finding H
     // real answer via an ordinary (non-edited) message still advances it.
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "alice"));
     expect(lastReplyText(testBot.calls)).toMatch(/title/i);
+  });
+});
+
+describe("/roster (R4/#89)", () => {
+  type AdminKind = "present" | "absent" | "unavailable";
+
+  function makeAdminTransformer(kind: AdminKind, adminIds: number[]) {
+    const calls: RecordedCall[] = [];
+    let messageId = 6000;
+    const transformer: Transformer = async (_prev, method, payload) => {
+      calls.push({ method, payload: (payload ?? {}) as Record<string, unknown> });
+      const p = (payload ?? {}) as Record<string, unknown>;
+      if (method === "getChatAdministrators") {
+        if (kind === "unavailable") {
+          throw new Error("simulated Telegram outage");
+        }
+        const ids = kind === "present" ? adminIds : [];
+        return {
+          ok: true,
+          result: ids.map((id) => ({
+            status: "administrator",
+            user: { id, is_bot: false, first_name: "Admin" },
+            can_be_edited: false,
+            can_manage_chat: true,
+            can_delete_messages: true,
+            can_manage_video_chats: true,
+            can_restrict_members: true,
+            can_promote_members: true,
+            can_change_info: true,
+            can_invite_users: true,
+          })),
+        } as never;
+      }
+      if (method === "sendMessage" || method === "editMessageText") {
+        const text = (p.text as string) ?? "";
+        return {
+          ok: true,
+          result: {
+            message_id: (p.message_id as number) ?? messageId++,
+            date: Math.floor(Date.now() / 1000),
+            chat: { id: Number(p.chat_id) || 1, type: "private" },
+            text,
+          },
+        } as never;
+      }
+      return { ok: true, result: true } as never;
+    };
+    return { calls, transformer };
+  }
+
+  async function seedRosterStore(
+    entries: { username: string; role: "Intern" | "HigherUp"; cohortId?: string }[],
+  ) {
+    const rosterStore = new InMemoryRosterStore();
+    for (const e of entries) {
+      await rosterStore.upsert(
+        { username: e.username, role: e.role, cohortId: e.cohortId ?? COHORT },
+        e.username,
+      );
+    }
+    const roster = new Roster(await rosterStore.listAll());
+    return { rosterStore, roster };
+  }
+
+  function makeRosterTestBot(opts: {
+    roster: Roster;
+    rosterStore: InMemoryRosterStore;
+    groupChatId?: string;
+    adminKind?: AdminKind;
+    adminIds?: number[];
+  }) {
+    const { calls, transformer } = makeAdminTransformer(
+      opts.adminKind ?? "present",
+      opts.adminIds ?? [],
+    );
+    const bot = new Bot("TEST_TOKEN", { botInfo: FAKE_BOT_INFO });
+    bot.api.config.use(transformer);
+    const cohorts = new InMemoryCohortStore(
+      opts.groupChatId !== undefined ? { [COHORT]: opts.groupChatId } : {},
+    );
+    const created = createBot({
+      token: "TEST_TOKEN",
+      taskStore: new InMemoryTaskStore(),
+      registrationStore: new InMemoryRegistrationStore(),
+      wizardStateStore: new InMemoryWizardStateStore(),
+      cohorts,
+      rosterStore: opts.rosterStore,
+      activeCohortId: COHORT,
+      dashboardUrl: "http://localhost:1234",
+      bot,
+      roster: opts.roster,
+    });
+    return { ...created, calls, rosterStore: opts.rosterStore };
+  }
+
+  // ---- /roster (list) --------------------------------------------------
+
+  it("a higher-up can list the roster", async () => {
+    const { rosterStore, roster } = await seedRosterStore([
+      { username: "carla", role: "HigherUp" },
+      { username: "alice", role: "Intern" },
+    ]);
+    const testBot = makeRosterTestBot({ roster, rosterStore, groupChatId: "-500" });
+    const carlaId = nextUserId();
+    await registerCaller(testBot, carlaId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(carlaId, carlaId, "/roster"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/@carla/);
+    expect(text).toMatch(/@alice/);
+  });
+
+  it("a non-higher-up is refused from /roster", async () => {
+    const { rosterStore, roster } = await seedRosterStore([
+      { username: "carla", role: "HigherUp" },
+      { username: "alice", role: "Intern" },
+    ]);
+    const testBot = makeRosterTestBot({ roster, rosterStore, groupChatId: "-500" });
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+
+    await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/roster"));
+
+    expect(lastReplyText(testBot.calls)).not.toMatch(/@carla/);
+  });
+
+  // ---- /roster add ------------------------------------------------------
+
+  it("a higher-up can add an intern by default", async () => {
+    const { rosterStore, roster } = await seedRosterStore([
+      { username: "carla", role: "HigherUp" },
+    ]);
+    const testBot = makeRosterTestBot({ roster, rosterStore, groupChatId: "-500" });
+    const carlaId = nextUserId();
+    await registerCaller(testBot, carlaId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(carlaId, carlaId, "/roster add @erin"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/erin.*added|added.*erin/i);
+    const entries = await rosterStore.listAll();
+    expect(entries.find((e) => e.username === "erin")?.role).toBe("Intern");
+    expect(rosterStore.setByOf(COHORT, "erin")).toBe("carla");
+  });
+
+  it("a non-higher-up is refused adding an intern", async () => {
+    const { rosterStore, roster } = await seedRosterStore([
+      { username: "carla", role: "HigherUp" },
+      { username: "alice", role: "Intern" },
+    ]);
+    const testBot = makeRosterTestBot({ roster, rosterStore, groupChatId: "-500" });
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+
+    await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/roster add @erin"));
+
+    expect(await rosterStore.listAll()).not.toContainEqual(
+      expect.objectContaining({ username: "erin" }),
+    );
+  });
+
+  it("adding as higher-up is allowed for a non-higher-up caller who is a verified group admin", async () => {
+    const { rosterStore, roster } = await seedRosterStore([
+      { username: "carla", role: "HigherUp" },
+      { username: "alice", role: "Intern" },
+    ]);
+    const aliceId = nextUserId();
+    const testBot = makeRosterTestBot({
+      roster,
+      rosterStore,
+      groupChatId: "-500",
+      adminKind: "present",
+      adminIds: [aliceId],
+    });
+    await registerCaller(testBot, aliceId, "alice");
+
+    await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/roster add @erin higherup"));
+
+    const entries = await rosterStore.listAll();
+    expect(entries.find((e) => e.username === "erin")?.role).toBe("HigherUp");
+  });
+
+  it("adding as higher-up is refused for a higher-up caller who is not a verified group admin", async () => {
+    const { rosterStore, roster } = await seedRosterStore([
+      { username: "carla", role: "HigherUp" },
+    ]);
+    const carlaId = nextUserId();
+    const testBot = makeRosterTestBot({
+      roster,
+      rosterStore,
+      groupChatId: "-500",
+      adminKind: "absent",
+    });
+    await registerCaller(testBot, carlaId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(carlaId, carlaId, "/roster add @erin higherup"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/admin/i);
+    expect(await rosterStore.listAll()).not.toContainEqual(
+      expect.objectContaining({ username: "erin" }),
+    );
+  });
+
+  it("an unavailable group-admin check refuses adding as higher-up rather than permitting it", async () => {
+    const { rosterStore, roster } = await seedRosterStore([
+      { username: "carla", role: "HigherUp" },
+    ]);
+    const carlaId = nextUserId();
+    // No groupChatId configured — the "unavailable" case (group_chat_id NULL).
+    const testBot = makeRosterTestBot({ roster, rosterStore });
+    await registerCaller(testBot, carlaId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(carlaId, carlaId, "/roster add @erin higherup"));
+
+    expect(lastReplyText(testBot.calls)).not.toMatch(/added/i);
+    expect(await rosterStore.listAll()).not.toContainEqual(
+      expect.objectContaining({ username: "erin" }),
+    );
+  });
+
+  // ---- /roster role -------------------------------------------------------
+
+  it("a higher-up who is not a verified group admin is refused from /roster role", async () => {
+    const { rosterStore, roster } = await seedRosterStore([
+      { username: "carla", role: "HigherUp" },
+      { username: "dave", role: "HigherUp" },
+      { username: "alice", role: "Intern" },
+    ]);
+    const carlaId = nextUserId();
+    const testBot = makeRosterTestBot({
+      roster,
+      rosterStore,
+      groupChatId: "-500",
+      adminKind: "absent",
+    });
+    await registerCaller(testBot, carlaId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(carlaId, carlaId, "/roster role @alice higherup"));
+
+    expect((await rosterStore.listAll()).find((e) => e.username === "alice")?.role).toBe("Intern");
+  });
+
+  it("a non-higher-up who is a verified group admin can change a role", async () => {
+    const { rosterStore, roster } = await seedRosterStore([
+      { username: "carla", role: "HigherUp" },
+      { username: "alice", role: "Intern" },
+    ]);
+    const aliceId = nextUserId();
+    const testBot = makeRosterTestBot({
+      roster,
+      rosterStore,
+      groupChatId: "-500",
+      adminKind: "present",
+      adminIds: [aliceId],
+    });
+    await registerCaller(testBot, aliceId, "alice");
+
+    await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/roster role @alice higherup"));
+
+    expect((await rosterStore.listAll()).find((e) => e.username === "alice")?.role).toBe("HigherUp");
+  });
+
+  it("a typo'd username on /roster role gets the existing suggestion reply", async () => {
+    const { rosterStore, roster } = await seedRosterStore([
+      { username: "carla", role: "HigherUp" },
+      { username: "alice", role: "Intern" },
+    ]);
+    const carlaId = nextUserId();
+    const testBot = makeRosterTestBot({
+      roster,
+      rosterStore,
+      groupChatId: "-500",
+      adminKind: "present",
+      adminIds: [carlaId],
+    });
+    await registerCaller(testBot, carlaId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(carlaId, carlaId, "/roster role @alicee intern"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/did you mean @alice/i);
+  });
+
+  // ---- /roster remove -----------------------------------------------------
+
+  it("a higher-up who is not a verified group admin is refused from /roster remove", async () => {
+    const { rosterStore, roster } = await seedRosterStore([
+      { username: "carla", role: "HigherUp" },
+      { username: "alice", role: "Intern" },
+    ]);
+    const carlaId = nextUserId();
+    const testBot = makeRosterTestBot({
+      roster,
+      rosterStore,
+      groupChatId: "-500",
+      adminKind: "absent",
+    });
+    await registerCaller(testBot, carlaId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(carlaId, carlaId, "/roster remove @alice"));
+
+    expect(await rosterStore.listAll()).toContainEqual(
+      expect.objectContaining({ username: "alice" }),
+    );
+  });
+
+  it("a non-higher-up who is a verified group admin can remove a member", async () => {
+    const { rosterStore, roster } = await seedRosterStore([
+      { username: "carla", role: "HigherUp" },
+      { username: "alice", role: "Intern" },
+      { username: "bob", role: "Intern" },
+    ]);
+    const aliceId = nextUserId();
+    const testBot = makeRosterTestBot({
+      roster,
+      rosterStore,
+      groupChatId: "-500",
+      adminKind: "present",
+      adminIds: [aliceId],
+    });
+    await registerCaller(testBot, aliceId, "alice");
+
+    await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/roster remove @bob"));
+
+    expect(await rosterStore.listAll()).not.toContainEqual(
+      expect.objectContaining({ username: "bob" }),
+    );
+  });
+
+  it("cannot remove the last higher-up through /roster, even as a verified group admin", async () => {
+    const { rosterStore, roster } = await seedRosterStore([
+      { username: "carla", role: "HigherUp" },
+      { username: "alice", role: "Intern" },
+    ]);
+    const carlaId = nextUserId();
+    const testBot = makeRosterTestBot({
+      roster,
+      rosterStore,
+      groupChatId: "-500",
+      adminKind: "present",
+      adminIds: [carlaId],
+    });
+    await registerCaller(testBot, carlaId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(carlaId, carlaId, "/roster remove @carla"));
+
+    expect(await rosterStore.listAll()).toContainEqual(
+      expect.objectContaining({ username: "carla" }),
+    );
+  });
+
+  it("cannot demote the last higher-up through /roster role, even as a verified group admin", async () => {
+    const { rosterStore, roster } = await seedRosterStore([
+      { username: "carla", role: "HigherUp" },
+      { username: "alice", role: "Intern" },
+    ]);
+    const carlaId = nextUserId();
+    const testBot = makeRosterTestBot({
+      roster,
+      rosterStore,
+      groupChatId: "-500",
+      adminKind: "present",
+      adminIds: [carlaId],
+    });
+    await registerCaller(testBot, carlaId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(carlaId, carlaId, "/roster role @carla intern"));
+
+    expect((await rosterStore.listAll()).find((e) => e.username === "carla")?.role).toBe("HigherUp");
+  });
+
+  it("refuses removal while the member holds open tasks", async () => {
+    const { rosterStore, roster } = await seedRosterStore([
+      { username: "carla", role: "HigherUp" },
+      { username: "alice", role: "Intern" },
+    ]);
+    const carlaId = nextUserId();
+    const testBot = makeRosterTestBot({
+      roster,
+      rosterStore,
+      groupChatId: "-500",
+      adminKind: "present",
+      adminIds: [carlaId],
+    });
+    await registerCaller(testBot, carlaId, "carla");
+    const task = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Do the thing", description: "d", dueDate: "2026-09-05" },
+    );
+    if (!task.ok) throw new Error("setup failed");
+
+    await testBot.bot.handleUpdate(messageUpdate(carlaId, carlaId, "/roster remove @alice"));
+
+    expect(lastReplyText(testBot.calls)).toContain(`#${task.value.id}`);
+    expect(await rosterStore.listAll()).toContainEqual(
+      expect.objectContaining({ username: "alice" }),
+    );
+  });
+
+  it("a write refreshes the in-process roster so a subsequent command in the same conversation sees it", async () => {
+    const { rosterStore, roster } = await seedRosterStore([
+      { username: "carla", role: "HigherUp" },
+    ]);
+    const carlaId = nextUserId();
+    const testBot = makeRosterTestBot({ roster, rosterStore, groupChatId: "-500" });
+    await registerCaller(testBot, carlaId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(carlaId, carlaId, "/roster add @erin"));
+    await testBot.bot.handleUpdate(messageUpdate(carlaId, carlaId, "/roster"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/@erin/);
+  });
+
+  // ---- Usage replies --------------------------------------------------
+
+  it.each([
+    "/roster add",
+    "/roster add @erin nonsense",
+    "/roster bogus",
+    "/roster role @alice",
+    "/roster role @alice nonsense",
+    "/roster remove",
+    "/roster remove @alice @bob",
+  ])("%s gets a usage reply", async (text) => {
+    const { rosterStore, roster } = await seedRosterStore([
+      { username: "carla", role: "HigherUp" },
+      { username: "alice", role: "Intern" },
+    ]);
+    const carlaId = nextUserId();
+    const testBot = makeRosterTestBot({ roster, rosterStore, groupChatId: "-500" });
+    await registerCaller(testBot, carlaId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(carlaId, carlaId, text));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/^Usage: \/roster/);
   });
 });

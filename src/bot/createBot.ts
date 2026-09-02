@@ -3,9 +3,13 @@ import { loadRoster } from "../config/roster.js";
 import { normalizeUsername } from "../domain/roster.js";
 import { SystemClock } from "../domain/clock.js";
 import { TaskService } from "../service/taskService.js";
+import { RosterService } from "../service/rosterService.js";
 import type { TaskStorePort } from "../storage/taskStorePort.js";
 import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
 import type { WizardStateStorePort } from "../storage/wizardStateStorePort.js";
+import type { CohortStorePort } from "../storage/cohortStorePort.js";
+import type { RosterStorePort } from "../storage/rosterStorePort.js";
+import { checkGroupMembership, checkGroupAdmin } from "./groupMembership.js";
 import { comingFriday, parseDueDate } from "../date/parseDueDate.js";
 import { parseAddTaskArgs } from "./addTaskParse.js";
 import { parseMentionTrigger } from "./mentionParse.js";
@@ -25,6 +29,7 @@ import {
   formatHelp,
   formatMyTasks,
   formatPending,
+  formatRoster,
   formatTaskDetail,
   statusLabel,
 } from "./format.js";
@@ -56,6 +61,17 @@ export interface CreateBotOptions {
   activeCohortId: string;
   rosterPath?: string;
   dashboardUrl: string;
+  /** Storage port for the `cohorts` table (R3/#88) — used by `/start` to
+   * look up the cohort's Telegram group chat id, so it can verify the
+   * caller is actually a member of that group before offering to register
+   * them. Production code passes a `SupabaseCohortStore`; tests pass an
+   * `InMemoryCohortStore`. */
+  cohorts: CohortStorePort;
+  /** Storage port `/start` writes to directly (R3/#88, building on R2/#87's
+   * `upsert`) — `/start` now creates the roster row itself instead of
+   * requiring one to already exist. Production code passes a
+   * `SupabaseRosterStore`; tests pass R2's `InMemoryRosterStore`. */
+  rosterStore: RosterStorePort;
   /** Injected Bot instance — used by tests to avoid a real network `getMe`
    * call and to intercept outgoing API calls via `bot.api.config.use(...)`.
    * Production code always omits this and gets a freshly constructed Bot. */
@@ -118,6 +134,7 @@ export const BOT_COMMANDS = [
   { command: "unblock", description: "Restore a blocked task to its previous status" },
   { command: "note", description: "Attach a feedback note to a task" },
   { command: "edit", description: "Edit a task's assignee, title, description, or due date (higher-ups only)" },
+  { command: "roster", description: "List, add, re-role, or remove roster members" },
   { command: "dashboard", description: "Get the dashboard link" },
   { command: "whoami", description: "Show who the bot thinks you are" },
 ] as const;
@@ -160,6 +177,9 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   // TaskService talks only through the TaskStorePort (ADR-0005) — see
   // bot/index.ts for how production wires this to SupabaseTaskStore.
   const service = new TaskService(options.taskStore, roster, clock);
+  // RosterService talks only through RosterStorePort/TaskStorePort (R4/#89)
+  // — see rosterService.ts for the authority table it enforces.
+  const rosterService = new RosterService(options.rosterStore, roster, options.taskStore);
   const wizards = new WizardManager(options.wizardStateStore);
 
   function requireCaller(userId: number) {
@@ -219,6 +239,30 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     await next();
   });
 
+  /** True when `cohortId` already has at least one roster entry with role
+   * `HigherUp` (R3/#88) — the recovery-path guard: the first person to
+   * register in a fresh cohort must be able to become a higher-up, and
+   * once one exists, self-promotion via the buttons is refused. Reads the
+   * in-process `roster` (kept current by the per-request refresh in
+   * `webhookHandler.ts`/R1's `roster.replaceAll`), not a fresh store read,
+   * so this stays consistent with the `roster.find` lookups right next to
+   * it in the same handler. */
+  function hasHigherUp(cohortId: string): boolean {
+    return roster.all().some((e) => e.cohortId === cohortId && e.role === "HigherUp");
+  }
+
+  function welcomeReply(username: string, role: Role, cohortId: string): string {
+    return `Welcome, @${username}! You're registered as ${role === "HigherUp" ? "a higher-up" : "an intern"} for ${cohortId}. Send /help to see what you can do.`;
+  }
+
+  function roleKeyboard(): InlineKeyboard {
+    return new InlineKeyboard()
+      .text("Intern", "startrole:intern")
+      .text("Higher-up", "startrole:higherup");
+  }
+
+  const NOT_ON_ROSTER_TEXT = "You're not on the roster yet — contact a higher-up to get added.";
+
   bot.command("start", async (ctx) => {
     const from = ctx.from;
     const username = from?.username;
@@ -229,17 +273,109 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       );
       return;
     }
-    const entry = roster.find(username, options.activeCohortId);
-    if (!entry) {
+    const normalizedUsername = normalizeUsername(username);
+    const entry = roster.find(normalizedUsername, options.activeCohortId);
+
+    if (entry) {
+      // Roster row already exists (decision table rows 1-4).
+      if (hasHigherUp(entry.cohortId)) {
+        // Row 1: group check not performed — re-link and report the role
+        // they already have.
+        await registrations.register(from.id, normalizedUsername);
+        await ctx.reply(welcomeReply(entry.username, entry.role, entry.cohortId));
+        return;
+      }
+      const groupChatId = await options.cohorts.getGroupChatId(options.activeCohortId);
+      const check = await checkGroupMembership(bot.api, groupChatId, from.id);
+      if (check.kind === "present") {
+        // Row 2: offer the buttons — the zero-higher-ups recovery path.
+        await ctx.reply(
+          `Are you an intern or a higher-up for ${entry.cohortId}?`,
+          { reply_markup: roleKeyboard() },
+        );
+        return;
+      }
+      // Rows 3-4 (absent or unavailable): register, report existing role.
+      await registrations.register(from.id, normalizedUsername);
+      await ctx.reply(welcomeReply(entry.username, entry.role, entry.cohortId));
+      return;
+    }
+
+    // No roster row (decision table rows 5-7).
+    const groupChatId = await options.cohorts.getGroupChatId(options.activeCohortId);
+    const check = await checkGroupMembership(bot.api, groupChatId, from.id);
+    if (check.kind === "present") {
+      // Row 5: offer the buttons.
       await ctx.reply(
-        "You're not on the roster yet — contact a higher-up to get added.",
+        `Are you an intern or a higher-up for ${options.activeCohortId}?`,
+        { reply_markup: roleKeyboard() },
       );
       return;
     }
-    await registrations.register(from.id, username);
-    await ctx.reply(
-      `Welcome, @${entry.username}! You're registered as ${entry.role === "HigherUp" ? "a higher-up" : "an intern"} for ${entry.cohortId}. Send /help to see what you can do.`,
+    if (check.kind === "absent") {
+      // Row 6.
+      await ctx.reply("This bot is for the cohort's Telegram group members.");
+      return;
+    }
+    // Row 7 — the fallback. Not "allow anyone": create nothing, same
+    // dead-end message today's /start gives everyone not on the roster.
+    // Reachable in production right now since the real cohort's
+    // group_chat_id is unset (see the ticket's "platform limit" note).
+    await ctx.reply(NOT_ON_ROSTER_TEXT);
+  });
+
+  // ---- /start's role buttons (R3/#88) -----------------------------------
+  // Acts on ctx.from.id — the person who tapped, never whoever ran /start
+  // (commands work in group chats too, so these buttons are visible to
+  // anyone in the chat; acting on the tapper means a tap can only ever
+  // register the tapper).
+
+  bot.callbackQuery(/^startrole:(intern|higherup)$/, async (ctx) => {
+    const tapper = ctx.from;
+    const username = tapper.username;
+    if (!username) {
+      await ctx.answerCallbackQuery({
+        text: "You don't have a Telegram username set.",
+      });
+      return;
+    }
+    const normalizedUsername = normalizeUsername(username);
+
+    // Re-run the membership check for the tapper — never trust the
+    // earlier /start check, since this is where the write happens.
+    const groupChatId = await options.cohorts.getGroupChatId(options.activeCohortId);
+    const check = await checkGroupMembership(bot.api, groupChatId, tapper.id);
+    if (check.kind !== "present") {
+      await ctx.answerCallbackQuery({
+        text: "You're not currently a member of the cohort's group.",
+      });
+      return;
+    }
+
+    // Anti-self-promotion guard, re-checked here (not only at /start):
+    // once the cohort has a higher-up, an existing roster row can't be
+    // overwritten via these buttons.
+    const existingEntry = roster.find(normalizedUsername, options.activeCohortId);
+    if (existingEntry && hasHigherUp(options.activeCohortId)) {
+      await ctx.answerCallbackQuery({ text: "You're already registered." });
+      return;
+    }
+
+    const [, roleParam] = ctx.match as unknown as [string, string];
+    const role: Role = roleParam === "higherup" ? "HigherUp" : "Intern";
+
+    await options.rosterStore.upsert(
+      { username: normalizedUsername, role, cohortId: options.activeCohortId },
+      normalizedUsername,
     );
+    await registrations.register(tapper.id, normalizedUsername);
+    // R1's per-update roster refresh (webhookHandler.ts) covers the NEXT
+    // update, not this one — refresh in place so the reply below (and any
+    // later handler in this same update) sees the new row.
+    roster.replaceAll(await options.rosterStore.listAll());
+
+    await ctx.answerCallbackQuery();
+    await ctx.reply(welcomeReply(normalizedUsername, role, options.activeCohortId));
   });
 
   // ---- /help ------------------------------------------------------------
@@ -952,6 +1088,113 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }),
   );
 
+  // ---- /roster (R4/#89) --------------------------------------------------
+  // List/add/re-role/remove the cohort's roster. Read (list) and the
+  // add-as-intern default are gated on the caller's roster-role HigherUp,
+  // same as /edit; every destructive operation (add as higherup, role,
+  // remove) is instead gated on a *live* group-admin check
+  // (`checkGroupAdmin`, R3/#88) — see rosterService.ts's doc comment for
+  // why a self-declared roster role can't be trusted for that.
+
+  /** Performs the live group-admin check for the caller and, on anything
+   * but `present`, replies with an actionable reason and returns `false` —
+   * fails closed (`unavailable` refuses, same as `absent`), the deliberate
+   * opposite of /start's fallback (refusing a roster edit is safe,
+   * permitting a wrong one is not). Callers only proceed to the
+   * `RosterService` call when this returns `true`. */
+  async function requireGroupAdmin(
+    ctx: import("grammy").Context,
+    caller: Caller,
+  ): Promise<boolean> {
+    const groupChatId = await options.cohorts.getGroupChatId(caller.cohortId);
+    const check = await checkGroupAdmin(bot.api, groupChatId, ctx.from!.id);
+    if (check.kind === "present") return true;
+    if (check.kind === "unavailable") {
+      await ctx.reply(
+        `Can't verify group-admin status right now (${check.reason}) — the cohort's group chat may not be configured yet. Ask a higher-up to sort that out first.`,
+      );
+    } else {
+      await ctx.reply("You need to be an admin of the cohort's Telegram group to do that.");
+    }
+    return false;
+  }
+
+  const ROSTER_USAGE =
+    "Usage: /roster, /roster add @user [intern|higherup], /roster role @user intern|higherup, or /roster remove @user.";
+
+  async function refreshRosterFromStore() {
+    roster.replaceAll(await options.rosterStore.listAll());
+  }
+
+  bot.command(
+    "roster",
+    withCaller(async (ctx, caller) => {
+      const parsed = parseRosterArgs(matchToString(ctx.match));
+
+      if (parsed.kind === "usage") {
+        await ctx.reply(ROSTER_USAGE);
+        return;
+      }
+
+      if (parsed.kind === "list") {
+        const result = await rosterService.listMembers(caller);
+        await replyChunked(ctx, result.ok ? formatRoster(result.value) : result.error);
+        return;
+      }
+
+      if (parsed.kind === "add") {
+        if (parsed.role === "HigherUp") {
+          if (!(await requireGroupAdmin(ctx, caller))) return;
+        }
+        const result = await rosterService.addMember(
+          caller,
+          parsed.username,
+          parsed.role,
+          parsed.role === "HigherUp",
+        );
+        if (!result.ok) {
+          await ctx.reply(result.error);
+          return;
+        }
+        await refreshRosterFromStore();
+        const roleWord = result.value.role === "HigherUp" ? "higher-up" : "intern";
+        await ctx.reply(`@${result.value.username} added to the roster as ${roleWord}.`);
+        return;
+      }
+
+      if (parsed.kind === "role") {
+        if (!roster.isMember(parsed.username, caller.cohortId)) {
+          await ctx.reply(unknownRosterMemberReply(parsed.username, caller.cohortId));
+          return;
+        }
+        if (!(await requireGroupAdmin(ctx, caller))) return;
+        const result = await rosterService.setRole(caller, parsed.username, parsed.role, true);
+        if (!result.ok) {
+          await ctx.reply(result.error);
+          return;
+        }
+        await refreshRosterFromStore();
+        const roleWord = result.value.role === "HigherUp" ? "higher-up" : "intern";
+        await ctx.reply(`@${result.value.username}'s role is now ${roleWord}.`);
+        return;
+      }
+
+      // remove
+      if (!roster.isMember(parsed.username, caller.cohortId)) {
+        await ctx.reply(unknownRosterMemberReply(parsed.username, caller.cohortId));
+        return;
+      }
+      if (!(await requireGroupAdmin(ctx, caller))) return;
+      const result = await rosterService.removeMember(caller, parsed.username, true);
+      if (!result.ok) {
+        await ctx.reply(result.error);
+        return;
+      }
+      await refreshRosterFromStore();
+      await ctx.reply(`@${parsed.username} removed from the roster.`);
+    }),
+  );
+
   // ---- /edit field-choice menu -----------------------------------------
 
   bot.callbackQuery(/^editfield:(assignee|title|description|duedate)$/, async (ctx) => {
@@ -1458,4 +1701,63 @@ function parseEditField(token: string): EditField | undefined {
     return "dueDate";
   }
   return undefined;
+}
+
+/** Parsed `/roster` subcommand grammar (R4/#89):
+ * `/roster`, `/roster add @user [intern|higherup]`,
+ * `/roster role @user intern|higherup`, `/roster remove @user`. Anything
+ * else (unrecognised subcommand, missing/extra arguments, an unrecognised
+ * role word) is `usage` — the bot layer replies with the usage string
+ * rather than guessing, following the /edit usage-reply pattern. */
+type RosterArgs =
+  | { kind: "list" }
+  | { kind: "add"; username: string; role: Role }
+  | { kind: "role"; username: string; role: Role }
+  | { kind: "remove"; username: string }
+  | { kind: "usage" };
+
+function parseRoleWord(token: string): Role | undefined {
+  const normalized = token.toLowerCase();
+  if (normalized === "intern") return "Intern";
+  if (normalized === "higherup") return "HigherUp";
+  return undefined;
+}
+
+function parseRosterArgs(raw: string): RosterArgs {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return { kind: "list" };
+
+  const tokens = trimmed.split(/\s+/);
+  const [subcommand, ...rest] = tokens;
+  const sub = subcommand!.toLowerCase();
+
+  if (sub === "add") {
+    if (rest.length < 1 || rest.length > 2) return { kind: "usage" };
+    const username = rest[0]!.replace(/^@/, "");
+    if (username.length === 0) return { kind: "usage" };
+    let role: Role = "Intern";
+    if (rest.length === 2) {
+      const parsedRole = parseRoleWord(rest[1]!);
+      if (!parsedRole) return { kind: "usage" };
+      role = parsedRole;
+    }
+    return { kind: "add", username, role };
+  }
+
+  if (sub === "role") {
+    if (rest.length !== 2) return { kind: "usage" };
+    const username = rest[0]!.replace(/^@/, "");
+    const role = parseRoleWord(rest[1]!);
+    if (username.length === 0 || !role) return { kind: "usage" };
+    return { kind: "role", username, role };
+  }
+
+  if (sub === "remove") {
+    if (rest.length !== 1) return { kind: "usage" };
+    const username = rest[0]!.replace(/^@/, "");
+    if (username.length === 0) return { kind: "usage" };
+    return { kind: "remove", username };
+  }
+
+  return { kind: "usage" };
 }

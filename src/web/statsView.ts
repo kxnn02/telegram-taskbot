@@ -1,4 +1,5 @@
-import type { CohortStats } from "../service/taskService.js";
+import type { Caller, ServiceResult } from "../domain/types.js";
+import type { CohortStats, TaskService } from "../service/taskService.js";
 
 /**
  * Presentation-only formatting for the Next.js stats page (Phase 6.2, issue
@@ -9,6 +10,22 @@ import type { CohortStats } from "../service/taskService.js";
  * already fully computed by `TaskService.getStats` — nothing here talks to
  * the service or re-derives a stat.
  */
+
+/**
+ * Thin data-fetching wrapper the stats page calls, mirroring
+ * `oversightData.ts`'s `loadOversightView` split so the "did this caller
+ * get refused" branch is directly unit-testable (R6/#91) instead of only
+ * reachable by rendering the page. `TaskService.getStats` stays the one
+ * place that decides who may see stats (higher-up only, unrelated to the
+ * dashboard's login gate) — this just calls it and returns whatever
+ * `ServiceResult` comes back, success or failure, unchanged.
+ */
+export async function loadStatsView(
+  service: Pick<TaskService, "getStats">,
+  caller: Caller,
+): Promise<ServiceResult<CohortStats>> {
+  return service.getStats(caller);
+}
 
 export interface InternBarViewModel {
   username: string;

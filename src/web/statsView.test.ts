@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { CohortStats } from "../service/taskService.js";
-import { buildStatsViewModel } from "./statsView.js";
+import type { Caller } from "../domain/types.js";
+import type { CohortStats, TaskService } from "../service/taskService.js";
+import { buildStatsViewModel, loadStatsView } from "./statsView.js";
 
 /**
  * Presentation-only formatting for the Next.js stats page (Phase 6.2, issue
@@ -77,5 +78,33 @@ describe("buildStatsViewModel", () => {
       { username: "alice", completed: 0, widthPercent: 0 },
       { username: "bob", completed: 0, widthPercent: 0 },
     ]);
+  });
+});
+
+/**
+ * R6/#91: once interns can log in to the dashboard, they can reach the
+ * stats page and get a `fail()` back from `TaskService.getStats` (still
+ * higher-up-only — that gate is untouched). `loadStatsView` is the thin
+ * pass-through the page calls, so this pins down that a refusal comes back
+ * as a `ServiceResult` the page can render as a clear message, not a crash.
+ */
+describe("loadStatsView", () => {
+  const caller: Caller = { username: "alice", role: "Intern", cohortId: "cohort-5" };
+
+  function fakeService(result: Awaited<ReturnType<TaskService["getStats"]>>): TaskService {
+    return { getStats: async () => result } as unknown as TaskService;
+  }
+
+  it("propagates a refusal from a non-higher-up caller instead of throwing", async () => {
+    const service = fakeService({ ok: false, error: "Only higher-ups can view cohort stats." });
+    const result = await loadStatsView(service, caller);
+    expect(result).toEqual({ ok: false, error: "Only higher-ups can view cohort stats." });
+  });
+
+  it("passes through a successful result unchanged", async () => {
+    const value = stats({ completedThisWeek: 2 });
+    const service = fakeService({ ok: true, value });
+    const result = await loadStatsView(service, caller);
+    expect(result).toEqual({ ok: true, value });
   });
 });

@@ -1,6 +1,6 @@
 import { DateTime } from "luxon";
 import type { TaskWithFlags } from "../service/taskService.js";
-import type { Role, TaskStatus } from "../domain/types.js";
+import type { Role, RosterEntry, TaskStatus } from "../domain/types.js";
 import { MANILA_ZONE } from "../domain/overdue.js";
 
 /** Display labels for the six free-set statuses (#27's normative status
@@ -162,6 +162,20 @@ export function formatBlocked(tasks: TaskWithFlags[]): string {
   ].join("\n");
 }
 
+/** Renders `/roster`'s list view (R4/#89) — already sorted by username by
+ * the service, one line per member. */
+export function formatRoster(members: RosterEntry[]): string {
+  if (members.length === 0) {
+    return "The roster is empty.";
+  }
+  return [
+    "Roster:",
+    ...members.map(
+      (m) => `- @${m.username} — ${m.role === "HigherUp" ? "Higher-up" : "Intern"}`,
+    ),
+  ].join("\n");
+}
+
 export function formatApproved(tasks: TaskWithFlags[]): string {
   if (tasks.length === 0) {
     return "Nothing was approved in the past week.";
@@ -260,6 +274,16 @@ const HELP_SECTIONS: { heading: string; lines: string[] }[] = [
       "/note <ref> <text> — attach a feedback note",
       "/edit <ref> <field> <value> — edit assignee, title, description, or duedate directly (restricted to higher-ups)",
       "/edit <ref> — bare, starts the field-choice form instead (restricted to higher-ups)",
+    ],
+  },
+  {
+    heading: "👥 Roster",
+    lines: [
+      "/roster — list the cohort's roster (restricted to higher-ups)",
+      "/roster add @user [intern|higherup] — add a member, defaults to intern (adding as intern restricted to higher-ups)",
+      "/roster role @user intern|higherup — change a member's role",
+      "/roster remove @user — remove a member",
+      "Adding someone as higher-up, changing a role, or removing someone requires being an admin of the cohort's Telegram group — your roster role alone isn't enough for those.",
     ],
   },
   {

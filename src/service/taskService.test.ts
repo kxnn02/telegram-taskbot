@@ -760,20 +760,24 @@ describe("getStats", () => {
   });
 });
 
-describe("dashboard higher-up login gate — must NOT be removed alongside the workflow gates", () => {
-  it("stays rejecting an intern outside of TaskService entirely (pinning the check still exists)", async () => {
+describe("dashboard login gate — roster/cohort membership, not role (R6/#91)", () => {
+  it("keeps rejecting a login with no roster entry, outside of TaskService entirely (pinning the check still exists)", async () => {
     // This isn't a workflow gate exercised through TaskService — it's
-    // telegramLoginHandler.ts:48's audience gate (the Express dashboard's
+    // telegramLoginHandler.ts's audience gate (the Express dashboard's
     // dashboardServer.ts carried the same check before its removal in
-    // Stage 8, #57). Pinned here as a plain role check so a future edit
-    // that deletes it is caught by a grep-able assertion rather than
-    // relying on an e2e dashboard test in this stage.
+    // Stage 8, #57). R6/#91 dropped the `entry.role !== "HigherUp"` half of
+    // this gate (interns may now log in) but kept the `!entry` half —
+    // roster membership in the deployment's bound cohort is still required.
+    // Pinned here as a source-level assertion so a future edit that drops
+    // the remaining `!entry` check is caught by a grep-able assertion
+    // rather than relying on an e2e dashboard test in this stage.
     const fs = await import("node:fs");
     const loginHandlerSrc = fs.readFileSync(
       new URL("../web/telegramLoginHandler.ts", import.meta.url),
       "utf8",
     );
-    expect(loginHandlerSrc).toMatch(/entry\.role !== "HigherUp"/);
+    expect(loginHandlerSrc).toMatch(/if \(!entry\)/);
+    expect(loginHandlerSrc).not.toMatch(/entry\.role !== "HigherUp"/);
   });
 });
 

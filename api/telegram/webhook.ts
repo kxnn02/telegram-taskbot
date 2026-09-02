@@ -6,6 +6,7 @@ import { SupabaseTaskStore } from "../../src/storage/supabaseTaskStore.js";
 import { SupabaseRegistrationStore } from "../../src/storage/supabaseRegistrationStore.js";
 import { SupabaseWizardStateStore } from "../../src/storage/supabaseWizardStateStore.js";
 import { SupabaseRosterStore } from "../../src/storage/supabaseRosterStore.js";
+import { SupabaseCohortStore } from "../../src/storage/supabaseCohortStore.js";
 import { SupabaseProcessedUpdatesStore } from "../../src/storage/supabaseProcessedUpdatesStore.js";
 import { loadRosterFromStore } from "../../src/config/roster.js";
 import { handleTelegramWebhook, type WebhookHandlerDeps } from "../../src/webhook/webhookHandler.js";
@@ -45,13 +46,16 @@ async function buildDeps(): Promise<WebhookHandlerDeps> {
   }
 
   const supabase = createSupabaseClient();
-  const roster = await loadRosterFromStore(new SupabaseRosterStore(supabase));
+  const rosterStore = new SupabaseRosterStore(supabase);
+  const roster = await loadRosterFromStore(rosterStore);
 
   const { bot } = createBot({
     token,
     taskStore: new SupabaseTaskStore(supabase),
     registrationStore: new SupabaseRegistrationStore(supabase),
     wizardStateStore: new SupabaseWizardStateStore(supabase),
+    cohorts: new SupabaseCohortStore(supabase),
+    rosterStore,
     roster,
     activeCohortId,
     dashboardUrl:
@@ -71,6 +75,7 @@ async function buildDeps(): Promise<WebhookHandlerDeps> {
     bot,
     expectedSecret: secret,
     claimUpdate: (updateId: number) => processedUpdates.claim(updateId),
+    refreshRoster: async () => roster.replaceAll(await rosterStore.listAll()),
   };
 }
 

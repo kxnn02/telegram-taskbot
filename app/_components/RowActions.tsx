@@ -23,10 +23,20 @@ const STATUS_OPTIONS: Array<{ value: TaskWithFlags["status"]; label: string }> =
  * review gate and are gone; in their place, a status dropdown lets any
  * roster member set any of the six statuses directly, via the same
  * `PATCH /api/tasks/:id` route `TaskForm` already uses (extended to accept
- * an optional `status` field). Edit's `canEdit` gate is gone too — the
- * Approved edit-lock no longer exists, so Edit is always shown.
+ * an optional `status` field). The old `canEdit` gate (the Approved
+ * edit-lock) is gone, but a new one takes its place (R6/#91): now that
+ * interns can log in, Edit is only shown to a `HigherUp` caller, matching
+ * the bot's `/edit`, which the dashboard's edit route/page also enforce
+ * server-side — this is purely so an intern isn't shown a link that will
+ * refuse them.
  */
-export function RowActions({ task }: { task: Pick<TaskWithFlags, "id" | "status"> }) {
+export function RowActions({
+  task,
+  canEdit,
+}: {
+  task: Pick<TaskWithFlags, "id" | "status">;
+  canEdit: boolean;
+}) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -55,10 +65,12 @@ export function RowActions({ task }: { task: Pick<TaskWithFlags, "id" | "status"
   return (
     <div className="row-actions" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
       <div style={{ display: "flex", gap: 6 }}>
-        <a className="btn secondary sm" href={`/tasks/${task.id}/edit`}>
-          <Icon name="pen" size={14} />
-          <span>Edit</span>
-        </a>
+        {canEdit ? (
+          <a className="btn secondary sm" href={`/tasks/${task.id}/edit`}>
+            <Icon name="pen" size={14} />
+            <span>Edit</span>
+          </a>
+        ) : null}
         <select
           aria-label={`Change status of task ${task.id}`}
           value={task.status}

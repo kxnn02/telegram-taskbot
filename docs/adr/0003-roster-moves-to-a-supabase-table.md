@@ -3,6 +3,10 @@
 - **Status**: Accepted (planning only — not yet implemented)
 - **Date**: 2026-08-31
 - **Depends on**: [ADR-0001](./0001-replatform-to-vercel-supabase.md)
+- **Amended by**: [ADR-0010](./0010-group-gated-registration-and-roster-management.md) — the
+  roster is still a Supabase table as decided here, but `roster.config.json`, kept committed by
+  this ADR's Decision below, was later deleted; it stopped being read or seeded by anything once
+  roster rows are created by `/start`.
 
 ## Context
 
@@ -26,6 +30,10 @@ callers are unaffected.
 
 `roster.config.json` **stays committed** — no longer as something the app reads, but as the
 documented shape of a roster and the seed for standing up a new cohort.
+
+> **Update (ADR-0010):** `roster.config.json` was later deleted. Once cohorts bootstrap
+> themselves — the first person to `/start` can claim Higher-up — nothing seeds the roster from a
+> file anymore, and the row shape it documented now lives in ADR-0010 instead.
 
 ## Consequences
 
