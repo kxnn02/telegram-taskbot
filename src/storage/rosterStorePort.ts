@@ -12,4 +12,11 @@ import type { RosterEntry } from "../domain/types.js";
  */
 export interface RosterStorePort {
   listAll(): Promise<RosterEntry[]>;
+
+  /** Creates or updates one roster entry, recording who set the role and
+   *  when. Keyed on the table's real unique constraint, (cohort_id, username). */
+  upsert(entry: RosterEntry, setBy: string): Promise<void>;
+
+  /** Removes one roster entry. No-op if it doesn't exist. */
+  remove(cohortId: string, username: string): Promise<void>;
 }
