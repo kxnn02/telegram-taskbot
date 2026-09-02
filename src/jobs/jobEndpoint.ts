@@ -65,3 +65,25 @@ export async function handleJobEndpoint(
   }
   return { status: 200 };
 }
+
+/**
+ * Reports a required-env-var misconfiguration the same way `handleJobEndpoint`
+ * reports a thrown `work()` error — via the caller's `onError` (built on
+ * `notifyJobFailure`), swallowing any failure to report so a broken DM path
+ * doesn't mask the original config error. Exists for checks that must run
+ * before `verify()` can, because the missing value is itself what `verify()`
+ * would check requests against (e.g. `CRON_SECRET`) — those can't be
+ * expressed as a `work()` thrown inside `handleJobEndpoint`, since `work()`
+ * only runs after a successful `verify()`.
+ */
+export async function reportConfigError(
+  onError: (error: unknown) => Promise<void>,
+  message: string,
+): Promise<MinimalJobResponse> {
+  try {
+    await onError(new Error(message));
+  } catch {
+    // Never let a failure to report the failure change the response.
+  }
+  return { status: 500 };
+}
