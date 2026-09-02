@@ -119,6 +119,27 @@ export const BOT_COMMANDS = [
   { command: "dashboard", description: "Get the dashboard link" },
 ] as const;
 
+/** Every command name this bot actually handles via `bot.command(...)`
+ * below — `BOT_COMMANDS` (the Telegram-menu list) plus the removed-command
+ * redirect handlers, which are real handlers even though they're excluded
+ * from the menu on purpose (see the comment on `BOT_COMMANDS`). Used by the
+ * mid-wizard interruption middleware (issue #63, finding H6) to decide
+ * whether an incoming `/word` is a command that's actually going to run —
+ * a typo'd command must not auto-cancel an in-progress form. Keep this set
+ * in step with the `bot.command(...)` registrations below it. */
+export const HANDLED_COMMANDS: ReadonlySet<string> = new Set([
+  ...BOT_COMMANDS.map((c) => c.command),
+  "submit",
+  "approve",
+  "revise",
+  "canceltask",
+  "unblocked",
+  "alltasks",
+  "backlog",
+  "blocked",
+  "complete",
+]);
+
 /** Registers `BOT_COMMANDS` with Telegram so the client's command-
  * autocomplete menu is populated (issue #27/#35 — this had never been
  * called anywhere in the repo before this stage). Idempotent: safe to call
@@ -177,21 +198,19 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   bot.use(async (ctx, next) => {
     const text = ctx.message?.text;
     const userId = ctx.from?.id;
-    if (
-      text &&
-      text.startsWith("/") &&
-      userId !== undefined &&
-      !text.toLowerCase().startsWith("/cancel")
-    ) {
-      const state = await wizards.get(userId);
-      if (
-        state &&
-        (state.data.chatId === undefined || state.data.chatId === ctx.chat?.id)
-      ) {
-        await wizards.cancel(userId);
-        await ctx.reply(
-          "Cancelled your in-progress form since you sent a new command.",
-        );
+    if (text && text.startsWith("/") && userId !== undefined) {
+      const commandName = parseCommandName(text);
+      if (commandName !== "cancel" && HANDLED_COMMANDS.has(commandName)) {
+        const state = await wizards.get(userId);
+        if (
+          state &&
+          (state.data.chatId === undefined || state.data.chatId === ctx.chat?.id)
+        ) {
+          await wizards.cancel(userId);
+          await ctx.reply(
+            "Cancelled your in-progress form since you sent a new command.",
+          );
+        }
       }
     }
     await next();
@@ -993,6 +1012,20 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       return;
     }
     const userId = ctx.from.id;
+    // Checked before wizards.get() below, which would otherwise silently
+    // consume the same expiry (it deletes an expired row internally): an
+    // expired wizard's next answer must not fall through to the generic
+    // "not sure what you mean" handling (issue #63, finding H7) — the user
+    // answered exactly what the bot asked, they just took more than 20
+    // minutes to do it. `takeExpired` reports `true` exactly once per
+    // expiry, and this reply is safe in a group chat (not gated on
+    // ctx.chat.type) since only someone who had a live form there gets it.
+    if (await wizards.takeExpired(userId)) {
+      await ctx.reply(
+        "That form expired after 20 minutes of inactivity, so I've dropped it. Send /addtask (or /edit <ref>) to start again.",
+      );
+      return;
+    }
     const rawState = await wizards.get(userId);
     // Chat-scoped wizards (issue #52/#53, finding F3): a wizard started in
     // one chat must not consume unrelated messages the same user sends in
@@ -1036,6 +1069,25 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       return;
     }
     await handleWizardInput(ctx, resolved.caller, state, text.trim());
+  });
+
+  // ---- Non-text answers mid-form (issue #63, finding H8) ----------------
+  // Registered after bot.on("message:text") above so it never shadows it —
+  // grammy runs middleware in registration order, and a text message
+  // already matched by that handler must not reach this one too. A photo,
+  // sticker, etc. sent while a wizard step is waiting on a text answer was
+  // previously swallowed with zero replies; nudge the user instead, but
+  // only when they actually have a live wizard in this chat — with no
+  // wizard, privacy mode off means the bot sees every non-text message in
+  // a group too, and replying to those is exactly the chatter #52 stopped.
+  bot.on("message", async (ctx) => {
+    if (ctx.message.text !== undefined) return;
+    const userId = ctx.from?.id;
+    if (userId === undefined) return;
+    const state = await wizards.get(userId);
+    if (!state) return;
+    if (state.data.chatId !== undefined && state.data.chatId !== ctx.chat.id) return;
+    await ctx.reply("I can only read text for this step. Send your answer as a message, or /cancel.");
   });
 
   async function handleWizardInput(
@@ -1235,6 +1287,17 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   }
 
   return { bot, service, roster, registrations, wizards };
+}
+
+/** Parses the leading `/word` of a message into a lowercase command name
+ * with the `/` and any `@botname` suffix stripped (issue #63, finding H6) —
+ * e.g. `/Help@test_bot foo` -> `help`. Used to check the token against
+ * `HANDLED_COMMANDS` before treating it as a real command. */
+function parseCommandName(text: string): string {
+  const token = text.slice(1).split(/\s/, 1)[0] ?? "";
+  const atIndex = token.indexOf("@");
+  const withoutBotname = atIndex === -1 ? token : token.slice(0, atIndex);
+  return withoutBotname.toLowerCase();
 }
 
 type CommandMatch = string | RegExpMatchArray | undefined;

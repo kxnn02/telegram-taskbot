@@ -151,6 +151,21 @@ function groupMessageUpdate(userId: number, username: string, chatId: number, te
   } as Update;
 }
 
+function photoMessageUpdate(userId: number, chatId: number, chatType: "private" | "group" = "private"): Update {
+  return {
+    update_id: updateIdSeq++,
+    message: {
+      message_id: messageIdSeq++,
+      date: Math.floor(Date.now() / 1000),
+      chat: chatType === "private" ? { id: chatId, type: "private" } : { id: chatId, type: "group", title: "Dump Group" },
+      from: { id: userId, is_bot: false, first_name: "Test" },
+      photo: [
+        { file_id: "abc", file_unique_id: "abc-u", width: 100, height: 100 },
+      ],
+    },
+  } as Update;
+}
+
 function callbackUpdate(userId: number, chatId: number, data: string): Update {
   return {
     update_id: updateIdSeq++,
@@ -2729,5 +2744,206 @@ describe("Stage 1: outermost error-guard middleware (issue #49/#50, finding F1)"
     await expect(
       created.bot.handleUpdate(messageUpdate(userId, userId, "/mytasks")),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("Stage 4 (N4): a typo'd command must not destroy an in-progress form (issue #63, finding H6)", () => {
+  it("a typo'd command does not cancel the wizard, and the form is still usable", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/tsak 3"));
+
+    const replies = testBot.calls
+      .filter((c) => c.method === "sendMessage")
+      .map((c) => c.payload.text as string);
+    expect(replies.some((t) => /cancelled your in-progress form/i.test(t))).toBe(false);
+    expect(await testBot.wizards.has(higherUpId)).toBe(true);
+  });
+
+  it("after a typo'd command, a valid assignee still advances the form to Title?", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/tsak 3"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "alice"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/title/i);
+  });
+
+  it("a recognized command (/help) still cancels the wizard (regression guard)", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/help"));
+
+    const replies = testBot.calls
+      .filter((c) => c.method === "sendMessage")
+      .map((c) => c.payload.text as string);
+    expect(replies.some((t) => /cancelled your in-progress form/i.test(t))).toBe(true);
+  });
+
+  it("a recognized command with an @botname suffix still cancels the wizard", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/help@test_bot"));
+
+    const replies = testBot.calls
+      .filter((c) => c.method === "sendMessage")
+      .map((c) => c.payload.text as string);
+    expect(replies.some((t) => /cancelled your in-progress form/i.test(t))).toBe(true);
+  });
+
+  it("a removed-command redirect handler (/submit) still cancels the wizard", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/submit 3"));
+
+    const replies = testBot.calls
+      .filter((c) => c.method === "sendMessage")
+      .map((c) => c.payload.text as string);
+    expect(replies.some((t) => /cancelled your in-progress form/i.test(t))).toBe(true);
+  });
+});
+
+describe("Stage 4 (N4): an expired form's next answer gets an expiry notice, not the generic error (issue #63, finding H7)", () => {
+  it("answering an expired /addtask wizard gets the expiry notice", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    vi.setSystemTime(new Date(Date.now() + 20 * 60 * 1000 + 1000));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "bob"));
+
+    expect(lastReplyText(testBot.calls)).toContain("That form expired");
+  });
+
+  it("the expiry notice fires only once — a second message falls through to normal handling", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    vi.setSystemTime(new Date(Date.now() + 20 * 60 * 1000 + 1000));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "bob"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "hello again"));
+
+    expect(lastReplyText(testBot.calls)).not.toContain("That form expired");
+    expect(lastReplyText(testBot.calls)).toContain("Not sure what you mean");
+  });
+
+  it("a user with no wizard at all still gets the unchanged unknown-text reply in a DM", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+    await registerCaller(testBot, userId, "alice");
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, userId, "just chatting"));
+
+    expect(lastReplyText(testBot.calls)).toBe("Not sure what you mean — try /help");
+  });
+
+  it("an expired /edit wizard produces the same expiry notice", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const result = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Some task", dueDate: "2026-09-05" },
+    );
+    if (!result.ok) throw new Error("setup failed: " + result.error);
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/edit ${result.value.id}`));
+    await testBot.bot.handleUpdate(callbackUpdate(higherUpId, higherUpId, "editfield:title"));
+    vi.setSystemTime(new Date(Date.now() + 20 * 60 * 1000 + 1000));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "Brand new title"));
+
+    expect(lastReplyText(testBot.calls)).toContain("That form expired");
+  });
+});
+
+describe("Stage 4 (N4): non-text answers mid-form get a nudge instead of being ignored (issue #63, finding H8)", () => {
+  const GROUP_CHAT_ID = -300;
+
+  it("a photo mid-wizard in a DM gets the 'I can only read text' nudge", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    await testBot.bot.handleUpdate(photoMessageUpdate(higherUpId, higherUpId));
+
+    expect(lastReplyText(testBot.calls)).toContain("I can only read text");
+  });
+
+  it("with no wizard, a photo in a DM gets zero replies", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+    await registerCaller(testBot, userId, "alice");
+
+    await testBot.bot.handleUpdate(photoMessageUpdate(userId, userId));
+
+    expect(testBot.calls.filter((c) => c.method === "sendMessage")).toHaveLength(0);
+  });
+
+  it("with no wizard, a photo in a group gets zero replies", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+    await registerCaller(testBot, userId, "alice");
+
+    await testBot.bot.handleUpdate(photoMessageUpdate(userId, GROUP_CHAT_ID, "group"));
+
+    expect(testBot.calls.filter((c) => c.method === "sendMessage")).toHaveLength(0);
+  });
+
+  it("a wizard started in a DM ignores a photo sent in a group by the same user (chatId gate from #53 holds)", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    const callsBefore = testBot.calls.length;
+
+    await testBot.bot.handleUpdate(photoMessageUpdate(higherUpId, GROUP_CHAT_ID, "group"));
+
+    expect(testBot.calls.length).toBe(callsBefore);
+  });
+
+  it("after the nudge, sending valid text still advances the form", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    await testBot.bot.handleUpdate(photoMessageUpdate(higherUpId, higherUpId));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "alice"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/title/i);
   });
 });
