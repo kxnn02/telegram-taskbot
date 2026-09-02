@@ -39,7 +39,7 @@ function sidebar(active: NavKey, username: string, role: string): string {
     <div class="brand">
       ${LOGO}
       <div>
-        <div class="mark">DEVCON<span style="color:#4263EB">+</span></div>
+        <div class="mark">DEVCON</div>
         <div class="tag">Cohort 5 Taskbot</div>
       </div>
     </div>
