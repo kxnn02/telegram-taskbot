@@ -21,9 +21,7 @@ function Sidebar({ active, username, role }: { active: NavKey; username: string;
       <div className="brand">
         <Logo />
         <div>
-          <div className="mark">
-            DEVCON<span style={{ color: "#4263EB" }}>+</span>
-          </div>
+          <div className="mark">DEVCON</div>
           <div className="tag">Cohort 5 Taskbot</div>
         </div>
       </div>
