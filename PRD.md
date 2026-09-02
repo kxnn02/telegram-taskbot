@@ -40,12 +40,22 @@ compromising correctness.
 > **Superseded by [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md), implemented.**
 > The role split below described v1's gated permission model. It no longer applies: any
 > registered roster member — Intern or Higher-up — may create a task, assign it to anyone else
-> on the roster, read every task in the cohort, and set any status on any task. **`/edit` is the
-> one command still restricted to `HigherUp`.** There is no other role check left anywhere in
-> `TaskService` or `createBot.ts`. The rest of this section (role assignment via the roster
+> on the roster, read every task in the cohort, and set any status on any task. **Three checks
+> are still restricted to `HigherUp`: the `/edit` command, `TaskService.getStats`
+> (`src/service/taskService.ts`, near line 354), and dashboard login
+> (`src/web/telegramLoginHandler.ts`, near line 47).** There is no other role check left anywhere
+> in `TaskService` or `createBot.ts`. The rest of this section (role assignment via the roster
 > config, and the roster's shared use for the dashboard's Telegram Login Widget) is unaffected —
 > only the permission table and the three notes below it are superseded. The rest of this
 > section is kept below as the historical record of v1's design.
+
+> **Superseded by [ADR-0010](./docs/adr/0010-group-gated-registration-and-roster-management.md),
+> planning only.** The line below — *"No self-registration surface: identity is resolved against
+> a known roster (see §7)"* — and the "Role assignment" paragraph describing a roster config are
+> both superseded: `/start` now verifies group membership and lets the caller declare their own
+> role, and roster management moves in-product, gated on live Telegram group-admin status rather
+> than the roster role. `roster.config.json` no longer exists. The rest of this section is kept
+> below as the historical record of that earlier design.
 
 | Role | Description | Permissions |
 |---|---|---|
@@ -321,6 +331,15 @@ implications this reverses). The bot ignores ordinary group conversation that is
 an active wizard reply — it doesn't reply to every message it now technically receives.
 
 ## 7. Identity & Registration
+
+> **Superseded by [ADR-0010](./docs/adr/0010-group-gated-registration-and-roster-management.md),
+> planning only.** Step 1 below — *"You collect each person's Telegram username upfront ... and
+> put them in the roster config"* — is superseded: there is no upfront collection step anymore.
+> `/start` verifies the caller is a member of the cohort's Telegram group, then lets them declare
+> Intern or Higher-up and writes the roster row itself; a stranger who isn't in the group cannot
+> register. Steps 2 and 3 below no longer describe the mechanism accurately either, since there is
+> no roster config to match against or add a line to — see the ADR for the replacement design.
+> The rest of this section is kept below as the historical record of that earlier design.
 
 Originally designed around passively listening to the group chat to auto-capture identities.
 Reconsidered: since role assignment already requires a maintained config list of known people

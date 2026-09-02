@@ -36,11 +36,14 @@ up the codebase later.
   from a Telegram user id via registration. Used throughout `taskService.ts` as the actor for
   every business rule (permission checks, ownership).
 - **Roster** — the list of who belongs to a cohort and in what role (`Intern` or `HigherUp`).
-  Membership is roster-based, not inferred from who's present in the group chat — a fixed, known
-  cohort made this simpler than passive membership tracking.
+  Membership is roster-based, not inferred from who's present in the group chat. A roster entry is
+  no longer collected upfront via a config file — as of ADR-0010 (planning only), `/start` creates
+  it itself, behind a check that the caller is a member of the cohort's Telegram group.
 - **Registration** — the one-time link between a Telegram user id and a roster username, created
-  by `/start`. A roster entry can exist before someone has registered; an unregistered roster
-  member is told to `/start` first.
+  by `/start`. As of ADR-0010 (planning only), `/start` also creates the roster row itself on
+  first run — registration and roster-entry creation happen together rather than registration
+  matching against a pre-existing row. A roster entry can still exist before someone has
+  registered (e.g. seeded directly); an unregistered roster member is told to `/start` first.
 - **Overdue-crossing** — the moment a task's due date passes while it's still open (not `done` —
   see `isOverdue`, `src/domain/overdue.ts`; ADR-0009 dropped the old Approved/Cancelled wording
   along with those statuses). Notified exactly once via `overdue_notifications` bookkeeping, not
@@ -416,6 +419,17 @@ permanently unusable.
 
 Bare `/addtask` run directly in a group is unaffected: the wizard still runs publicly there and
 still expects its next answer from that same group, per the existing group-chat-support decision.
+
+### Roster registration moves from a config file to group-gated `/start` (ADR-0010)
+
+Role assignment used to mean editing a gitignored roster file and re-seeding Supabase by hand —
+nobody in the cohort could do it. As of ADR-0010 (planning only, tracked as issue #83, tickets
+#85-#91), `/start` checks that the caller is a member of the cohort's Telegram group, then lets
+them self-declare Intern or Higher-up and writes the roster row itself; roster management
+(changing a role, removing a member) stays out of self-declared reach by gating it on live
+Telegram group-admin status instead of the roster role. See the ADR for the full design, including
+why the Bot API can't enumerate group members and why invite links and admin-derived roles were
+rejected.
 
 ## Out of scope (deferred to v2)
 

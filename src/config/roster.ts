@@ -7,11 +7,12 @@ interface RosterConfigFile {
   entries: RosterEntry[];
 }
 
-/** Loads the roster config file (PRD §2/§7). Superseded in production by
- * `loadRosterFromStore` below (ADR-0003) — a gitignored file doesn't exist
- * in a Vercel deployment. Kept for the dashboard (`src/web/index.ts`,
- * unaffected by this phase) and for tests that still want a quick
- * file-backed roster. */
+/** Loads the roster config file (PRD §2/§7, both superseded by ADR-0010).
+ * Superseded in production by `loadRosterFromStore` below (ADR-0003) — a
+ * gitignored file doesn't exist in a Vercel deployment. `roster.config.json`
+ * itself was deleted per ADR-0010; this loader is kept only as a
+ * `createBot` fallback for tests that still want a quick file-backed
+ * roster, given an explicit `path`. */
 export function loadRoster(path = "roster.config.json"): Roster {
   const raw = readFileSync(path, "utf-8");
   const parsed = JSON.parse(raw) as RosterConfigFile;

@@ -108,9 +108,9 @@ export async function buildStandup(
 }
 
 /** "cohort-5" -> "Cohort 5". Roster cohort ids are lowercase hyphenated
- * words/numbers (see roster.config.json) — this just title-cases the
- * words and leaves numbers alone, with no cohort-name lookup table to
- * maintain. */
+ * words/numbers (see ADR-0010 for the roster row shape, since
+ * roster.config.json was deleted) — this just title-cases the words and
+ * leaves numbers alone, with no cohort-name lookup table to maintain. */
 function formatCohortName(cohortId: string): string {
   return cohortId
     .split(/[-_]+/)
