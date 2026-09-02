@@ -10,11 +10,13 @@ import {
  * Data-fetching + query-parsing for the Next.js oversight page (Phase 6.1 /
  * issue #17), factored out of the RSC itself so it's directly unit-testable
  * — mirrors the removed Express dashboard's `GET /` handler's query-parsing and
- * filtering logic, minus the Express req/res plumbing. Authorization is
- * NOT reimplemented here: `TaskService.listAllTasks` already enforces
- * "HigherUp sees the whole cohort, Intern sees only their own tasks"
- * (existing, tested rule in taskService.ts) and this function just calls
- * it, the same as the bot's `/alltasks` and the old Express dashboard do.
+ * filtering logic, minus the Express req/res plumbing. No authorization is
+ * done here or in `TaskService.listAllTasks`, and that's intentional
+ * (ADR-0009 / issue #28): every roster member sees every task in the
+ * cohort, notes and all — this is the same cohort-wide read the bot's
+ * `/tasks` already gives interns, so the web view isn't stricter. The
+ * dashboard's one login gate is roster/cohort membership (R6/#91); nothing
+ * here is role-scoped.
  */
 
 export type GroupMode = "action" | "intern";
