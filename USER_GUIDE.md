@@ -45,7 +45,8 @@ applies, and the title is kept exactly as typed.
 
 Send bare **`/addtask`** with no text to get the old step-by-step form instead (who, title,
 description, due date) — useful if you want to add a description, since the one-line form
-doesn't have room for one.
+doesn't have room for one. The form expires after 20 minutes of inactivity; if you answer after
+it's expired, the bot tells you and asks you to send `/addtask` (or `/edit <ref>`) again.
 
 A due date in the past is accepted, not rejected — backdating a task is legitimate — but the
 reply (from `/addtask`, `/edit <id> duedate <value>`, and the step-by-step form's confirmation

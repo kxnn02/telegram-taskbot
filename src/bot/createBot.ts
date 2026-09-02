@@ -1071,6 +1071,25 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     await handleWizardInput(ctx, resolved.caller, state, text.trim());
   });
 
+  // ---- Non-text answers mid-form (issue #63, finding H8) ----------------
+  // Registered after bot.on("message:text") above so it never shadows it —
+  // grammy runs middleware in registration order, and a text message
+  // already matched by that handler must not reach this one too. A photo,
+  // sticker, etc. sent while a wizard step is waiting on a text answer was
+  // previously swallowed with zero replies; nudge the user instead, but
+  // only when they actually have a live wizard in this chat — with no
+  // wizard, privacy mode off means the bot sees every non-text message in
+  // a group too, and replying to those is exactly the chatter #52 stopped.
+  bot.on("message", async (ctx) => {
+    if (ctx.message.text !== undefined) return;
+    const userId = ctx.from?.id;
+    if (userId === undefined) return;
+    const state = await wizards.get(userId);
+    if (!state) return;
+    if (state.data.chatId !== undefined && state.data.chatId !== ctx.chat.id) return;
+    await ctx.reply("I can only read text for this step. Send your answer as a message, or /cancel.");
+  });
+
   async function handleWizardInput(
     ctx: import("grammy").Context,
     caller: Caller,

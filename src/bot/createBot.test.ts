@@ -151,6 +151,21 @@ function groupMessageUpdate(userId: number, username: string, chatId: number, te
   } as Update;
 }
 
+function photoMessageUpdate(userId: number, chatId: number, chatType: "private" | "group" = "private"): Update {
+  return {
+    update_id: updateIdSeq++,
+    message: {
+      message_id: messageIdSeq++,
+      date: Math.floor(Date.now() / 1000),
+      chat: chatType === "private" ? { id: chatId, type: "private" } : { id: chatId, type: "group", title: "Dump Group" },
+      from: { id: userId, is_bot: false, first_name: "Test" },
+      photo: [
+        { file_id: "abc", file_unique_id: "abc-u", width: 100, height: 100 },
+      ],
+    },
+  } as Update;
+}
+
 function callbackUpdate(userId: number, chatId: number, data: string): Update {
   return {
     update_id: updateIdSeq++,
@@ -2865,5 +2880,70 @@ describe("Stage 4 (N4): an expired form's next answer gets an expiry notice, not
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "Brand new title"));
 
     expect(lastReplyText(testBot.calls)).toContain("That form expired");
+  });
+});
+
+describe("Stage 4 (N4): non-text answers mid-form get a nudge instead of being ignored (issue #63, finding H8)", () => {
+  const GROUP_CHAT_ID = -300;
+
+  it("a photo mid-wizard in a DM gets the 'I can only read text' nudge", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    await testBot.bot.handleUpdate(photoMessageUpdate(higherUpId, higherUpId));
+
+    expect(lastReplyText(testBot.calls)).toContain("I can only read text");
+  });
+
+  it("with no wizard, a photo in a DM gets zero replies", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+    await registerCaller(testBot, userId, "alice");
+
+    await testBot.bot.handleUpdate(photoMessageUpdate(userId, userId));
+
+    expect(testBot.calls.filter((c) => c.method === "sendMessage")).toHaveLength(0);
+  });
+
+  it("with no wizard, a photo in a group gets zero replies", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+    await registerCaller(testBot, userId, "alice");
+
+    await testBot.bot.handleUpdate(photoMessageUpdate(userId, GROUP_CHAT_ID, "group"));
+
+    expect(testBot.calls.filter((c) => c.method === "sendMessage")).toHaveLength(0);
+  });
+
+  it("a wizard started in a DM ignores a photo sent in a group by the same user (chatId gate from #53 holds)", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    const callsBefore = testBot.calls.length;
+
+    await testBot.bot.handleUpdate(photoMessageUpdate(higherUpId, GROUP_CHAT_ID, "group"));
+
+    expect(testBot.calls.length).toBe(callsBefore);
+  });
+
+  it("after the nudge, sending valid text still advances the form", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    await testBot.bot.handleUpdate(photoMessageUpdate(higherUpId, higherUpId));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "alice"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/title/i);
   });
 });
