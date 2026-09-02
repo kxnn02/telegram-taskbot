@@ -269,6 +269,7 @@ const HELP_SECTIONS: { heading: string; lines: string[] }[] = [
       "/start — register yourself against the roster",
       "/help — this list",
       "/cancel — abort an in-progress wizard",
+      "/whoami — show who the bot thinks you are",
     ],
   },
 ];

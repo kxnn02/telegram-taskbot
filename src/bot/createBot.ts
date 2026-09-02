@@ -119,6 +119,7 @@ export const BOT_COMMANDS = [
   { command: "note", description: "Attach a feedback note to a task" },
   { command: "edit", description: "Edit a task's assignee, title, description, or due date (higher-ups only)" },
   { command: "dashboard", description: "Get the dashboard link" },
+  { command: "whoami", description: "Show who the bot thinks you are" },
 ] as const;
 
 /** Every command name this bot actually handles via `bot.command(...)`
@@ -291,6 +292,19 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       await handler(ctx, caller);
     };
   }
+
+  // ---- /whoami ------------------------------------------------------------
+  // Grouped with /help and /cancel in the "Other" section (issue #66,
+  // finding H16). Reuses /start's exact role wording (createBot.ts:183 —
+  // "a higher-up" / "an intern") so the two messages agree.
+
+  bot.command(
+    "whoami",
+    withCaller(async (ctx, caller) => {
+      const roleWord = caller.role === "HigherUp" ? "a higher-up" : "an intern";
+      await ctx.reply(`You're @${caller.username}, ${roleWord} in ${caller.cohortId}.`);
+    }),
+  );
 
   /** Sends `text` as one or more Telegram-sized messages (issue #55/F8):
    * several unbounded list commands could otherwise throw
