@@ -261,12 +261,6 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     await ctx.reply(had ? "Cancelled." : "Nothing to cancel.");
   });
 
-  // ---- /dashboard ---------------------------------------------------------
-
-  bot.command("dashboard", async (ctx) => {
-    await ctx.reply(`Dashboard: ${options.dashboardUrl}`);
-  });
-
   // ---- Not-registered guard for everything else below --------------------
 
   async function resolveCallerOrReply(
@@ -306,6 +300,23 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       await ctx.reply(chunk);
     }
   }
+
+  // ---- /dashboard ---------------------------------------------------------
+  // Gated by withCaller like every other data-bearing command (issue #65,
+  // finding H15) — the dashboard link itself was previously handed to
+  // anyone, registered or not. The dashboard is independently auth-gated
+  // (Telegram login + roster check), so this only stops URL disclosure to
+  // strangers, but there's no reason for this one command to skip the same
+  // check every other one applies. Registration only, not a role check —
+  // an intern who can't log into the dashboard's HigherUp-only view still
+  // gets the link, same as before.
+
+  bot.command(
+    "dashboard",
+    withCaller(async (ctx) => {
+      await ctx.reply(`Dashboard: ${options.dashboardUrl}`);
+    }),
+  );
 
   // ---- Read-only commands ---------------------------------------------
 
@@ -1003,12 +1014,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     if (text.startsWith("/")) {
       // Reaching here means no bot.command() handler above matched it —
       // i.e. an unrecognized command (PRD §6).
-      const commandToken = text.slice(1).split(/\s/, 1)[0] ?? "";
-      const atIndex = commandToken.indexOf("@");
-      const addressedToOtherBot =
-        atIndex !== -1 &&
-        commandToken.slice(atIndex + 1).toLowerCase() !== bot.botInfo.username.toLowerCase();
-      if (ctx.chat.type === "private" && !addressedToOtherBot) {
+      if (ctx.chat.type === "private" && !isAddressedToOtherBot(text, bot.botInfo.username)) {
         await ctx.reply("Not sure what you mean — try /help");
       }
       return;
@@ -1090,6 +1096,37 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     if (!state) return;
     if (state.data.chatId !== undefined && state.data.chatId !== ctx.chat.id) return;
     await ctx.reply("I can only read text for this step. Send your answer as a message, or /cancel.");
+  });
+
+  // ---- Edited commands are acknowledged, never executed (issue #65,
+  // finding H14; decision D11 in #59) ------------------------------------
+  // Registered after every other bot.on handler above so it can never
+  // shadow message:text or the non-text nudge above — an edited message is
+  // its own update type and grammy would never route it there anyway, but
+  // keeping the ordering consistent with the rest of the file makes that
+  // explicit rather than accidental.
+  //
+  // An edit arrives as a new update with a fresh update_id, so the
+  // processed_telegram_updates dedup (ADR-0004) does not suppress it.
+  // Running the command again on edit would double-execute it — e.g.
+  // editing "/complete 1" into "/complete 2" would run both the original
+  // send and the edit. That hazard is why this was escalated to the
+  // maintainer rather than assumed, and why the decision is: acknowledge
+  // the edit, never run it. A read-only allowlist was rejected too, since
+  // it would need hand-maintaining every time a command is added — reusing
+  // HANDLED_COMMANDS (gate 3 below) means this stays in sync automatically.
+  //
+  // Accepted consequence: editing the same message three times produces
+  // three nudges, one per update, exactly like every other handler in this
+  // file. De-duplicating it would need per-message state that doesn't
+  // exist, and isn't worth adding for this.
+  bot.on("edited_message:text", async (ctx) => {
+    const text = ctx.editedMessage.text;
+    if (!text.startsWith("/")) return;
+    if (isAddressedToOtherBot(text, bot.botInfo.username)) return;
+    const commandName = parseCommandName(text);
+    if (!HANDLED_COMMANDS.has(commandName)) return;
+    await ctx.reply("I don't pick up edits — send that as a new message.");
   });
 
   async function handleWizardInput(
@@ -1300,6 +1337,21 @@ function parseCommandName(text: string): string {
   const atIndex = token.indexOf("@");
   const withoutBotname = atIndex === -1 ? token : token.slice(0, atIndex);
   return withoutBotname.toLowerCase();
+}
+
+/** True when a leading `/command@othername` is explicitly addressed to a
+ * different bot (issue #52) — checked so this bot doesn't reply to chatter
+ * meant for someone else in a group chat. Extracted to module scope (issue
+ * #65, finding H14) so the `message:text` handler and the `edited_message`
+ * handler share exactly one implementation of this rule instead of each
+ * having their own copy. */
+function isAddressedToOtherBot(text: string, botUsername: string): boolean {
+  const commandToken = text.slice(1).split(/\s/, 1)[0] ?? "";
+  const atIndex = commandToken.indexOf("@");
+  return (
+    atIndex !== -1 &&
+    commandToken.slice(atIndex + 1).toLowerCase() !== botUsername.toLowerCase()
+  );
 }
 
 type CommandMatch = string | RegExpMatchArray | undefined;

@@ -93,6 +93,20 @@ describe("formatMyTasks pagination", () => {
   });
 });
 
+describe("formatAllTasksGrouped empty result (issue #65, finding H9)", () => {
+  it("reports plain emptiness when no filter was applied", () => {
+    expect(formatAllTasksGrouped([], 1)).toBe("No tasks in this cohort yet.");
+  });
+
+  it("reports the filter when a member filter matched nothing", () => {
+    expect(formatAllTasksGrouped([], 1, "@bob")).toBe("No tasks match @bob.");
+  });
+
+  it("reports the filter when a role filter matched nothing", () => {
+    expect(formatAllTasksGrouped([], 1, "intern")).toBe("No tasks match intern.");
+  });
+});
+
 describe("formatAllTasksGrouped pagination", () => {
   it("shows no pagination footer for a small result set", () => {
     const text = formatAllTasksGrouped(tasks(5));
