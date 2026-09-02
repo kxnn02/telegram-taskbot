@@ -119,6 +119,27 @@ export const BOT_COMMANDS = [
   { command: "dashboard", description: "Get the dashboard link" },
 ] as const;
 
+/** Every command name this bot actually handles via `bot.command(...)`
+ * below — `BOT_COMMANDS` (the Telegram-menu list) plus the removed-command
+ * redirect handlers, which are real handlers even though they're excluded
+ * from the menu on purpose (see the comment on `BOT_COMMANDS`). Used by the
+ * mid-wizard interruption middleware (issue #63, finding H6) to decide
+ * whether an incoming `/word` is a command that's actually going to run —
+ * a typo'd command must not auto-cancel an in-progress form. Keep this set
+ * in step with the `bot.command(...)` registrations below it. */
+export const HANDLED_COMMANDS: ReadonlySet<string> = new Set([
+  ...BOT_COMMANDS.map((c) => c.command),
+  "submit",
+  "approve",
+  "revise",
+  "canceltask",
+  "unblocked",
+  "alltasks",
+  "backlog",
+  "blocked",
+  "complete",
+]);
+
 /** Registers `BOT_COMMANDS` with Telegram so the client's command-
  * autocomplete menu is populated (issue #27/#35 — this had never been
  * called anywhere in the repo before this stage). Idempotent: safe to call
@@ -177,21 +198,19 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   bot.use(async (ctx, next) => {
     const text = ctx.message?.text;
     const userId = ctx.from?.id;
-    if (
-      text &&
-      text.startsWith("/") &&
-      userId !== undefined &&
-      !text.toLowerCase().startsWith("/cancel")
-    ) {
-      const state = await wizards.get(userId);
-      if (
-        state &&
-        (state.data.chatId === undefined || state.data.chatId === ctx.chat?.id)
-      ) {
-        await wizards.cancel(userId);
-        await ctx.reply(
-          "Cancelled your in-progress form since you sent a new command.",
-        );
+    if (text && text.startsWith("/") && userId !== undefined) {
+      const commandName = parseCommandName(text);
+      if (commandName !== "cancel" && HANDLED_COMMANDS.has(commandName)) {
+        const state = await wizards.get(userId);
+        if (
+          state &&
+          (state.data.chatId === undefined || state.data.chatId === ctx.chat?.id)
+        ) {
+          await wizards.cancel(userId);
+          await ctx.reply(
+            "Cancelled your in-progress form since you sent a new command.",
+          );
+        }
       }
     }
     await next();
@@ -1235,6 +1254,17 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   }
 
   return { bot, service, roster, registrations, wizards };
+}
+
+/** Parses the leading `/word` of a message into a lowercase command name
+ * with the `/` and any `@botname` suffix stripped (issue #63, finding H6) —
+ * e.g. `/Help@test_bot foo` -> `help`. Used to check the token against
+ * `HANDLED_COMMANDS` before treating it as a real command. */
+function parseCommandName(text: string): string {
+  const token = text.slice(1).split(/\s/, 1)[0] ?? "";
+  const atIndex = token.indexOf("@");
+  const withoutBotname = atIndex === -1 ? token : token.slice(0, atIndex);
+  return withoutBotname.toLowerCase();
 }
 
 type CommandMatch = string | RegExpMatchArray | undefined;

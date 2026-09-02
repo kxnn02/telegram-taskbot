@@ -2731,3 +2731,79 @@ describe("Stage 1: outermost error-guard middleware (issue #49/#50, finding F1)"
     ).resolves.toBeUndefined();
   });
 });
+
+describe("Stage 4 (N4): a typo'd command must not destroy an in-progress form (issue #63, finding H6)", () => {
+  it("a typo'd command does not cancel the wizard, and the form is still usable", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/tsak 3"));
+
+    const replies = testBot.calls
+      .filter((c) => c.method === "sendMessage")
+      .map((c) => c.payload.text as string);
+    expect(replies.some((t) => /cancelled your in-progress form/i.test(t))).toBe(false);
+    expect(await testBot.wizards.has(higherUpId)).toBe(true);
+  });
+
+  it("after a typo'd command, a valid assignee still advances the form to Title?", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/tsak 3"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "alice"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/title/i);
+  });
+
+  it("a recognized command (/help) still cancels the wizard (regression guard)", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/help"));
+
+    const replies = testBot.calls
+      .filter((c) => c.method === "sendMessage")
+      .map((c) => c.payload.text as string);
+    expect(replies.some((t) => /cancelled your in-progress form/i.test(t))).toBe(true);
+  });
+
+  it("a recognized command with an @botname suffix still cancels the wizard", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/help@test_bot"));
+
+    const replies = testBot.calls
+      .filter((c) => c.method === "sendMessage")
+      .map((c) => c.payload.text as string);
+    expect(replies.some((t) => /cancelled your in-progress form/i.test(t))).toBe(true);
+  });
+
+  it("a removed-command redirect handler (/submit) still cancels the wizard", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/submit 3"));
+
+    const replies = testBot.calls
+      .filter((c) => c.method === "sendMessage")
+      .map((c) => c.payload.text as string);
+    expect(replies.some((t) => /cancelled your in-progress form/i.test(t))).toBe(true);
+  });
+});
