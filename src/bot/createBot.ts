@@ -1012,6 +1012,20 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       return;
     }
     const userId = ctx.from.id;
+    // Checked before wizards.get() below, which would otherwise silently
+    // consume the same expiry (it deletes an expired row internally): an
+    // expired wizard's next answer must not fall through to the generic
+    // "not sure what you mean" handling (issue #63, finding H7) — the user
+    // answered exactly what the bot asked, they just took more than 20
+    // minutes to do it. `takeExpired` reports `true` exactly once per
+    // expiry, and this reply is safe in a group chat (not gated on
+    // ctx.chat.type) since only someone who had a live form there gets it.
+    if (await wizards.takeExpired(userId)) {
+      await ctx.reply(
+        "That form expired after 20 minutes of inactivity, so I've dropped it. Send /addtask (or /edit <ref>) to start again.",
+      );
+      return;
+    }
     const rawState = await wizards.get(userId);
     // Chat-scoped wizards (issue #52/#53, finding F3): a wizard started in
     // one chat must not consume unrelated messages the same user sends in

@@ -2807,3 +2807,63 @@ describe("Stage 4 (N4): a typo'd command must not destroy an in-progress form (i
     expect(replies.some((t) => /cancelled your in-progress form/i.test(t))).toBe(true);
   });
 });
+
+describe("Stage 4 (N4): an expired form's next answer gets an expiry notice, not the generic error (issue #63, finding H7)", () => {
+  it("answering an expired /addtask wizard gets the expiry notice", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    vi.setSystemTime(new Date(Date.now() + 20 * 60 * 1000 + 1000));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "bob"));
+
+    expect(lastReplyText(testBot.calls)).toContain("That form expired");
+  });
+
+  it("the expiry notice fires only once — a second message falls through to normal handling", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    vi.setSystemTime(new Date(Date.now() + 20 * 60 * 1000 + 1000));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "bob"));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "hello again"));
+
+    expect(lastReplyText(testBot.calls)).not.toContain("That form expired");
+    expect(lastReplyText(testBot.calls)).toContain("Not sure what you mean");
+  });
+
+  it("a user with no wizard at all still gets the unchanged unknown-text reply in a DM", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+    await registerCaller(testBot, userId, "alice");
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, userId, "just chatting"));
+
+    expect(lastReplyText(testBot.calls)).toBe("Not sure what you mean — try /help");
+  });
+
+  it("an expired /edit wizard produces the same expiry notice", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const result = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Some task", dueDate: "2026-09-05" },
+    );
+    if (!result.ok) throw new Error("setup failed: " + result.error);
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/edit ${result.value.id}`));
+    await testBot.bot.handleUpdate(callbackUpdate(higherUpId, higherUpId, "editfield:title"));
+    vi.setSystemTime(new Date(Date.now() + 20 * 60 * 1000 + 1000));
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "Brand new title"));
+
+    expect(lastReplyText(testBot.calls)).toContain("That form expired");
+  });
+});

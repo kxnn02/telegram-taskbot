@@ -50,17 +50,25 @@ export class WizardManager {
   constructor(private readonly store: WizardStateStorePort) {}
 
   async get(userId: number): Promise<WizardState | undefined> {
-    const state = await this.store.get(userId);
-    if (!state) return undefined;
-    if (this.isExpired(state)) {
-      await this.store.delete(userId);
-      return undefined;
-    }
-    return state;
+    if (await this.takeExpired(userId)) return undefined;
+    return this.store.get(userId);
   }
 
   isExpired(state: WizardState): boolean {
     return Date.now() - state.lastActivity > WIZARD_EXPIRY_MS;
+  }
+
+  /** Reports whether `userId` had a wizard that has just expired, deleting
+   * it as a side effect (issue #63, finding H7). Returns `true` exactly
+   * once per expiry — a user with no wizard at all, or a still-live one,
+   * gets `false`. `get` delegates to this so the two never disagree about
+   * what "expired" means. Reads the store directly (not through `get`) so
+   * it can observe the row before it's deleted. */
+  async takeExpired(userId: number): Promise<boolean> {
+    const state = await this.store.get(userId);
+    if (!state || !this.isExpired(state)) return false;
+    await this.store.delete(userId);
+    return true;
   }
 
   async start(userId: number, kind: WizardKind, initial: WizardData = {}): Promise<WizardState> {

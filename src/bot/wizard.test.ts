@@ -101,3 +101,42 @@ describe("WizardManager expiry", () => {
     }
   });
 });
+
+describe("WizardManager.takeExpired (issue #63, finding H7)", () => {
+  it("returns false when the user never had a wizard", async () => {
+    const wizards = makeManager();
+    expect(await wizards.takeExpired(1)).toBe(false);
+  });
+
+  it("returns false while a wizard is live (not expired)", async () => {
+    const wizards = makeManager();
+    await wizards.start(1, "assign");
+    expect(await wizards.takeExpired(1)).toBe(false);
+  });
+
+  it("returns true exactly once when a wizard has expired, and deletes it", async () => {
+    vi.useFakeTimers();
+    try {
+      const wizards = makeManager();
+      await wizards.start(1, "assign");
+      vi.advanceTimersByTime(WIZARD_EXPIRY_MS + 1);
+      expect(await wizards.takeExpired(1)).toBe(true);
+      expect(await wizards.takeExpired(1)).toBe(false);
+      expect(await wizards.has(1)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("get still returns undefined for an expired wizard (unchanged behaviour)", async () => {
+    vi.useFakeTimers();
+    try {
+      const wizards = makeManager();
+      await wizards.start(1, "assign");
+      vi.advanceTimersByTime(WIZARD_EXPIRY_MS + 1);
+      expect(await wizards.get(1)).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
