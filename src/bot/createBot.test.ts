@@ -151,6 +151,54 @@ function groupMessageUpdate(userId: number, username: string, chatId: number, te
   } as Update;
 }
 
+function editedMessageUpdate(userId: number, chatId: number, text: string): Update {
+  const entities = text.startsWith("/")
+    ? [
+        {
+          type: "bot_command",
+          offset: 0,
+          length: (text.match(/^\/\S+/)?.[0] ?? text).length,
+        },
+      ]
+    : undefined;
+  return {
+    update_id: updateIdSeq++,
+    edited_message: {
+      message_id: messageIdSeq++,
+      date: Math.floor(Date.now() / 1000),
+      edit_date: Math.floor(Date.now() / 1000),
+      chat: { id: chatId, type: "private" },
+      from: { id: userId, is_bot: false, first_name: "Test" },
+      text,
+      ...(entities ? { entities } : {}),
+    },
+  } as Update;
+}
+
+function editedGroupMessageUpdate(userId: number, username: string, chatId: number, text: string): Update {
+  const entities = text.startsWith("/")
+    ? [
+        {
+          type: "bot_command",
+          offset: 0,
+          length: (text.match(/^\/\S+/)?.[0] ?? text).length,
+        },
+      ]
+    : undefined;
+  return {
+    update_id: updateIdSeq++,
+    edited_message: {
+      message_id: messageIdSeq++,
+      date: Math.floor(Date.now() / 1000),
+      edit_date: Math.floor(Date.now() / 1000),
+      chat: { id: chatId, type: "group", title: "Dump Group" },
+      from: { id: userId, is_bot: false, first_name: "Test", username },
+      text,
+      ...(entities ? { entities } : {}),
+    },
+  } as Update;
+}
+
 function photoMessageUpdate(userId: number, chatId: number, chatType: "private" | "group" = "private"): Update {
   return {
     update_id: updateIdSeq++,
@@ -3049,6 +3097,107 @@ describe("Stage 4 (N4): non-text answers mid-form get a nudge instead of being i
     await testBot.bot.handleUpdate(photoMessageUpdate(higherUpId, higherUpId));
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "alice"));
 
+    expect(lastReplyText(testBot.calls)).toMatch(/title/i);
+  });
+});
+
+describe("Edited commands are acknowledged, never executed (issue #65, finding H14; D11 in #59)", () => {
+  let roster: Roster;
+  let testBot: ReturnType<typeof makeTestBot>;
+  const EDIT_ACK = "I don't pick up edits — send that as a new message.";
+
+  beforeEach(() => {
+    roster = makeRoster();
+    testBot = makeTestBot(roster);
+  });
+
+  it("an edited /mytasks in a DM replies with the edit-ack text", async () => {
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    await testBot.bot.handleUpdate(editedMessageUpdate(aliceId, aliceId, "/mytasks"));
+
+    expect(lastReplyText(testBot.calls)).toBe(EDIT_ACK);
+  });
+
+  it("an edited /mytasks does not execute: no task-list text, exactly one sendMessage", async () => {
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    await testBot.bot.handleUpdate(editedMessageUpdate(aliceId, aliceId, "/mytasks"));
+
+    const sends = testBot.calls.filter((c) => c.method === "sendMessage");
+    expect(sends).toHaveLength(1);
+    expect(sends[0]?.payload.text).toBe(EDIT_ACK);
+    expect(sends[0]?.payload.text).not.toMatch(/Your open tasks|no tasks right now/i);
+  });
+
+  it("an edited /complete <ref> does not change the task's status — the hazard the decision turns on", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const task = await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Ship it", description: "d", dueDate: "2026-09-05" },
+    );
+    if (!task.ok) throw new Error("setup failed");
+
+    await testBot.bot.handleUpdate(editedMessageUpdate(higherUpId, higherUpId, `/complete ${task.value.id}`));
+
+    const result = await testBot.service.getTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      task.value.id,
+    );
+    expect(result.ok && result.value.status).not.toBe("done");
+    expect(lastReplyText(testBot.calls)).toBe(EDIT_ACK);
+  });
+
+  it("an edited /mytasks in a group also replies (gate 3 already removes the chatter risk)", async () => {
+    const GROUP_CHAT_ID = -300;
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    await testBot.bot.handleUpdate(editedGroupMessageUpdate(aliceId, "alice", GROUP_CHAT_ID, "/mytasks"));
+
+    expect(lastReplyText(testBot.calls)).toBe(EDIT_ACK);
+  });
+
+  it("an edited /poll@other_bot produces zero replies (addressed-to-another-bot rule)", async () => {
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    await testBot.bot.handleUpdate(editedMessageUpdate(aliceId, aliceId, "/poll@other_bot lunch?"));
+
+    expect(testBot.calls.filter((c) => c.method === "sendMessage")).toHaveLength(0);
+  });
+
+  it("an edited /tsak (unhandled command) produces zero replies", async () => {
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    await testBot.bot.handleUpdate(editedMessageUpdate(aliceId, aliceId, "/tsak 3"));
+
+    expect(testBot.calls.filter((c) => c.method === "sendMessage")).toHaveLength(0);
+  });
+
+  it("an edited plain-text message with no leading slash produces zero replies", async () => {
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    await testBot.bot.handleUpdate(editedMessageUpdate(aliceId, aliceId, "oops typo fix"));
+
+    expect(testBot.calls.filter((c) => c.method === "sendMessage")).toHaveLength(0);
+  });
+
+  it("editing a message while a wizard is live does not cancel the wizard or feed the form (regression guard on N4)", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/addtask"));
+    const callsBeforeEdit = testBot.calls.length;
+
+    await testBot.bot.handleUpdate(editedMessageUpdate(higherUpId, higherUpId, "alice"));
+    // A plain-text edit with no leading "/" is not a command at all, so it
+    // must produce zero replies — not even the edit-ack — and, crucially,
+    // must not have been fed into the live wizard as its next answer.
+    expect(testBot.calls.length).toBe(callsBeforeEdit);
+
+    // The wizard is still exactly where /addtask left it: feeding it the
+    // real answer via an ordinary (non-edited) message still advances it.
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "alice"));
     expect(lastReplyText(testBot.calls)).toMatch(/title/i);
   });
 });
