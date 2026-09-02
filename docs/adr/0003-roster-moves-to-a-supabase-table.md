@@ -1,6 +1,6 @@
 # ADR-0003: The roster moves from a JSON file to a Supabase table
 
-- **Status**: Accepted (planning only — not yet implemented)
+- **Status**: Accepted, implemented
 - **Date**: 2026-08-31
 - **Depends on**: [ADR-0001](./0001-replatform-to-vercel-supabase.md)
 - **Amended by**: [ADR-0010](./0010-group-gated-registration-and-roster-management.md) — the

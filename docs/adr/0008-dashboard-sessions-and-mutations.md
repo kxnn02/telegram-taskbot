@@ -1,7 +1,7 @@
 # ADR-0008: Dashboard sessions and mutation style
 
-- **Status**: Accepted, implemented (sessions half only — issue #16 / Phase 5; the mutation-style
-  decision is recorded for the future Next.js rewrite, Phase 6 / issue #17, not yet built)
+- **Status**: Accepted, implemented (sessions — issue #16 / Phase 5; mutation style — Phase 6 /
+  issue #17, closed, live in production)
 - **Date**: 2026-08-31
 - **Depends on**: ADR-0001
 

@@ -1,6 +1,6 @@
 # ADR-0001: Re-platform to Vercel + Supabase
 
-- **Status**: Accepted (planning only — not yet implemented)
+- **Status**: Accepted, implemented — live in production since 2026-09-02 (issue #17)
 - **Date**: 2026-08-31
 - **Supersedes**: the "node:sqlite instead of better-sqlite3", "Scheduling: node-cron in-process",
   and the deploy-related half of "Dashboard: Telegram Login Widget" decisions in `CONTEXT.md`

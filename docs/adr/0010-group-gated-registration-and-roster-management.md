@@ -1,6 +1,7 @@
 # ADR-0010: Group-gated registration and in-product roster management
 
-- **Status**: Accepted (planning only — not yet implemented)
+- **Status**: Accepted, implemented (spec #83, merged via PR #93, live in production since
+  2026-09-02)
 - **Date**: 2026-09-02
 - **Supersedes**: `PRD.md` §2's *"No self-registration surface: identity is resolved against a
   known roster (see §7)"* and §7's step 1, *"You collect each person's Telegram username upfront

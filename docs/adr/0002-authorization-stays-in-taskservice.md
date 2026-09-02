@@ -1,6 +1,6 @@
 # ADR-0002: Authorization stays in TaskService; RLS is a deny-by-default backstop
 
-- **Status**: Accepted (planning only — not yet implemented)
+- **Status**: Accepted, implemented
 - **Date**: 2026-08-31
 - **Depends on**: [ADR-0001](./0001-replatform-to-vercel-supabase.md)
 
