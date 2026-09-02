@@ -11,6 +11,7 @@ import { loadRosterFromStore } from "../config/roster.js";
 import { TaskService } from "../service/taskService.js";
 import { SystemClock } from "../domain/clock.js";
 import type { NotificationJobDeps } from "./notificationJobs.js";
+import type { RosterReconciliationDeps } from "./rosterReconciliation.js";
 import type { NotifierBot } from "../notifications/scheduler.js";
 
 /**
@@ -100,6 +101,33 @@ export async function buildNotificationJobDeps(): Promise<NotificationJobDeps> {
     service,
     roster,
     overdueNotifications: new SupabaseOverdueNotificationStore(supabase),
+    cohorts: new SupabaseCohortStore(supabase),
+    throttle: new SupabaseAlertThrottleStore(supabase),
+  };
+}
+
+/**
+ * Dependencies for the roster-reconciliation job (R5/#90). No `TaskService`
+ * needed here (unlike `buildNotificationJobDeps`) — this job never touches
+ * task data, only roster/registration/group-membership state — so this is
+ * a separate, smaller builder rather than reusing `NotificationJobDeps`.
+ * `api` is grammy's `bot.api`, which already satisfies `MembershipApi`
+ * (`getChatMember(chatId, userId)`) without any adapting.
+ */
+export async function buildRosterReconciliationDeps(): Promise<RosterReconciliationDeps> {
+  const token = process.env.BOT_TOKEN;
+  if (!token) throw new Error("BOT_TOKEN is not set.");
+
+  const supabase = createSupabaseClient();
+  const roster = await loadRosterFromStore(new SupabaseRosterStore(supabase));
+  const bot = new Bot(token);
+  await bot.init();
+
+  return {
+    bot,
+    api: bot.api,
+    registrations: new SupabaseRegistrationStore(supabase),
+    roster,
     cohorts: new SupabaseCohortStore(supabase),
     throttle: new SupabaseAlertThrottleStore(supabase),
   };
