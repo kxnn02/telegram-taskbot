@@ -76,7 +76,7 @@ const PAST_DUE_WARNING = "⚠️ That due date is already in the past.";
  * suggests the obvious next command rather than describing a permission. */
 const NEXT_STEP_HINT: Record<TaskStatus, string> = {
   backlog: "Send `/update <id> todo` to move it to To do status.",
-  todo: "Send `/done <id>` once you start it.",
+  todo: "Send `/update <id> in progress` once you start it.",
   in_progress: "Send `/done <id>` when you're done.",
   in_review: "It's now awaiting review. Send `/complete <id>` to mark it Done.",
   blocked: "Send `/unblock <id>` once it's unblocked.",

@@ -1538,7 +1538,7 @@ describe("Blocked notifications have no inline buttons — the review gate they 
 });
 
 describe("/task <id> appends a per-status next-step hint (issue #27/#29/#31)", () => {
-  it("hints at /done for a todo task", async () => {
+  it("hints at /update <id> in progress for a todo task, not /done (H4)", async () => {
     const roster = makeRoster();
     const testBot = makeTestBot(roster);
     const higherUpId = nextUserId();
@@ -1552,7 +1552,8 @@ describe("/task <id> appends a per-status next-step hint (issue #27/#29/#31)", (
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/task ${task.value.id}`));
     const text = lastReplyText(testBot.calls);
     expect(text).toContain("Status: To do");
-    expect(text).toMatch(/\/done/);
+    expect(text).toContain("/update <id> in progress");
+    expect(text).not.toContain("/done");
   });
 
   it("also accepts a t-prefixed ref (/task t<id>), issue #31's shared ref parser", async () => {
