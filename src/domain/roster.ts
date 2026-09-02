@@ -10,14 +10,32 @@ import type { RosterEntry, Role } from "./types.js";
  * leading "@", since Telegram usernames are case-insensitive.
  */
 export class Roster {
-  private readonly entries: RosterEntry[];
-  private readonly byCohortAndUsername = new Map<string, RosterEntry>();
+  private entries: RosterEntry[];
+  private byCohortAndUsername = new Map<string, RosterEntry>();
 
   constructor(entries: RosterEntry[]) {
     this.entries = entries;
     for (const entry of entries) {
       this.byCohortAndUsername.set(this.key(entry.cohortId, entry.username), entry);
     }
+  }
+
+  /**
+   * Replaces the roster's contents in place (R1/issue #86): a per-request
+   * refresh so a role edited in Supabase takes effect on the next request
+   * instead of whenever this Lambda instance next goes cold.
+   *
+   * The replacement `Map` is built fully before either field is swapped in,
+   * so a concurrent reader (Fluid Compute reuses one instance across
+   * concurrent requests) never observes a half-populated map.
+   */
+  replaceAll(entries: RosterEntry[]): void {
+    const byCohortAndUsername = new Map<string, RosterEntry>();
+    for (const entry of entries) {
+      byCohortAndUsername.set(this.key(entry.cohortId, entry.username), entry);
+    }
+    this.entries = entries;
+    this.byCohortAndUsername = byCohortAndUsername;
   }
 
   private key(cohortId: string, username: string): string {

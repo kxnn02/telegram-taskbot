@@ -28,6 +28,7 @@ export interface DashboardDeps {
   sessionSecret: string;
   roster: Roster;
   service: TaskService;
+  rosterStore: SupabaseRosterStore;
 }
 
 function requireEnv(name: string): string {
@@ -45,20 +46,28 @@ async function buildDashboardDeps(): Promise<DashboardDeps> {
   const sessionSecret = requireEnv("SESSION_SECRET");
 
   const supabase = createSupabaseClient();
-  const roster = await loadRosterFromStore(new SupabaseRosterStore(supabase));
+  const rosterStore = new SupabaseRosterStore(supabase);
+  const roster = await loadRosterFromStore(rosterStore);
   const service = new TaskService(new SupabaseTaskStore(supabase), roster, new SystemClock());
 
-  return { botToken, botUsername, activeCohortId, sessionSecret, roster, service };
+  return { botToken, botUsername, activeCohortId, sessionSecret, roster, service, rosterStore };
 }
 
 let depsPromise: Promise<DashboardDeps> | undefined;
 
-export function getDashboardDeps(): Promise<DashboardDeps> {
+/** Refreshes the roster's contents on every call (R1/issue #86), so a role
+ * edited in Supabase takes effect on the very next request rather than
+ * whenever this Lambda/dev-server instance next goes cold. The rest of the
+ * dependency bag (bot token, `TaskService`, etc.) stays memoized via
+ * `depsPromise` — only the roster's contents are re-read per call. */
+export async function getDashboardDeps(): Promise<DashboardDeps> {
   if (!depsPromise) {
     depsPromise = buildDashboardDeps().catch((err) => {
       depsPromise = undefined;
       throw err;
     });
   }
-  return depsPromise;
+  const deps = await depsPromise;
+  deps.roster.replaceAll(await deps.rosterStore.listAll());
+  return deps;
 }

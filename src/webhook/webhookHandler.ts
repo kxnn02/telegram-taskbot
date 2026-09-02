@@ -34,6 +34,10 @@ export interface WebhookHandlerDeps {
    * is the one that should process it, `false` if it's a duplicate
    * delivery. */
   claimUpdate(updateId: number): Promise<boolean>;
+  /** Refreshes the roster in place before the update is dispatched, so a
+   *  role change in Supabase is visible on the very next update rather than
+   *  whenever this Lambda instance next goes cold. */
+  refreshRoster?: () => Promise<void>;
 }
 
 const SECRET_HEADER = "x-telegram-bot-api-secret-token";
@@ -69,6 +73,7 @@ export async function handleTelegramWebhook(
     return { status: 200 };
   }
 
+  await deps.refreshRoster?.();
   await deps.bot.handleUpdate(update);
   return { status: 200 };
 }
