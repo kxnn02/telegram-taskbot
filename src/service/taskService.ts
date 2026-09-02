@@ -67,8 +67,10 @@ const MS_PER_WEEK = 7 * 24 * MS_PER_HOUR;
 const DEADLINE_WINDOW_DAYS = 7;
 
 /** Every status except `done` — drives `/mytasks` (issue #28's redefinition
- * of the old OPEN_STATUSES, which enumerated the gate-era open statuses). */
-const OPEN_STATUSES: TaskStatus[] = [
+ * of the old OPEN_STATUSES, which enumerated the gate-era open statuses).
+ * Exported so `rosterService.ts`'s removal rule (R4/#89) can use the same
+ * definition of "open" rather than duplicating it. */
+export const OPEN_STATUSES: TaskStatus[] = [
   "backlog",
   "todo",
   "in_progress",

@@ -3,12 +3,13 @@ import { loadRoster } from "../config/roster.js";
 import { normalizeUsername } from "../domain/roster.js";
 import { SystemClock } from "../domain/clock.js";
 import { TaskService } from "../service/taskService.js";
+import { RosterService } from "../service/rosterService.js";
 import type { TaskStorePort } from "../storage/taskStorePort.js";
 import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
 import type { WizardStateStorePort } from "../storage/wizardStateStorePort.js";
 import type { CohortStorePort } from "../storage/cohortStorePort.js";
 import type { RosterStorePort } from "../storage/rosterStorePort.js";
-import { checkGroupMembership } from "./groupMembership.js";
+import { checkGroupMembership, checkGroupAdmin } from "./groupMembership.js";
 import { comingFriday, parseDueDate } from "../date/parseDueDate.js";
 import { parseAddTaskArgs } from "./addTaskParse.js";
 import { parseMentionTrigger } from "./mentionParse.js";
@@ -28,6 +29,7 @@ import {
   formatHelp,
   formatMyTasks,
   formatPending,
+  formatRoster,
   formatTaskDetail,
   statusLabel,
 } from "./format.js";
@@ -132,6 +134,7 @@ export const BOT_COMMANDS = [
   { command: "unblock", description: "Restore a blocked task to its previous status" },
   { command: "note", description: "Attach a feedback note to a task" },
   { command: "edit", description: "Edit a task's assignee, title, description, or due date (higher-ups only)" },
+  { command: "roster", description: "List, add, re-role, or remove roster members" },
   { command: "dashboard", description: "Get the dashboard link" },
   { command: "whoami", description: "Show who the bot thinks you are" },
 ] as const;
@@ -174,6 +177,9 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   // TaskService talks only through the TaskStorePort (ADR-0005) — see
   // bot/index.ts for how production wires this to SupabaseTaskStore.
   const service = new TaskService(options.taskStore, roster, clock);
+  // RosterService talks only through RosterStorePort/TaskStorePort (R4/#89)
+  // — see rosterService.ts for the authority table it enforces.
+  const rosterService = new RosterService(options.rosterStore, roster, options.taskStore);
   const wizards = new WizardManager(options.wizardStateStore);
 
   function requireCaller(userId: number) {
@@ -1082,6 +1088,113 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }),
   );
 
+  // ---- /roster (R4/#89) --------------------------------------------------
+  // List/add/re-role/remove the cohort's roster. Read (list) and the
+  // add-as-intern default are gated on the caller's roster-role HigherUp,
+  // same as /edit; every destructive operation (add as higherup, role,
+  // remove) is instead gated on a *live* group-admin check
+  // (`checkGroupAdmin`, R3/#88) — see rosterService.ts's doc comment for
+  // why a self-declared roster role can't be trusted for that.
+
+  /** Performs the live group-admin check for the caller and, on anything
+   * but `present`, replies with an actionable reason and returns `false` —
+   * fails closed (`unavailable` refuses, same as `absent`), the deliberate
+   * opposite of /start's fallback (refusing a roster edit is safe,
+   * permitting a wrong one is not). Callers only proceed to the
+   * `RosterService` call when this returns `true`. */
+  async function requireGroupAdmin(
+    ctx: import("grammy").Context,
+    caller: Caller,
+  ): Promise<boolean> {
+    const groupChatId = await options.cohorts.getGroupChatId(caller.cohortId);
+    const check = await checkGroupAdmin(bot.api, groupChatId, ctx.from!.id);
+    if (check.kind === "present") return true;
+    if (check.kind === "unavailable") {
+      await ctx.reply(
+        `Can't verify group-admin status right now (${check.reason}) — the cohort's group chat may not be configured yet. Ask a higher-up to sort that out first.`,
+      );
+    } else {
+      await ctx.reply("You need to be an admin of the cohort's Telegram group to do that.");
+    }
+    return false;
+  }
+
+  const ROSTER_USAGE =
+    "Usage: /roster, /roster add @user [intern|higherup], /roster role @user intern|higherup, or /roster remove @user.";
+
+  async function refreshRosterFromStore() {
+    roster.replaceAll(await options.rosterStore.listAll());
+  }
+
+  bot.command(
+    "roster",
+    withCaller(async (ctx, caller) => {
+      const parsed = parseRosterArgs(matchToString(ctx.match));
+
+      if (parsed.kind === "usage") {
+        await ctx.reply(ROSTER_USAGE);
+        return;
+      }
+
+      if (parsed.kind === "list") {
+        const result = await rosterService.listMembers(caller);
+        await replyChunked(ctx, result.ok ? formatRoster(result.value) : result.error);
+        return;
+      }
+
+      if (parsed.kind === "add") {
+        if (parsed.role === "HigherUp") {
+          if (!(await requireGroupAdmin(ctx, caller))) return;
+        }
+        const result = await rosterService.addMember(
+          caller,
+          parsed.username,
+          parsed.role,
+          parsed.role === "HigherUp",
+        );
+        if (!result.ok) {
+          await ctx.reply(result.error);
+          return;
+        }
+        await refreshRosterFromStore();
+        const roleWord = result.value.role === "HigherUp" ? "higher-up" : "intern";
+        await ctx.reply(`@${result.value.username} added to the roster as ${roleWord}.`);
+        return;
+      }
+
+      if (parsed.kind === "role") {
+        if (!roster.isMember(parsed.username, caller.cohortId)) {
+          await ctx.reply(unknownRosterMemberReply(parsed.username, caller.cohortId));
+          return;
+        }
+        if (!(await requireGroupAdmin(ctx, caller))) return;
+        const result = await rosterService.setRole(caller, parsed.username, parsed.role, true);
+        if (!result.ok) {
+          await ctx.reply(result.error);
+          return;
+        }
+        await refreshRosterFromStore();
+        const roleWord = result.value.role === "HigherUp" ? "higher-up" : "intern";
+        await ctx.reply(`@${result.value.username}'s role is now ${roleWord}.`);
+        return;
+      }
+
+      // remove
+      if (!roster.isMember(parsed.username, caller.cohortId)) {
+        await ctx.reply(unknownRosterMemberReply(parsed.username, caller.cohortId));
+        return;
+      }
+      if (!(await requireGroupAdmin(ctx, caller))) return;
+      const result = await rosterService.removeMember(caller, parsed.username, true);
+      if (!result.ok) {
+        await ctx.reply(result.error);
+        return;
+      }
+      await refreshRosterFromStore();
+      await ctx.reply(`@${parsed.username} removed from the roster.`);
+    }),
+  );
+
   // ---- /edit field-choice menu -----------------------------------------
 
   bot.callbackQuery(/^editfield:(assignee|title|description|duedate)$/, async (ctx) => {
@@ -1588,4 +1701,63 @@ function parseEditField(token: string): EditField | undefined {
     return "dueDate";
   }
   return undefined;
+}
+
+/** Parsed `/roster` subcommand grammar (R4/#89):
+ * `/roster`, `/roster add @user [intern|higherup]`,
+ * `/roster role @user intern|higherup`, `/roster remove @user`. Anything
+ * else (unrecognised subcommand, missing/extra arguments, an unrecognised
+ * role word) is `usage` — the bot layer replies with the usage string
+ * rather than guessing, following the /edit usage-reply pattern. */
+type RosterArgs =
+  | { kind: "list" }
+  | { kind: "add"; username: string; role: Role }
+  | { kind: "role"; username: string; role: Role }
+  | { kind: "remove"; username: string }
+  | { kind: "usage" };
+
+function parseRoleWord(token: string): Role | undefined {
+  const normalized = token.toLowerCase();
+  if (normalized === "intern") return "Intern";
+  if (normalized === "higherup") return "HigherUp";
+  return undefined;
+}
+
+function parseRosterArgs(raw: string): RosterArgs {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return { kind: "list" };
+
+  const tokens = trimmed.split(/\s+/);
+  const [subcommand, ...rest] = tokens;
+  const sub = subcommand!.toLowerCase();
+
+  if (sub === "add") {
+    if (rest.length < 1 || rest.length > 2) return { kind: "usage" };
+    const username = rest[0]!.replace(/^@/, "");
+    if (username.length === 0) return { kind: "usage" };
+    let role: Role = "Intern";
+    if (rest.length === 2) {
+      const parsedRole = parseRoleWord(rest[1]!);
+      if (!parsedRole) return { kind: "usage" };
+      role = parsedRole;
+    }
+    return { kind: "add", username, role };
+  }
+
+  if (sub === "role") {
+    if (rest.length !== 2) return { kind: "usage" };
+    const username = rest[0]!.replace(/^@/, "");
+    const role = parseRoleWord(rest[1]!);
+    if (username.length === 0 || !role) return { kind: "usage" };
+    return { kind: "role", username, role };
+  }
+
+  if (sub === "remove") {
+    if (rest.length !== 1) return { kind: "usage" };
+    const username = rest[0]!.replace(/^@/, "");
+    if (username.length === 0) return { kind: "usage" };
+    return { kind: "remove", username };
+  }
+
+  return { kind: "usage" };
 }
