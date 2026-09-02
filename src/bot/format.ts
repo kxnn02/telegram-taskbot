@@ -255,12 +255,22 @@ const HELP_SECTIONS: { heading: string; lines: string[] }[] = [
       "/update t21,t22,t23 done — bulk shared status",
       "/update t21 done, t22 review, t23 inprogress — bulk mixed status",
       "/update, one ref+status per line — bulk multiline",
-      "Statuses: backlog · todo · in progress · in review · blocked · done",
       "/blocked <ref> <reason> — flag a task as blocked",
       "/unblock <ref> — restore a blocked task to its previous status",
       "/note <ref> <text> — attach a feedback note",
       "/edit <ref> <field> <value> — edit assignee, title, description, or duedate directly (restricted to higher-ups)",
       "/edit <ref> — bare, starts the field-choice form instead (restricted to higher-ups)",
+    ],
+  },
+  {
+    heading: "🏷️ Statuses",
+    lines: [
+      "backlog — not yet started",
+      "todo — ready to be picked up",
+      "in progress — actively being worked on",
+      "in review — done, awaiting feedback",
+      "blocked — stuck, can't proceed",
+      "done — complete",
     ],
   },
   {

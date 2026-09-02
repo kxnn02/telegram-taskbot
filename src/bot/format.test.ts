@@ -313,6 +313,17 @@ describe("formatHelp", () => {
     expect(text).toContain("/tasks intern");
     expect(text).toContain("/tasks higherup");
   });
+
+  it("has a dedicated Statuses section listing all six statuses with a one-line meaning each", () => {
+    const text = formatHelp("Intern");
+    expect(text).toMatch(/Statuses/);
+    expect(text).toMatch(/backlog.*not.*started/i);
+    expect(text).toMatch(/todo.*ready/i);
+    expect(text).toMatch(/in progress.*(actively )?being worked on/i);
+    expect(text).toMatch(/in review.*(waiting|awaiting)/i);
+    expect(text).toMatch(/blocked.*stuck/i);
+    expect(text).toMatch(/done.*complete/i);
+  });
 });
 
 describe("BOT_COMMANDS / formatHelp coherence (issue #27/#35)", () => {
