@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { handleJobEndpoint } from "./jobEndpoint.js";
+import { handleJobEndpoint, reportConfigError } from "./jobEndpoint.js";
 
 function makeReq(overrides: Partial<{ method: string; headers: Record<string, string> }> = {}) {
   return {
@@ -51,6 +51,24 @@ describe("handleJobEndpoint", () => {
     const work = vi.fn().mockRejectedValue(new Error("db down"));
     const onError = vi.fn().mockRejectedValue(new Error("dm failed"));
     const res = await handleJobEndpoint({ verify: () => true, work, onError }, makeReq());
+    expect(res.status).toBe(500);
+  });
+});
+
+describe("reportConfigError", () => {
+  it("reports a config error via onError and returns 500", async () => {
+    const onError = vi.fn().mockResolvedValue(undefined);
+    const res = await reportConfigError(onError, "CRON_SECRET is not set.");
+    expect(res.status).toBe(500);
+    expect(onError).toHaveBeenCalledTimes(1);
+    const reportedError = onError.mock.calls[0]?.[0];
+    expect(reportedError).toBeInstanceOf(Error);
+    expect((reportedError as Error).message).toBe("CRON_SECRET is not set.");
+  });
+
+  it("still returns 500 if onError itself throws, without leaking that failure", async () => {
+    const onError = vi.fn().mockRejectedValue(new Error("dm failed"));
+    const res = await reportConfigError(onError, "CRON_SECRET is not set.");
     expect(res.status).toBe(500);
   });
 });
