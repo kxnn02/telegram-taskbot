@@ -5,6 +5,7 @@ import { SupabaseTaskStore } from "../storage/supabaseTaskStore.js";
 import { SupabaseRegistrationStore } from "../storage/supabaseRegistrationStore.js";
 import { SupabaseWizardStateStore } from "../storage/supabaseWizardStateStore.js";
 import { SupabaseRosterStore } from "../storage/supabaseRosterStore.js";
+import { SupabaseCohortStore } from "../storage/supabaseCohortStore.js";
 import { loadRosterFromStore } from "../config/roster.js";
 
 /**
@@ -35,13 +36,16 @@ async function main() {
   }
 
   const supabase = createSupabaseClient();
-  const roster = await loadRosterFromStore(new SupabaseRosterStore(supabase));
+  const rosterStore = new SupabaseRosterStore(supabase);
+  const roster = await loadRosterFromStore(rosterStore);
 
   const { bot } = createBot({
     token,
     taskStore: new SupabaseTaskStore(supabase),
     registrationStore: new SupabaseRegistrationStore(supabase),
     wizardStateStore: new SupabaseWizardStateStore(supabase),
+    cohorts: new SupabaseCohortStore(supabase),
+    rosterStore,
     roster,
     activeCohortId,
     dashboardUrl:
