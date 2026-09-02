@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { normalizeUsername } from "../domain/roster.js";
 import type { RosterEntry, Role } from "../domain/types.js";
 import type { RosterStorePort } from "./rosterStorePort.js";
 
@@ -23,5 +24,32 @@ export class SupabaseRosterStore implements RosterStorePort {
       role: row.role,
       cohortId: row.cohort_id,
     }));
+  }
+
+  async upsert(entry: RosterEntry, setBy: string): Promise<void> {
+    const row = {
+      username: normalizeUsername(entry.username),
+      role: entry.role,
+      cohort_id: entry.cohortId,
+      role_set_by: normalizeUsername(setBy),
+      role_set_at: new Date().toISOString(),
+    };
+    const { error } = await this.client
+      .from("roster")
+      .upsert(row, { onConflict: "cohort_id,username" });
+    if (error) {
+      throw new Error(`upsert() failed: ${error.message}`);
+    }
+  }
+
+  async remove(cohortId: string, username: string): Promise<void> {
+    const { error } = await this.client
+      .from("roster")
+      .delete()
+      .eq("cohort_id", cohortId)
+      .eq("username", normalizeUsername(username));
+    if (error) {
+      throw new Error(`remove() failed: ${error.message}`);
+    }
   }
 }

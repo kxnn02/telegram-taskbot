@@ -4,7 +4,15 @@ import type { RosterEntry } from "../domain/types.js";
 import { loadRosterFromStore } from "./roster.js";
 
 function fakeStore(entries: RosterEntry[]): RosterStorePort {
-  return { listAll: async () => entries };
+  return {
+    listAll: async () => entries,
+    upsert: async () => {
+      throw new Error("not implemented in fakeStore");
+    },
+    remove: async () => {
+      throw new Error("not implemented in fakeStore");
+    },
+  };
 }
 
 describe("loadRosterFromStore", () => {

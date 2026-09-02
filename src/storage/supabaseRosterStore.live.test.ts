@@ -62,4 +62,65 @@ describe("SupabaseRosterStore (live)", () => {
       cohortId,
     });
   });
+
+  it("upsert creates a new roster entry and records who set it", async () => {
+    const store = new SupabaseRosterStore(client);
+    await store.upsert({ username: "test_new", role: "Intern", cohortId }, "test_setter");
+
+    const { data, error } = await client
+      .from("roster")
+      .select("username, role, cohort_id, role_set_by, role_set_at")
+      .eq("cohort_id", cohortId)
+      .eq("username", "test_new")
+      .single();
+    if (error) throw new Error(`Failed to read back upserted row: ${error.message}`);
+
+    expect(data).toMatchObject({
+      username: "test_new",
+      role: "Intern",
+      cohort_id: cohortId,
+      role_set_by: "test_setter",
+    });
+    expect(data?.role_set_at).toBeTruthy();
+  });
+
+  it("upsert on an existing (cohortId, username) updates in place rather than duplicating", async () => {
+    const store = new SupabaseRosterStore(client);
+    await store.upsert({ username: "test_existing", role: "Intern", cohortId }, "test_setter_1");
+    await store.upsert({ username: "test_existing", role: "HigherUp", cohortId }, "test_setter_2");
+
+    const { data, error } = await client
+      .from("roster")
+      .select("username, role, role_set_by")
+      .eq("cohort_id", cohortId)
+      .eq("username", "test_existing");
+    if (error) throw new Error(`Failed to read back row: ${error.message}`);
+
+    expect(data).toHaveLength(1);
+    expect(data?.[0]).toMatchObject({
+      username: "test_existing",
+      role: "HigherUp",
+      role_set_by: "test_setter_2",
+    });
+  });
+
+  it("remove deletes a roster entry", async () => {
+    const store = new SupabaseRosterStore(client);
+    await store.upsert({ username: "test_removable", role: "Intern", cohortId }, "test_setter");
+
+    await store.remove(cohortId, "test_removable");
+
+    const { data, error } = await client
+      .from("roster")
+      .select("username")
+      .eq("cohort_id", cohortId)
+      .eq("username", "test_removable");
+    if (error) throw new Error(`Failed to read back row: ${error.message}`);
+    expect(data).toHaveLength(0);
+  });
+
+  it("remove on a missing entry is a no-op", async () => {
+    const store = new SupabaseRosterStore(client);
+    await expect(store.remove(cohortId, "test_nobody")).resolves.toBeUndefined();
+  });
 });
