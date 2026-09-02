@@ -91,7 +91,11 @@ export function formatAllTasksGrouped(
   hintPrefix = "",
 ): string {
   if (tasks.length === 0) {
-    return "No tasks in this cohort yet.";
+    // A filter that matched nothing is not the same as an empty cohort
+    // (issue #65, finding H9) — `hintPrefix` already carries the filter
+    // argument (`@alice`, `intern`) into this branch, so say what actually
+    // happened instead of implying the bot lost the cohort's data.
+    return hintPrefix ? `No tasks match ${hintPrefix}.` : "No tasks in this cohort yet.";
   }
   const paged = paginate(tasks, page);
   const byAssignee = new Map<string, TaskWithFlags[]>();

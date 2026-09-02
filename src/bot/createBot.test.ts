@@ -1966,6 +1966,28 @@ describe("/tasks and /mytasks pagination (issue #7/#33)", () => {
     expect(text).toMatch(/isn't a known roster member/i);
   });
 
+  it("/tasks @bob reports no match rather than claiming the cohort is empty (issue #65, finding H9)", async () => {
+    await testBot.service.assignTask(
+      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "alice's task", dueDate: "2026-09-05" },
+    );
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/tasks @bob"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toBe("No tasks match @bob.");
+  });
+
+  it("/tasks with a genuinely empty cohort still reports plain emptiness (issue #65, finding H9)", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/tasks"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toBe("No tasks in this cohort yet.");
+  });
+
   it("/tasks intern filters to tasks assigned to interns", async () => {
     await testBot.service.assignTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
