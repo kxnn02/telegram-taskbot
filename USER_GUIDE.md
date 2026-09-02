@@ -4,12 +4,20 @@ A guide for interns and higher-ups. No technical background needed.
 
 ## Getting started
 
-1. Make sure a higher-up has added your Telegram username to the roster.
+1. Make sure you're a member of the cohort's Telegram group — that's the only requirement.
 2. Message the bot (`@devcon_cohort5_taskbot`) and send `/start`.
-3. Send `/help` any time to see the command list again from inside Telegram, or start typing `/`
+3. Pick **Intern** or **Higher-up** from the two buttons that come back — that registers you and
+   sets your role. (First person in a fresh cohort: see the note below.)
+4. Send `/help` any time to see the command list again from inside Telegram, or start typing `/`
    to see Telegram's own autocomplete menu for every command.
 
-If `/start` says you're not on the roster, ask a higher-up to add you before trying again.
+If `/start` says it couldn't confirm you're in the group, make sure you've actually joined the
+cohort's Telegram group first, then try again.
+
+**Changing your role later**: once someone in the cohort is registered as Higher-up, tapping the
+role buttons again won't change an existing registration — ask a Higher-up to run `/roster role
+@you <role>` instead. Before that first Higher-up exists, anyone can still re-run `/start` and
+tap the other button to correct themselves.
 
 ## Where you can use commands
 
@@ -145,6 +153,20 @@ Worked example — you're clearing out a backlog and moving three tasks into rev
 Nothing locks once a task is Done — you can edit or reopen a finished task at any time. There's
 no separate "cancel a task" command any more either; if a task is no longer needed, just
 `/update` it to `backlog` (the nearest "parked" status) or `blocked` with a note explaining why.
+
+## Managing the roster
+
+- **`/roster`** — lists everyone currently registered in the cohort, grouped by role. Requires
+  you to be a Higher-up in the roster.
+- **`/roster add @user`** — adds someone to the roster as an intern, for anyone who can't or
+  hasn't self-registered via `/start`. Requires you to be a Higher-up in the roster.
+- **`/roster add @user higherup`**, **`/roster role @user intern|higherup`**, and **`/roster
+  remove @user`** — adding someone directly as a Higher-up, changing an existing member's role, or
+  removing them, all require you to be a **verified admin of the cohort's Telegram group**
+  (checked live against Telegram, not against your roster role) — being a Higher-up in the roster
+  alone isn't enough for these three. This is deliberate: a roster role is self-declared via
+  `/start`, so letting it also control who can grant roster roles would let anyone hand themselves
+  admin power.
 
 ## Automatic notifications
 

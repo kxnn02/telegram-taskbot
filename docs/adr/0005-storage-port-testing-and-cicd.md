@@ -1,6 +1,6 @@
 # ADR-0005: Storage port, testing strategy, and CI/CD
 
-- **Status**: Accepted (planning only — not yet implemented)
+- **Status**: Accepted, implemented
 - **Date**: 2026-08-31
 - **Depends on**: ADR-0001
 

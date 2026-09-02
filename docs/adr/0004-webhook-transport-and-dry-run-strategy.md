@@ -1,6 +1,7 @@
 # ADR-0004: Webhook transport, dedup, and dry-run strategy
 
-- **Status**: Accepted (planning only — not yet implemented)
+- **Status**: Accepted, implemented — webhook cut over from the dry-run deployment to production
+  2026-09-02
 - **Date**: 2026-08-31
 - **Depends on**: ADR-0001
 

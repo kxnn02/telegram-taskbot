@@ -50,12 +50,13 @@ compromising correctness.
 > section is kept below as the historical record of v1's design.
 
 > **Superseded by [ADR-0010](./docs/adr/0010-group-gated-registration-and-roster-management.md),
-> planning only.** The line below — *"No self-registration surface: identity is resolved against
-> a known roster (see §7)"* — and the "Role assignment" paragraph describing a roster config are
-> both superseded: `/start` now verifies group membership and lets the caller declare their own
-> role, and roster management moves in-product, gated on live Telegram group-admin status rather
-> than the roster role. `roster.config.json` no longer exists. The rest of this section is kept
-> below as the historical record of that earlier design.
+> implemented (spec [#83](https://github.com/kxnn02/telegram-taskbot/issues/83), live in
+> production since 2026-09-02).** The line below — *"No self-registration surface: identity is
+> resolved against a known roster (see §7)"* — and the "Role assignment" paragraph describing a
+> roster config are both superseded: `/start` now verifies group membership and lets the caller
+> declare their own role, and roster management moves in-product via `/roster`, gated on live
+> Telegram group-admin status rather than the roster role. `roster.config.json` no longer exists.
+> The rest of this section is kept below as the historical record of that earlier design.
 
 | Role | Description | Permissions |
 |---|---|---|
@@ -333,7 +334,7 @@ an active wizard reply — it doesn't reply to every message it now technically 
 ## 7. Identity & Registration
 
 > **Superseded by [ADR-0010](./docs/adr/0010-group-gated-registration-and-roster-management.md),
-> planning only.** Step 1 below — *"You collect each person's Telegram username upfront ... and
+> implemented.** Step 1 below — *"You collect each person's Telegram username upfront ... and
 > put them in the roster config"* — is superseded: there is no upfront collection step anymore.
 > `/start` verifies the caller is a member of the cohort's Telegram group, then lets them declare
 > Intern or Higher-up and writes the roster row itself; a stranger who isn't in the group cannot
@@ -487,9 +488,9 @@ just not surfaced by default, so it remains available directly in the database i
   — [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md): the "any higher-up can act on
   any task, assignees must be interns, edit locked after Approved" example list described v1's
   gated rules; current-cohort-only-by-default is the only part of that example still accurate.
-  See §2/§4 for what replaced it. This parity principle is scheduled to reach the dashboard in
-  Phase 6.3, [#17](https://github.com/kxnn02/telegram-taskbot/issues/17), which is blocked on
-  this ADR shipping first.)*
+  See §2/§4 for what replaced it. This parity principle reached the dashboard in Phase 6.3,
+  [#17](https://github.com/kxnn02/telegram-taskbot/issues/17), now closed and live in
+  production.)*
 
 ## 13. Open Items to Resolve During Implementation
 

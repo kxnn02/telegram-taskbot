@@ -8,14 +8,16 @@ See [`PRD.md`](./PRD.md) for the full product spec and design decisions, and
 [`CONTEXT.md`](./CONTEXT.md) for the "why" behind the technical choices. For how to actually use
 the bot day-to-day, see [`USER_GUIDE.md`](./USER_GUIDE.md).
 
-> **Re-platform in progress.** This codebase is being re-platformed onto Next.js + Vercel +
+> **Re-platform complete, live in production.** This codebase now runs on Next.js + Vercel +
 > Supabase — see [`CONTEXT.md`](./CONTEXT.md) and [`docs/adr/`](./docs/adr/) for the full
 > reasoning, and GitHub issues
-> [#11](https://github.com/kxnn02/telegram-taskbot/issues/11)-[#17](https://github.com/kxnn02/telegram-taskbot/issues/17)
-> for the spec and phased implementation plan. As of Phase 2 (#13), storage is Supabase Postgres
-> (SQLite has been removed) but the bot still runs as an Express + `node-cron` + Telegram
-> long-polling process, not yet the webhook/Vercel/Next.js target — the setup and running
-> instructions below describe that current in-between state.
+> [#11](https://github.com/kxnn02/telegram-taskbot/issues/11)/[#17](https://github.com/kxnn02/telegram-taskbot/issues/17)
+> (both closed) for the spec and phased implementation plan. The bot runs on a Telegram webhook
+> (`/api/telegram/webhook`), scheduled jobs run on Supabase `pg_cron`/`pg_net` plus two
+> Vercel Cron jobs, and the dashboard is the Next.js app under `app/`. The dry-run deployment used
+> during the build is decommissioned from live traffic; the real Cohort 5 group is on production.
+> The setup and running instructions below still cover local development (`npm run dev` against
+> the same Supabase-backed stack), not a separate legacy mode.
 
 ## Requirements
 
@@ -52,12 +54,14 @@ live Telegram group-admin status. See the ADR for the full design and the row sh
 ## Running locally
 
 ```bash
-npm run dev             # the bot
-npm run dashboard:dev   # the web dashboard (separate process, separate terminal)
+npm run dev        # the bot, long polling (LOCAL-DEV-ONLY — see src/bot/index.ts; the
+                    # deployed bot runs on the webhook at api/telegram/webhook.ts instead)
+npm run next:dev    # the Next.js dashboard (separate process, separate terminal)
 ```
 
-Both need to be restarted manually after a code change or a roster edit — neither has hot reload
-(the roster is loaded once at process startup).
+Both talk to the same real Supabase project as production (same roster/cohort tables) — there is
+no separate local data store. The bot process needs restarting manually after a code change (no
+hot reload); the dashboard's `next dev` reloads on save as usual.
 
 **Testing the dashboard's login locally**: Telegram's Login Widget refuses to render its button
 on `localhost` or any domain not registered for the bot via `@BotFather` → `/setdomain`. For
@@ -65,8 +69,7 @@ local testing, expose the dashboard through a temporary HTTPS tunnel (e.g.
 [cloudflared](https://github.com/cloudflare/cloudflared): `cloudflared tunnel --url
 http://localhost:3000`), register the resulting `*.trycloudflare.com` domain with `/setdomain`,
 then open the dashboard through that URL instead of `localhost`. The domain changes each time the
-tunnel restarts, so `/setdomain` needs re-running per test session — this isn't needed once the
-dashboard has a permanent deployed domain.
+tunnel restarts, so `/setdomain` needs re-running per test session.
 
 ## Testing
 
@@ -86,15 +89,26 @@ src/
 ├── service/        taskService.ts — THE seam: all business rules live here.
 │                    Both the bot and the dashboard call into this, never the
 │                    repositories directly.
-├── storage/        TaskStorePort + Supabase/in-memory implementations
+├── storage/        TaskStorePort + Supabase implementations
 │                    (see supabase/migrations/ for schema)
 ├── config/         Roster loading
 ├── date/           chrono-node due-date parsing (Asia/Manila)
-├── notifications/  Scheduled jobs: overdue-crossing, due-date reminders,
-│                    daily/weekly digests (node-cron)
+├── notifications/  Scheduled job bodies: overdue-crossing, due-date reminders,
+│                    daily/weekly digests, roster reconciliation — triggered by
+│                    Supabase pg_cron/pg_net, not run in-process
+├── jobs/           Shared dependency wiring for the /api/jobs/* endpoints
 ├── bot/            Telegram bot: commands, wizards, formatting, notifications
-└── web/            Dashboard: Express server, Telegram Login Widget auth,
-                     task oversight/creation/editing, and stats views
+└── web/            Dashboard building blocks: Telegram Login Widget auth,
+                     session cookies, oversight/stats data, consumed by app/
+
+api/
+├── telegram/       Webhook entrypoint (api/telegram/webhook.ts)
+└── jobs/            Vercel Function endpoints for every scheduled job,
+                      including the two Vercel-Cron-triggered ones
+                      (keep-alive, weekly-backup)
+
+app/                Next.js (App Router) dashboard: login, task list/detail,
+                     stats, and their API routes
 ```
 
 ## Issue tracker

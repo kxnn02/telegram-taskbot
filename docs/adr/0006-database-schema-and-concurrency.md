@@ -1,6 +1,6 @@
 # ADR-0006: Database schema and concurrency control
 
-- **Status**: Accepted (planning only — not yet implemented)
+- **Status**: Accepted, implemented
 - **Date**: 2026-08-31
 - **Depends on**: ADR-0001, ADR-0002, ADR-0003
 

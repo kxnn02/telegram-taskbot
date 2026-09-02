@@ -4,6 +4,42 @@ A running log of what's shipped, for interns, higher-ups, and anyone else follow
 technical changelog — see `git log` or the GitHub issues for that level of detail. See
 `PRD.md` for the full design and `CONTEXT.md` for why things were built the way they were.
 
+## 2026-09-02 — Production cutover: the real Cohort 5 group is live
+
+The bot is no longer running against the dry-run deployment — the Telegram webhook now points at
+production, and the real Cohort 5 group is using it. This closes
+[#17](https://github.com/kxnn02/telegram-taskbot/issues/17) (Phase 6 dashboard rewrite +
+cutover) and its parent spec [#11](https://github.com/kxnn02/telegram-taskbot/issues/11).
+
+- Production's `cohorts.group_chat_id` now points at the real Cohort 5 Telegram group.
+- The scheduled jobs (`jobs_base_url` in Supabase Vault) now call production instead of the
+  dry-run deployment, and `INTERNAL_JOB_SECRET`/`MAINTAINER_USERNAME` were added to production's
+  environment and synced with Vault, rotated fresh in the process.
+- Smoke-tested live: real cohort members have self-registered successfully through the
+  production webhook.
+- [#43](https://github.com/kxnn02/telegram-taskbot/issues/43) — Vercel Cron's `keep-alive` and
+  `weekly-backup` jobs — remains open, but only pending confirmation of their first scheduled
+  runs; the code fix already shipped separately.
+
+## 2026-09-02 — Group-gated self-registration and in-product roster management
+
+Roster entries are no longer collected upfront in a hand-edited config file — see
+[ADR-0010](./docs/adr/0010-group-gated-registration-and-roster-management.md) and spec
+[#83](https://github.com/kxnn02/telegram-taskbot/issues/83) (merged via PR #93).
+
+- **`/start` now self-registers.** It checks that the caller is a member of the cohort's Telegram
+  group, then lets them declare **Intern** or **Higher-up** via two buttons and writes the roster
+  row itself. A stranger who isn't in the group can't register.
+- **`/roster` command** — `/roster` lists the cohort (requires roster role Higher-up);
+  `/roster add @user` adds someone as an intern (same requirement); adding someone directly as a
+  Higher-up, changing an existing member's role (`/roster role`), and removing someone
+  (`/roster remove`) all require being a *verified admin of the Telegram group itself* — checked
+  live against Telegram, not the self-declared roster role, so nobody can grant themselves roster
+  power.
+- **Daily roster reconciliation job** added, catching drift between the roster and actual group
+  membership.
+- `roster.config.json` is deleted; the roster lives entirely in the `roster` Supabase table now.
+
 ## 2026-09-01 — Devie-parity command redesign: direct commands, free-set statuses
 
 Every command is now a one-line direct command, and the old submit → review → approve/revise

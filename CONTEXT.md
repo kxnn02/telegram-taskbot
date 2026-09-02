@@ -4,9 +4,9 @@ Why this project is built the way it is. See `PRD.md` for the full product spec;
 covers technical decisions and the reasoning behind them, for anyone (human or agent) picking
 up the codebase later.
 
-> **In flux — read `docs/adr/` first.** v1 shipped feature-complete but was never deployed. The
-> deployment decision has now been taken and it supersedes several decisions recorded below:
-> the project is being re-platformed onto Vercel + Supabase
+> **Re-platform complete, live in production — read `docs/adr/` for the decisions behind it.**
+> v1 shipped feature-complete but was never deployed; the project has since been re-platformed
+> onto Vercel + Supabase
 > ([ADR-0001](./docs/adr/0001-replatform-to-vercel-supabase.md),
 > [ADR-0002](./docs/adr/0002-authorization-stays-in-taskservice.md),
 > [ADR-0003](./docs/adr/0003-roster-moves-to-a-supabase-table.md),
@@ -15,20 +15,30 @@ up the codebase later.
 > [ADR-0006](./docs/adr/0006-database-schema-and-concurrency.md) — schema + concurrency,
 > [ADR-0007](./docs/adr/0007-scheduled-jobs-and-operational-tasks.md) — jobs, keep-alive, backups,
 > [ADR-0008](./docs/adr/0008-dashboard-sessions-and-mutations.md) — sessions + mutation style).
-> Superseded sections are marked inline. **None of it is implemented yet** — the code described
-> below is still the code that exists. The full spec and phased implementation plan are tracked as
-> GitHub issues [#11](https://github.com/kxnn02/telegram-taskbot/issues/11)-[#17](https://github.com/kxnn02/telegram-taskbot/issues/17).
+> Superseded sections below are marked inline and kept as the historical record of v1's design.
+> The full spec and phased implementation plan were tracked as GitHub issues
+> [#11](https://github.com/kxnn02/telegram-taskbot/issues/11) and
+> [#17](https://github.com/kxnn02/telegram-taskbot/issues/17) — both closed as of 2026-09-02, once
+> the production cutover (webhook repointed to the live Cohort 5 group, scheduled jobs repointed
+> at production) was verified live.
 >
-> **A second, independent redesign is also pending**
-> ([ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md)): the bot's commands become
+> **A second, independent redesign has also shipped**
+> ([ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md)): the bot's commands are now
 > direct one-liners and its six gated statuses are replaced by six free-set ones, matching
-> **Devie**, another DevCon bot this cohort's higher-ups already use. This deletes the
-> submit → review → approve workflow, opens task creation and read access to every roster
-> member, and turns `blocked` from a flag into a status. It ships **before** the production
-> cutover, so it also blocks Phase 6.3 in
-> [#17](https://github.com/kxnn02/telegram-taskbot/issues/17). Likewise not implemented yet;
-> tracked as [#27](https://github.com/kxnn02/telegram-taskbot/issues/27), stages
+> **Devie**, another DevCon bot this cohort's higher-ups already use. This deleted the
+> submit → review → approve workflow, opened task creation and read access to every roster
+> member, and turned `blocked` from a flag into a status. It shipped **before** the production
+> cutover, since it was blocking Phase 6.3 in
+> [#17](https://github.com/kxnn02/telegram-taskbot/issues/17). Tracked as
+> [#27](https://github.com/kxnn02/telegram-taskbot/issues/27) (closed), stages
 > [#28](https://github.com/kxnn02/telegram-taskbot/issues/28)-[#35](https://github.com/kxnn02/telegram-taskbot/issues/35).
+>
+> **A third change has also shipped**
+> ([ADR-0010](./docs/adr/0010-group-gated-registration-and-roster-management.md), spec
+> [#83](https://github.com/kxnn02/telegram-taskbot/issues/83), merged via PR #93): roster
+> registration moved from a hand-edited config file to group-gated self-registration via `/start`,
+> plus an in-product `/roster` command for group-admin-gated roster management. See the "Roster
+> registration" entry below.
 
 ## Glossary
 
@@ -37,10 +47,10 @@ up the codebase later.
   every business rule (permission checks, ownership).
 - **Roster** — the list of who belongs to a cohort and in what role (`Intern` or `HigherUp`).
   Membership is roster-based, not inferred from who's present in the group chat. A roster entry is
-  no longer collected upfront via a config file — as of ADR-0010 (planning only), `/start` creates
+  no longer collected upfront via a config file — as of ADR-0010, `/start` creates
   it itself, behind a check that the caller is a member of the cohort's Telegram group.
 - **Registration** — the one-time link between a Telegram user id and a roster username, created
-  by `/start`. As of ADR-0010 (planning only), `/start` also creates the roster row itself on
+  by `/start`. As of ADR-0010, `/start` also creates the roster row itself on
   first run — registration and roster-entry creation happen together rather than registration
   matching against a pre-existing row. A roster entry can still exist before someone has
   registered (e.g. seeded directly); an unregistered roster member is told to `/start` first.
@@ -140,7 +150,7 @@ password Cohort 4's dashboard uses, since it is per-person and roster-authorized
 > the old in-memory `Map` (`src/web/sessionStore.ts`) is gone. Username/role/cohortId and an
 > expiry live inside the cookie itself, so no session table or server-side revocation exists;
 > `/logout` just clears the cookie (nothing left to destroy server-side). Dashboard mutations in
-> the future Next.js rewrite (Phase 6 / issue #17) will use REST-style API routes, not Server
+> the Next.js rewrite (Phase 6 / issue #17, closed) use REST-style API routes, not Server
 > Actions — see ADR-0008 for why.
 
 Session cookies are still marked `Secure`, so they only persist over real HTTPS, not plain
@@ -423,13 +433,19 @@ still expects its next answer from that same group, per the existing group-chat-
 ### Roster registration moves from a config file to group-gated `/start` (ADR-0010)
 
 Role assignment used to mean editing a gitignored roster file and re-seeding Supabase by hand —
-nobody in the cohort could do it. As of ADR-0010 (planning only, tracked as issue #83, tickets
-#85-#91), `/start` checks that the caller is a member of the cohort's Telegram group, then lets
-them self-declare Intern or Higher-up and writes the roster row itself; roster management
-(changing a role, removing a member) stays out of self-declared reach by gating it on live
-Telegram group-admin status instead of the roster role. See the ADR for the full design, including
-why the Bot API can't enumerate group members and why invite links and admin-derived roles were
-rejected.
+nobody in the cohort could do it. As of ADR-0010 (implemented, spec #83, tickets #85-#91, merged
+via PR #93, live in production since 2026-09-02), `/start` checks that the caller is a member of
+the cohort's Telegram group, then lets them self-declare Intern or Higher-up and writes the
+roster row itself; roster management (changing a role, removing a member) stays out of
+self-declared reach by gating it on live Telegram group-admin status instead of the roster role,
+via the `/roster` command. See the ADR for the full design, including why the Bot API can't
+enumerate group members and why invite links and admin-derived roles were rejected.
+
+**Bootstrap note**: the very first registrant(s) in a freshly cut-over cohort will have no
+Higher-up yet, so the self-promotion guard that normally blocks re-declaring a role is inactive
+until one exists — anyone can re-run `/start` and tap the other role button to correct
+themselves. Once a cohort has at least one Higher-up, that recovery path closes for everyone with
+an existing roster row, and role changes must go through `/roster role @user <role>` instead.
 
 ## Out of scope (deferred to v2)
 
