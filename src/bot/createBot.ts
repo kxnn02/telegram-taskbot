@@ -261,12 +261,6 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     await ctx.reply(had ? "Cancelled." : "Nothing to cancel.");
   });
 
-  // ---- /dashboard ---------------------------------------------------------
-
-  bot.command("dashboard", async (ctx) => {
-    await ctx.reply(`Dashboard: ${options.dashboardUrl}`);
-  });
-
   // ---- Not-registered guard for everything else below --------------------
 
   async function resolveCallerOrReply(
@@ -306,6 +300,23 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       await ctx.reply(chunk);
     }
   }
+
+  // ---- /dashboard ---------------------------------------------------------
+  // Gated by withCaller like every other data-bearing command (issue #65,
+  // finding H15) — the dashboard link itself was previously handed to
+  // anyone, registered or not. The dashboard is independently auth-gated
+  // (Telegram login + roster check), so this only stops URL disclosure to
+  // strangers, but there's no reason for this one command to skip the same
+  // check every other one applies. Registration only, not a role check —
+  // an intern who can't log into the dashboard's HigherUp-only view still
+  // gets the link, same as before.
+
+  bot.command(
+    "dashboard",
+    withCaller(async (ctx) => {
+      await ctx.reply(`Dashboard: ${options.dashboardUrl}`);
+    }),
+  );
 
   // ---- Read-only commands ---------------------------------------------
 

@@ -2052,6 +2052,51 @@ describe("/tasks and /mytasks pagination (issue #7/#33)", () => {
   });
 });
 
+describe("/dashboard is gated like every other data command (issue #65, finding H15)", () => {
+  let roster: Roster;
+  let testBot: ReturnType<typeof makeTestBot>;
+
+  beforeEach(() => {
+    roster = makeRoster();
+    testBot = makeTestBot(roster);
+  });
+
+  it("an unregistered user gets the not-registered reply, not the URL", async () => {
+    const strangerId = nextUserId();
+    await testBot.bot.handleUpdate(messageUpdate(strangerId, strangerId, "/dashboard"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toBe("Send /start first so I know who you are.");
+    expect(text).not.toContain("Dashboard:");
+  });
+
+  it("a registered higher-up still gets the dashboard URL", async () => {
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "/dashboard"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toBe("Dashboard: http://localhost:1234");
+  });
+
+  it("a registered intern still gets the dashboard URL (registration check, not a role gate)", async () => {
+    const aliceId = nextUserId();
+    await registerCaller(testBot, aliceId, "alice");
+    await testBot.bot.handleUpdate(messageUpdate(aliceId, aliceId, "/dashboard"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toBe("Dashboard: http://localhost:1234");
+  });
+
+  it("/help from an unregistered user still replies with the not-registered variant (regression guard)", async () => {
+    const strangerId = nextUserId();
+    await testBot.bot.handleUpdate(messageUpdate(strangerId, strangerId, "/help"));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/not registered yet/i);
+  });
+});
+
 describe("/deadlines (issue #33)", () => {
   let roster: Roster;
   let testBot: ReturnType<typeof makeTestBot>;
