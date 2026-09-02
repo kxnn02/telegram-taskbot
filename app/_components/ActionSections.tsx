@@ -27,7 +27,15 @@ const ACTION_SECTION_META: Record<ActionGroup, ActionSectionMeta> = {
   open: { label: "Open", ic: "spark", bg: "#E4EEFE", fg: "#1A5FCC" },
 };
 
-function Section({ meta, tasks }: { meta: ActionSectionMeta; tasks: TaskWithFlags[] }) {
+function Section({
+  meta,
+  tasks,
+  canEdit,
+}: {
+  meta: ActionSectionMeta;
+  tasks: TaskWithFlags[];
+  canEdit: boolean;
+}) {
   const headingInner = (
     <>
       <div className="sec-ic" style={{ background: meta.bg, color: meta.fg }}>
@@ -67,7 +75,7 @@ function Section({ meta, tasks }: { meta: ActionSectionMeta; tasks: TaskWithFlag
           </thead>
           <tbody>
             {tasks.map((t) => (
-              <ActionRow key={t.id} task={t} />
+              <ActionRow key={t.id} task={t} canEdit={canEdit} />
             ))}
           </tbody>
         </table>
@@ -76,12 +84,12 @@ function Section({ meta, tasks }: { meta: ActionSectionMeta; tasks: TaskWithFlag
   );
 }
 
-export function ActionSections({ tasks }: { tasks: TaskWithFlags[] }) {
+export function ActionSections({ tasks, canEdit }: { tasks: TaskWithFlags[]; canEdit: boolean }) {
   const grouped = groupByAction(tasks);
   return (
     <>
       {ACTION_GROUPS.map((g) => (
-        <Section key={g} meta={ACTION_SECTION_META[g]} tasks={grouped.get(g) ?? []} />
+        <Section key={g} meta={ACTION_SECTION_META[g]} tasks={grouped.get(g) ?? []} canEdit={canEdit} />
       ))}
     </>
   );

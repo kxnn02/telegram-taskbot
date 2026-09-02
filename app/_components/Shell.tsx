@@ -31,10 +31,12 @@ function Sidebar({ active, username, role }: { active: NavKey; username: string;
           <Icon name="clipboard" />
           <span>Task oversight</span>
         </a>
-        <a className={`nav-item${active === "stats" ? " active" : ""}`} href="/stats">
-          <Icon name="chart" />
-          <span>Stats</span>
-        </a>
+        {role === "HigherUp" ? (
+          <a className={`nav-item${active === "stats" ? " active" : ""}`} href="/stats">
+            <Icon name="chart" />
+            <span>Stats</span>
+          </a>
+        ) : null}
       </div>
       <div className="side-user">
         <div className="av">{initialsFor(username)}</div>

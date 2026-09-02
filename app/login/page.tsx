@@ -50,7 +50,7 @@ export default async function LoginPage({
           <div style={{ font: "var(--md3-body-md)", color: "#C2363B", marginBottom: 16 }}>{error}</div>
         ) : null}
         <div style={{ font: "var(--md3-body-md)", color: "#64748B", marginBottom: 20 }}>
-          Higher-ups only. Interns manage their tasks in Telegram.
+          Sign in with the Telegram account you use for this cohort.
         </div>
         <TelegramLoginWidget botUsername={deps.botUsername} authUrl="/api/auth/telegram/callback" />
         <div style={{ font: "var(--md3-body-sm)", color: "#94A3B8", marginTop: 18 }}>

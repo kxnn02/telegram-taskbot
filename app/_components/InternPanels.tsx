@@ -4,7 +4,7 @@ import { initialsFor } from "../../src/web/layout";
 import { InternRow } from "./TaskRow";
 
 /** Faithful port of the removed Express dashboard's renderInternPanels. */
-export function InternPanels({ tasks }: { tasks: TaskWithFlags[] }) {
+export function InternPanels({ tasks, canEdit }: { tasks: TaskWithFlags[]; canEdit: boolean }) {
   const grouped = groupByAssignee(tasks);
   const entries = [...grouped.entries()].sort(([a], [b]) => a.localeCompare(b));
 
@@ -43,7 +43,7 @@ export function InternPanels({ tasks }: { tasks: TaskWithFlags[] }) {
             </thead>
             <tbody>
               {assigneeTasks.map((t) => (
-                <InternRow key={t.id} task={t} />
+                <InternRow key={t.id} task={t} canEdit={canEdit} />
               ))}
             </tbody>
           </table>

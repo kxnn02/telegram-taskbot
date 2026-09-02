@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  editPatchRequiresHigherUp,
   parseCreateTaskRequest,
   parseDueDateTextRequest,
   parseEditTaskRequest,
@@ -137,5 +138,48 @@ describe("parseEditTaskRequest", () => {
   it("combines a status change with other field edits in one patch", () => {
     const result = parseEditTaskRequest({ title: "New title", status: "done" });
     expect(result).toEqual({ ok: true, value: { title: "New title", status: "done" } });
+  });
+});
+
+/**
+ * R6/#91 sweep: the bot's `/edit <task_id>` command (`createBot.ts`,
+ * `bot.command("edit", ...)`) is higher-up-only, checked before it ever
+ * calls `TaskService.editTask` — `editTask` itself deliberately has no role
+ * check (`taskService.test.ts`'s "lets any roster member edit a task, no
+ * role check"), since every other caller of it already gates at the
+ * command layer. The dashboard's `PATCH /api/tasks/:id` is the equivalent
+ * entry point for those same four fields (assignee/title/description/due
+ * date), so it needs the same gate — this function is what decides whether
+ * a given patch needs it. A status-only patch (the row's inline status
+ * dropdown, mirroring `/update`, not `/edit`) must NOT require it — #27/#28
+ * intentionally opened status changes to every roster member.
+ */
+describe("editPatchRequiresHigherUp", () => {
+  it("is false for an empty patch (a pure status change carries no edit fields)", () => {
+    expect(editPatchRequiresHigherUp({})).toBe(false);
+  });
+
+  it("is false for a patch that only sets status", () => {
+    expect(editPatchRequiresHigherUp({ status: "done" })).toBe(false);
+  });
+
+  it("is true when the patch touches title", () => {
+    expect(editPatchRequiresHigherUp({ title: "New title" })).toBe(true);
+  });
+
+  it("is true when the patch touches assigneeUsername", () => {
+    expect(editPatchRequiresHigherUp({ assigneeUsername: "bob" })).toBe(true);
+  });
+
+  it("is true when the patch touches description", () => {
+    expect(editPatchRequiresHigherUp({ description: "New description" })).toBe(true);
+  });
+
+  it("is true when the patch touches dueDate", () => {
+    expect(editPatchRequiresHigherUp({ dueDate: "2026-10-01" })).toBe(true);
+  });
+
+  it("is true when an edit field is combined with a status change", () => {
+    expect(editPatchRequiresHigherUp({ title: "New title", status: "done" })).toBe(true);
   });
 });

@@ -44,11 +44,10 @@ export function handleTelegramLoginCallback(
   }
 
   const entry = deps.roster.find(verified.username, deps.activeCohortId);
-  if (!entry || entry.role !== "HigherUp") {
+  if (!entry) {
     return {
       ok: false,
-      message:
-        "This dashboard is for higher-ups only. Your Telegram account isn't registered as a higher-up for this cohort.",
+      message: "Your Telegram account isn't registered on the roster for this cohort.",
     };
   }
 

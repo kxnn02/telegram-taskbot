@@ -77,7 +77,11 @@ export default async function OversightPage({
     <DashboardShell active="tasks" title="Task oversight" actions={newTaskBtn} caller={caller}>
       <Controls groupMode={groupMode} assignees={assignees} activeAssignee={assignee} />
       {groupMode === "intern" ? <StatusChips activeStatus={statusGroup} /> : null}
-      {groupMode === "action" ? <ActionSections tasks={tasks} /> : <InternPanels tasks={tasks} />}
+      {groupMode === "action" ? (
+        <ActionSections tasks={tasks} canEdit={caller.role === "HigherUp"} />
+      ) : (
+        <InternPanels tasks={tasks} canEdit={caller.role === "HigherUp"} />
+      )}
     </DashboardShell>
   );
 }

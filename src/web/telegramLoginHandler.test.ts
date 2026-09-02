@@ -68,18 +68,21 @@ describe("handleTelegramLoginCallback", () => {
     expect(verified).toEqual({ ok: true, session: result.caller });
   });
 
-  it("rejects an intern even though the Telegram login itself is valid", () => {
+  it("logs in an intern on the roster and returns a signed session cookie value (R6/#91)", () => {
     const result = handleTelegramLoginCallback(deps(), telegramQueryFor("alice"));
-    expect(result).toEqual({
-      ok: false,
-      message:
-        "This dashboard is for higher-ups only. Your Telegram account isn't registered as a higher-up for this cohort.",
-    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.caller).toEqual({ username: "alice", role: "Intern", cohortId: COHORT });
+    const verified = verifySession(result.cookieValue, SESSION_SECRET);
+    expect(verified).toEqual({ ok: true, session: result.caller });
   });
 
   it("rejects a Telegram account not on the roster at all", () => {
     const result = handleTelegramLoginCallback(deps(), telegramQueryFor("eve_stranger"));
-    expect(result.ok).toBe(false);
+    expect(result).toEqual({
+      ok: false,
+      message: "Your Telegram account isn't registered on the roster for this cohort.",
+    });
   });
 
   it("rejects a tampered payload", () => {
@@ -89,7 +92,7 @@ describe("handleTelegramLoginCallback", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("resolves against the dashboard's own bound cohort, not just any matching username (ADR-0004 dry-run reused accounts)", () => {
+  it("resolves against the dashboard's own bound cohort, not just any matching username (ADR-0004 dry-run reused accounts) — same username is an Intern there and still gets a session", () => {
     const roster = new Roster([
       { username: "carla", role: "HigherUp", cohortId: "cohort-5" },
       { username: "carla", role: "Intern", cohortId: "cohort5-dryrun" },
@@ -98,8 +101,20 @@ describe("handleTelegramLoginCallback", () => {
       deps({ roster, activeCohortId: "cohort5-dryrun" }),
       telegramQueryFor("carla"),
     );
-    // In cohort5-dryrun, carla is an Intern, so login must be rejected even
-    // though a HigherUp entry for the same username exists in cohort-5.
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.caller).toEqual({ username: "carla", role: "Intern", cohortId: "cohort5-dryrun" });
+  });
+
+  it("rejects a roster member logging in against a cohort they're not a member of at all, even though the same username exists in another cohort (ADR-0004 dry-run reused accounts / cohort binding)", () => {
+    const roster = new Roster([
+      { username: "carla", role: "HigherUp", cohortId: "cohort-5" },
+      { username: "carla", role: "Intern", cohortId: "cohort5-dryrun" },
+    ]);
+    const result = handleTelegramLoginCallback(
+      deps({ roster, activeCohortId: "cohort-6" }),
+      telegramQueryFor("carla"),
+    );
     expect(result.ok).toBe(false);
   });
 });

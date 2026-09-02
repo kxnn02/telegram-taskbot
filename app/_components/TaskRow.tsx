@@ -29,7 +29,7 @@ function DueCell({ task }: { task: TaskWithFlags }) {
   );
 }
 
-export function ActionRow({ task }: { task: TaskWithFlags }) {
+export function ActionRow({ task, canEdit }: { task: TaskWithFlags; canEdit: boolean }) {
   return (
     <tr>
       <td style={{ width: 70 }}>
@@ -50,13 +50,13 @@ export function ActionRow({ task }: { task: TaskWithFlags }) {
       </td>
       <DueCell task={task} />
       <td style={{ width: 168 }}>
-        <RowActions task={task} />
+        <RowActions task={task} canEdit={canEdit} />
       </td>
     </tr>
   );
 }
 
-export function InternRow({ task }: { task: TaskWithFlags }) {
+export function InternRow({ task, canEdit }: { task: TaskWithFlags; canEdit: boolean }) {
   return (
     <tr>
       <td style={{ width: 70 }}>
@@ -71,7 +71,7 @@ export function InternRow({ task }: { task: TaskWithFlags }) {
       </td>
       <DueCell task={task} />
       <td style={{ width: 168 }}>
-        <RowActions task={task} />
+        <RowActions task={task} canEdit={canEdit} />
       </td>
     </tr>
   );
