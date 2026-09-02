@@ -610,7 +610,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
           await ctx.reply("Usage: /done <ref>");
           return;
         }
-        await applyStatusChange(caller, item.ref, "in_review", ctx, "marked as submitted. Nice work!");
+        await applyStatusChange(caller, item.ref, "in_review", ctx, "is now In review. Nice work!");
         return;
       }
       const outcomes = await runBatch(caller, items, () => ({ status: "in_review" }));

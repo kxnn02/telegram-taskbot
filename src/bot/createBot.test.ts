@@ -2528,6 +2528,20 @@ describe("/done and /complete — Devie's deliberate wart (issue #27/#31)", () =
     expect(result.ok && result.value.status).toBe("in_review");
   });
 
+  it("/done <ref> replies with In review wording, not the removed 'submitted' vocabulary (H11)", async () => {
+    const taskId = await seedTask();
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/done ${taskId}`));
+
+    const ownReply = testBot.calls.find(
+      (c) => c.method === "sendMessage" && Number(c.payload.chat_id) === higherUpId,
+    );
+    const text = ownReply?.payload.text as string;
+    expect(text).toBe(`Task ${taskId} is now In review. Nice work!`);
+    expect(text).not.toContain("submitted");
+  });
+
   it("/complete <ref> sets done", async () => {
     const taskId = await seedTask();
     const higherUpId = nextUserId();
