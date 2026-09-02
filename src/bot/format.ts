@@ -122,10 +122,10 @@ export function formatPending(tasks: TaskWithFlags[]): string {
 
 export function formatBacklog(tasks: TaskWithFlags[]): string {
   if (tasks.length === 0) {
-    return "Nothing in the backlog — no overdue tasks.";
+    return "Nothing is overdue.";
   }
   return [
-    "Backlog (overdue tasks):",
+    "Overdue:",
     ...tasks.map(
       (t) =>
         `- #${t.id} ${t.title} — ${t.daysOverdue} day(s) overdue (assigned to @${t.assigneeUsername})`,

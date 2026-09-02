@@ -5,6 +5,7 @@ import {
   chunkMessage,
   formatAllTasksGrouped,
   formatApproved,
+  formatBacklog,
   formatBlocked,
   formatDeadlines,
   formatMyTasks,
@@ -52,6 +53,18 @@ describe("formatBlocked", () => {
     expect(text).toContain("#1");
     expect(text).toContain("@alice");
     expect(text).toContain("waiting on API access");
+  });
+});
+
+describe("formatBacklog (H10 — /overdue no longer calls itself Backlog)", () => {
+  it("says nothing is overdue when the list is empty", () => {
+    expect(formatBacklog([])).toBe("Nothing is overdue.");
+  });
+
+  it("heads the list with 'Overdue:', not 'Backlog'", () => {
+    const text = formatBacklog([task({ daysOverdue: 3 })]);
+    expect(text).toContain("Overdue:");
+    expect(text).not.toContain("Backlog");
   });
 });
 
