@@ -206,6 +206,37 @@ describe("formatTaskDetail", () => {
     const text = formatTaskDetail(task({ status: "in_review", previousStatus: null, blockedReason: null }));
     expect(text).toContain("Status: In review");
   });
+
+  describe("note timestamps are Manila-resolved, not raw UTC ISO instants (H12)", () => {
+    it("renders 2026-09-01T16:05:00.000Z as Sep 2, 00:05", () => {
+      const text = formatTaskDetail(
+        task({
+          notes: [{ text: "hi", authorUsername: "carla", createdAt: "2026-09-01T16:05:00.000Z" }],
+        }),
+      );
+      expect(text).toContain("[Sep 2, 00:05] @carla: hi");
+      expect(text).not.toContain("2026-09-01T16:05:00.000Z");
+    });
+
+    it("renders 2026-08-31T23:59:00.000Z as Sep 1, 07:59 (crosses the Manila/UTC date boundary)", () => {
+      const text = formatTaskDetail(
+        task({
+          notes: [{ text: "hi", authorUsername: "carla", createdAt: "2026-08-31T23:59:00.000Z" }],
+        }),
+      );
+      expect(text).toContain("[Sep 1, 07:59] @carla: hi");
+    });
+
+    it("falls back to the raw stored value for an unparseable createdAt, not 'Invalid DateTime'", () => {
+      const text = formatTaskDetail(
+        task({
+          notes: [{ text: "hi", authorUsername: "carla", createdAt: "not-a-date" }],
+        }),
+      );
+      expect(text).toContain("[not-a-date] @carla: hi");
+      expect(text).not.toContain("Invalid DateTime");
+    });
+  });
 });
 
 describe("formatHelp", () => {
