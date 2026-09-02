@@ -49,6 +49,7 @@ export interface StandupReport {
   cohortId: string;
   today: Date;
   counts: Record<TaskStatus, number>;
+  overdue: number;
   details: StandupDetailSection[];
   doneThisWeek: TaskWithFlags[];
 }
@@ -90,6 +91,8 @@ export async function buildStandup(
   };
   for (const t of tasks) counts[t.status]++;
 
+  const overdue = tasks.filter((t) => t.overdue).length;
+
   const details = DETAIL_STATUS_ORDER.map((status) => ({
     status,
     members: groupByAssignee(tasks.filter((t) => t.status === status)),
@@ -101,7 +104,7 @@ export async function buildStandup(
     )
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
-  return { cohortId: caller.cohortId, today: now, counts, details, doneThisWeek };
+  return { cohortId: caller.cohortId, today: now, counts, overdue, details, doneThisWeek };
 }
 
 /** "cohort-5" -> "Cohort 5". Roster cohort ids are lowercase hyphenated
@@ -142,6 +145,7 @@ export function formatStandup(report: StandupReport): string {
     `📦 Backlog: ${report.counts.backlog}`,
     `✅ Done: ${report.counts.done}`,
     `🚧 Blocked: ${report.counts.blocked}`,
+    `⚠️ Overdue: ${report.overdue}`,
   ];
 
   for (const section of report.details) {

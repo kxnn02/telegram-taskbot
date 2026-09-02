@@ -199,6 +199,59 @@ describe("formatStandup (standup redesign)", () => {
     expect(text).toContain("Wednesday, September 2, 2026");
   });
 
+  it("renders the overdue count after Blocked and before the first detail section (H17)", async () => {
+    const { service } = makeService();
+    await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "past due one",
+      dueDate: "2026-08-20",
+    });
+    const created = await service.assignTask(carla, {
+      assigneeUsername: "bob",
+      title: "past due two",
+      dueDate: "2026-08-21",
+    });
+    if (!created.ok) throw new Error("setup failed");
+    await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "future one",
+      dueDate: "2026-09-10",
+    });
+
+    const report = await buildStandup(service, carla, NOW);
+    expect(report.overdue).toBe(2);
+    const text = formatStandup(report);
+    expect(text).toContain("⚠️ Overdue: 2");
+
+    const blockedIdx = text.indexOf("🚧 Blocked:");
+    const overdueIdx = text.indexOf("⚠️ Overdue:");
+    const firstDetailIdx = text.indexOf("📝 To do (");
+    expect(overdueIdx).toBeGreaterThan(blockedIdx);
+    expect(overdueIdx).toBeLessThan(firstDetailIdx);
+  });
+
+  it("renders Overdue: 0 when nothing is overdue (H17)", async () => {
+    const { service } = makeService();
+    const report = await buildStandup(service, carla, NOW);
+    expect(report.overdue).toBe(0);
+    const text = formatStandup(report);
+    expect(text).toContain("⚠️ Overdue: 0");
+  });
+
+  it("does not count a past-due done task as overdue (H17)", async () => {
+    const { service } = makeService();
+    const created = await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "past due but done",
+      dueDate: "2026-08-01",
+    });
+    if (!created.ok) throw new Error("setup failed");
+    await service.setStatus(alice, created.value.id, "done");
+
+    const report = await buildStandup(service, carla, NOW);
+    expect(report.overdue).toBe(0);
+  });
+
   it("is a distinct formatter from the digest's formatGroupDailySummary", () => {
     expect(formatStandup).not.toBe(formatGroupDailySummary as unknown as typeof formatStandup);
   });
