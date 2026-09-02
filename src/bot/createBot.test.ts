@@ -1538,7 +1538,7 @@ describe("Blocked notifications have no inline buttons — the review gate they 
 });
 
 describe("/task <id> appends a per-status next-step hint (issue #27/#29/#31)", () => {
-  it("hints at /done for a todo task", async () => {
+  it("hints at /update <id> in progress for a todo task, not /done (H4)", async () => {
     const roster = makeRoster();
     const testBot = makeTestBot(roster);
     const higherUpId = nextUserId();
@@ -1552,7 +1552,8 @@ describe("/task <id> appends a per-status next-step hint (issue #27/#29/#31)", (
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/task ${task.value.id}`));
     const text = lastReplyText(testBot.calls);
     expect(text).toContain("Status: To do");
-    expect(text).toMatch(/\/done/);
+    expect(text).toContain("/update <id> in progress");
+    expect(text).not.toContain("/done");
   });
 
   it("also accepts a t-prefixed ref (/task t<id>), issue #31's shared ref parser", async () => {
@@ -1586,6 +1587,29 @@ describe("/task <id> appends a per-status next-step hint (issue #27/#29/#31)", (
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/task ${task.value.id}`));
     const text = lastReplyText(testBot.calls);
     expect(text).toContain("Nice work!");
+  });
+
+  it("no next-step hint contains a literal backtick — there is no parse_mode to render Markdown (H5)", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const caller = { username: "carla", role: "HigherUp" as const, cohortId: COHORT };
+
+    for (const status of ["backlog", "todo", "in_progress", "in_review", "blocked", "done"] as const) {
+      const task = await testBot.service.assignTask(caller, {
+        assigneeUsername: "alice",
+        title: "Ship it",
+        description: "d",
+        dueDate: "2026-09-05",
+      });
+      if (!task.ok) throw new Error("setup failed");
+      await testBot.service.setStatus(caller, task.value.id, status);
+
+      await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/task ${task.value.id}`));
+      const text = lastReplyText(testBot.calls);
+      expect(text).not.toContain("`");
+    }
   });
 
   it("a task with enough notes to exceed Telegram's 4096-character limit sends multiple messages and does not throw (issue #55/F8)", async () => {
@@ -2502,6 +2526,20 @@ describe("/done and /complete — Devie's deliberate wart (issue #27/#31)", () =
       taskId,
     );
     expect(result.ok && result.value.status).toBe("in_review");
+  });
+
+  it("/done <ref> replies with In review wording, not the removed 'submitted' vocabulary (H11)", async () => {
+    const taskId = await seedTask();
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/done ${taskId}`));
+
+    const ownReply = testBot.calls.find(
+      (c) => c.method === "sendMessage" && Number(c.payload.chat_id) === higherUpId,
+    );
+    const text = ownReply?.payload.text as string;
+    expect(text).toBe(`Task ${taskId} is now In review. Nice work!`);
+    expect(text).not.toContain("submitted");
   });
 
   it("/complete <ref> sets done", async () => {

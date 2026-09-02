@@ -1,5 +1,7 @@
+import { DateTime } from "luxon";
 import type { TaskWithFlags } from "../service/taskService.js";
 import type { Role, TaskStatus } from "../domain/types.js";
+import { MANILA_ZONE } from "../domain/overdue.js";
 
 /** Display labels for the six free-set statuses (#27's normative status
  * table) — the only place this vocabulary is spelled out for user-facing
@@ -122,10 +124,10 @@ export function formatPending(tasks: TaskWithFlags[]): string {
 
 export function formatBacklog(tasks: TaskWithFlags[]): string {
   if (tasks.length === 0) {
-    return "Nothing in the backlog — no overdue tasks.";
+    return "Nothing is overdue.";
   }
   return [
-    "Backlog (overdue tasks):",
+    "Overdue:",
     ...tasks.map(
       (t) =>
         `- #${t.id} ${t.title} — ${t.daysOverdue} day(s) overdue (assigned to @${t.assigneeUsername})`,
@@ -168,6 +170,16 @@ export function formatApproved(tasks: TaskWithFlags[]): string {
   ].join("\n");
 }
 
+/** Renders a note's stored UTC ISO `createdAt` as a short Manila-resolved
+ * timestamp (H12) — every other date in the product is Asia/Manila-resolved,
+ * and raw UTC instants (millisecond precision, `T`/`Z` separators) stood out
+ * as the one exception. Falls back to the raw stored string, rather than the
+ * string "Invalid DateTime", when the value can't be parsed. */
+function formatNoteTimestamp(createdAt: string): string {
+  const dt = DateTime.fromISO(createdAt, { zone: MANILA_ZONE });
+  return dt.isValid ? dt.toFormat("LLL d, HH:mm") : createdAt;
+}
+
 export function formatTaskDetail(task: TaskWithFlags): string {
   const flags: string[] = [];
   if (task.overdue) flags.push(`OVERDUE (${task.daysOverdue} day(s))`);
@@ -178,7 +190,7 @@ export function formatTaskDetail(task: TaskWithFlags): string {
     task.notes.length === 0
       ? "No notes yet."
       : task.notes
-          .map((n) => `  [${n.createdAt}] @${n.authorUsername}: ${n.text}`)
+          .map((n) => `  [${formatNoteTimestamp(n.createdAt)}] @${n.authorUsername}: ${n.text}`)
           .join("\n");
 
   return [
