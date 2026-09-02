@@ -1589,6 +1589,29 @@ describe("/task <id> appends a per-status next-step hint (issue #27/#29/#31)", (
     expect(text).toContain("Nice work!");
   });
 
+  it("no next-step hint contains a literal backtick — there is no parse_mode to render Markdown (H5)", async () => {
+    const roster = makeRoster();
+    const testBot = makeTestBot(roster);
+    const higherUpId = nextUserId();
+    await registerCaller(testBot, higherUpId, "carla");
+    const caller = { username: "carla", role: "HigherUp" as const, cohortId: COHORT };
+
+    for (const status of ["backlog", "todo", "in_progress", "in_review", "blocked", "done"] as const) {
+      const task = await testBot.service.assignTask(caller, {
+        assigneeUsername: "alice",
+        title: "Ship it",
+        description: "d",
+        dueDate: "2026-09-05",
+      });
+      if (!task.ok) throw new Error("setup failed");
+      await testBot.service.setStatus(caller, task.value.id, status);
+
+      await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/task ${task.value.id}`));
+      const text = lastReplyText(testBot.calls);
+      expect(text).not.toContain("`");
+    }
+  });
+
   it("a task with enough notes to exceed Telegram's 4096-character limit sends multiple messages and does not throw (issue #55/F8)", async () => {
     const roster = makeRoster();
     const testBot = makeTestBot(roster);

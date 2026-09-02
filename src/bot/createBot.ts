@@ -73,13 +73,15 @@ const PAST_DUE_WARNING = "⚠️ That due date is already in the past.";
 /** Per-status next-step hint appended to `/task <id>`'s detail reply (#27's
  * status table). There's no more gated "you can't act on this" case — any
  * roster member may move a task to any status — so every hint just
- * suggests the obvious next command rather than describing a permission. */
+ * suggests the obvious next command rather than describing a permission.
+ * Plain text, no Markdown: the bot sends no `parse_mode` anywhere, so
+ * backticks would render literally instead of as code formatting (H5). */
 const NEXT_STEP_HINT: Record<TaskStatus, string> = {
-  backlog: "Send `/update <id> todo` to move it to To do status.",
-  todo: "Send `/update <id> in progress` once you start it.",
-  in_progress: "Send `/done <id>` when you're done.",
-  in_review: "It's now awaiting review. Send `/complete <id>` to mark it Done.",
-  blocked: "Send `/unblock <id>` once it's unblocked.",
+  backlog: "Send /update <id> todo to move it to To do status.",
+  todo: "Send /update <id> in progress once you start it.",
+  in_progress: "Send /done <id> when you're ready for review.",
+  in_review: "It's waiting for review. Send /complete <id> to mark it Done.",
+  blocked: "Send /unblock <id> once it's unblocked.",
   done: "Nice work!",
 };
 
