@@ -20,7 +20,7 @@ export interface InternDailyCounts {
  */
 export function formatGroupDailySummary(perIntern: InternDailyCounts[]): string {
   if (perIntern.length === 0) {
-    return "Nothing to report today — the cohort has no open tasks.";
+    return "Nothing to report today — everyone's clear.";
   }
 
   const totals = perIntern.reduce(
@@ -32,7 +32,7 @@ export function formatGroupDailySummary(perIntern: InternDailyCounts[]): string 
     { onTrack: 0, overdue: 0, blocked: 0 },
   );
 
-  const header = `${totals.onTrack} on track, ${totals.overdue} overdue, ${totals.blocked} blocked`;
+  const header = `Today's status: ${totals.onTrack} on track, ${totals.overdue} overdue, ${totals.blocked} blocked`;
 
   const lines = perIntern.map((i) => {
     if (i.onTrack === 0 && i.overdue === 0 && i.blocked === 0) {

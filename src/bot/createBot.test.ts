@@ -685,7 +685,7 @@ describe("direct /edit <task_id> <field> <value> (issue #30)", () => {
     );
 
     const text = lastReplyText(testBot.calls);
-    expect(text).toMatch(/isn't a known roster member/i);
+    expect(text).toMatch(/don't see @bobb on this cohort's roster/i);
     expect(text).toMatch(/did you mean @bob/i);
   });
 
@@ -1112,7 +1112,7 @@ describe("direct /addtask one-liner (issue #27/#30)", () => {
     await addtask(internId, "Fix the login page @bobb"); // typo of bob
 
     const text = lastReplyText(testBot.calls);
-    expect(text).toMatch(/isn't a known roster member/i);
+    expect(text).toMatch(/don't see @bobb on this cohort's roster/i);
     expect(text).toMatch(/did you mean @bob/i);
 
     const list = await testBot.service.listAllTasks({
@@ -1384,7 +1384,7 @@ describe("group chat does not answer other bots' commands or bare unknown comman
 
     await testBot.bot.handleUpdate(messageUpdate(userId, userId, "/nonsense"));
 
-    expect(lastReplyText(testBot.calls)).toBe("Not sure what you mean — try /help");
+    expect(lastReplyText(testBot.calls)).toBe("Not sure what you're asking — try /help to see what I can do.");
   });
 
   it("does not reply to an unknown command explicitly addressed to another bot, even in a DM", async () => {
@@ -1502,7 +1502,7 @@ describe("/blocked (no arguments): read-only blocked list, issue #6", () => {
     );
 
     const text = lastReplyText(testBot.calls);
-    expect(text).toMatch(/flagged as blocked/i);
+    expect(text).toMatch(/flagged as 🚧 blocked/i);
 
     const result = await testBot.service.getTask(
       { username: "carla", role: "HigherUp", cohortId: COHORT },
@@ -1548,7 +1548,7 @@ describe("Blocked notifications have no inline buttons — the review gate they 
     const callbackData = lastKeyboardCallbackData(testBot.calls);
     expect(callbackData).toEqual([]);
     const text = lastReplyText(testBot.calls);
-    expect(text).toMatch(/flagged as blocked/i);
+    expect(text).toMatch(/flagged as 🚧 blocked/i);
   });
 
   it("the removed unblock: callback is unrecognized — tapping a stale button does nothing", async () => {
@@ -1573,7 +1573,7 @@ describe("Blocked notifications have no inline buttons — the review gate they 
       taskId,
     );
     expect(result.ok && result.value.status).not.toBe("blocked");
-    expect(lastReplyText(testBot.calls)).toMatch(/no longer blocked/i);
+    expect(lastReplyText(testBot.calls)).toMatch(/no longer 🚧 blocked/i);
   });
 
   it("/unblock also accepts a t-prefixed task ref", async () => {
@@ -1853,7 +1853,7 @@ describe("Stage 5: notification correctness (issue #54, findings F4/F5/F13)", ()
 
     await created.bot.handleUpdate(messageUpdate(carlaId, carlaId, `/blocked ${task.value.id} stuck`));
 
-    expect(lastReplyText(calls)).toMatch(/flagged as blocked/i);
+    expect(lastReplyText(calls)).toMatch(/flagged as 🚧 blocked/i);
   });
 
   it("/addtask ... @bob where bob has never run /start warns in the reply (F13)", async () => {
@@ -2387,7 +2387,7 @@ describe("/update <ref> <status> — generic status setter (issue #27/#31)", () 
 
     const text = lastReplyText(testBot.calls);
     expect(text).toBe(
-      'I don\'t recognize "finished" as a status. Valid statuses: backlog, todo, in progress, in review, blocked, done',
+      'I don\'t recognize "finished" as a status — valid ones are: backlog, todo, in progress, in review, blocked, done',
     );
   });
 
@@ -2573,7 +2573,7 @@ describe("Stage 4: bulk and multiline /update, with partial-failure reporting (i
 
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, `/update t${t1} done`));
 
-    expect(lastReplyText(testBot.calls)).toBe(`Task ${t1} set to Done.`);
+    expect(lastReplyText(testBot.calls)).toBe(`Task ${t1} set to ✅ Done.`);
   });
 
   it("duplicate refs in one batch are each applied, independently, in order", async () => {
@@ -2706,7 +2706,7 @@ describe("/done and /complete — Devie's deliberate wart (issue #27/#31)", () =
       (c) => c.method === "sendMessage" && Number(c.payload.chat_id) === higherUpId,
     );
     const text = ownReply?.payload.text as string;
-    expect(text).toBe(`Task ${taskId} is now In review. Nice work!`);
+    expect(text).toBe(`Task ${taskId} is now 👀 In review. Nice work!`);
     expect(text).not.toContain("submitted");
   });
 
@@ -3103,7 +3103,7 @@ describe("Group-gated /start creates its own roster row (R3/#88)", () => {
     await testBot.bot.handleUpdate(startUpdate(erinId, "erin"));
 
     expect(lastReplyText(testBot.calls)).toBe(
-      "You're not on the roster yet — contact a higher-up to get added.",
+      "You're not on the roster yet — ping a higher-up to get added, then try again.",
     );
     expect(lastKeyboardCallbackData(testBot.calls)).toEqual([]);
     expect(await testBot.registrations.findUsername(erinId)).toBeUndefined();
@@ -3418,7 +3418,7 @@ describe("Stage 4 (N4): an expired form's next answer gets an expiry notice, not
     await testBot.bot.handleUpdate(messageUpdate(higherUpId, higherUpId, "hello again"));
 
     expect(lastReplyText(testBot.calls)).not.toContain("That form expired");
-    expect(lastReplyText(testBot.calls)).toContain("Not sure what you mean");
+    expect(lastReplyText(testBot.calls)).toContain("Not sure what you're asking");
   });
 
   it("a user with no wizard at all still gets the unchanged unknown-text reply in a DM", async () => {
@@ -3429,7 +3429,7 @@ describe("Stage 4 (N4): an expired form's next answer gets an expiry notice, not
 
     await testBot.bot.handleUpdate(messageUpdate(userId, userId, "just chatting"));
 
-    expect(lastReplyText(testBot.calls)).toBe("Not sure what you mean — try /help");
+    expect(lastReplyText(testBot.calls)).toBe("Not sure what you're asking — try /help to see what I can do.");
   });
 
   it("an expired /edit wizard produces the same expiry notice", async () => {

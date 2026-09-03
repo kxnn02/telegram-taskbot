@@ -20,6 +20,15 @@ export function statusLabel(status: TaskStatus): string {
   return STATUS_LABELS[status];
 }
 
+export const STATUS_EMOJI: Record<TaskStatus, string> = {
+  in_progress: "🔄",
+  in_review: "👀",
+  todo: "📝",
+  backlog: "📦",
+  blocked: "🚧",
+  done: "✅",
+};
+
 /** Tasks per page for the paginated list commands (/alltasks, /mytasks) —
  * issue #7. A command-argument page number was chosen over inline
  * Next/Previous buttons: both commands can be run in the group chat by
@@ -61,15 +70,15 @@ function paginationFooter(
 
 export function formatTaskLine(task: TaskWithFlags): string {
   const flags: string[] = [];
-  if (task.overdue) flags.push(`OVERDUE ${task.daysOverdue}d`);
-  if (task.status === "blocked") flags.push("BLOCKED");
+  if (task.overdue) flags.push(`⚠️ OVERDUE ${task.daysOverdue}d`);
+  if (task.status === "blocked") flags.push("🚧 BLOCKED");
   const flagText = flags.length > 0 ? ` [${flags.join(", ")}]` : "";
-  return `#${task.id} ${task.title} — ${statusLabel(task.status)} (due ${task.dueDate})${flagText}`;
+  return `#${task.id} ${task.title} — ${STATUS_EMOJI[task.status]} ${statusLabel(task.status)} (due ${task.dueDate})${flagText}`;
 }
 
 export function formatMyTasks(tasks: TaskWithFlags[], page = 1): string {
   if (tasks.length === 0) {
-    return "You have no tasks right now.";
+    return "You're all clear — no tasks right now.";
   }
   const paged = paginate(tasks, page);
   const lines = [
@@ -128,13 +137,13 @@ export function formatPending(tasks: TaskWithFlags[]): string {
 
 export function formatBacklog(tasks: TaskWithFlags[]): string {
   if (tasks.length === 0) {
-    return "Nothing is overdue.";
+    return "Nothing's overdue — nice.";
   }
   return [
     "Overdue:",
     ...tasks.map(
       (t) =>
-        `- #${t.id} ${t.title} — ${t.daysOverdue} day(s) overdue (assigned to @${t.assigneeUsername})`,
+        `- ⚠️ #${t.id} ${t.title} — ${t.daysOverdue} day(s) overdue (assigned to @${t.assigneeUsername})`,
     ),
   ].join("\n");
 }
@@ -145,7 +154,7 @@ export function formatDeadlines(tasks: TaskWithFlags[]): string {
   }
   return [
     "Due in the next 7 days:",
-    ...tasks.map((t) => `- ${formatTaskLine(t)} (assigned to @${t.assigneeUsername})`),
+    ...tasks.map((t) => `- ⏰ ${formatTaskLine(t)} (assigned to @${t.assigneeUsername})`),
   ].join("\n");
 }
 
@@ -347,10 +356,7 @@ export function chunkMessage(text: string, limit = 4000): string[] {
 
 export function formatHelp(role: Role | undefined): string {
   if (!role) {
-    return [
-      "You're not registered yet.",
-      "Run /start to link your Telegram account to the roster.",
-    ].join("\n");
+    return "You're not registered yet — send /start to link your Telegram account to the roster.";
   }
   return [
     "Available Commands",

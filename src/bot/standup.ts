@@ -1,6 +1,6 @@
 import type { TaskService, TaskWithFlags } from "../service/taskService.js";
 import type { Caller, TaskStatus } from "../domain/types.js";
-import { formatTaskLine, statusLabel } from "./format.js";
+import { formatTaskLine, statusLabel, STATUS_EMOJI } from "./format.js";
 import { MANILA_ZONE } from "../domain/overdue.js";
 
 const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
@@ -17,15 +17,6 @@ const DETAIL_STATUS_ORDER: TaskStatus[] = [
   "backlog",
   "blocked",
 ];
-
-const STATUS_EMOJI: Record<TaskStatus, string> = {
-  in_progress: "🔄",
-  in_review: "👀",
-  todo: "📝",
-  backlog: "📦",
-  blocked: "🚧",
-  done: "✅",
-};
 
 export interface StandupMemberGroup {
   username: string;

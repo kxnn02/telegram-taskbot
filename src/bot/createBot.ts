@@ -32,6 +32,7 @@ import {
   formatRoster,
   formatTaskDetail,
   statusLabel,
+  STATUS_EMOJI,
 } from "./format.js";
 import { buildStandup, formatStandup } from "./standup.js";
 import type { Caller, Role, TaskStatus } from "../domain/types.js";
@@ -204,7 +205,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       console.error(err);
       try {
         await ctx.reply(
-          "Something went wrong on my end and that command didn't finish. Please try again in a moment — send /task <ref> first if you want to check whether it went through.",
+          "Something went wrong on my end — that didn't go through. Try again in a moment, or send /task <ref> to check whether it actually saved.",
         );
       } catch (replyErr) {
         console.error(replyErr);
@@ -231,7 +232,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         ) {
           await wizards.cancel(userId);
           await ctx.reply(
-            "Cancelled your in-progress form since you sent a new command.",
+            "No worries — I cancelled your in-progress form since you sent a new command.",
           );
         }
       }
@@ -252,7 +253,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   }
 
   function welcomeReply(username: string, role: Role, cohortId: string): string {
-    return `Welcome, @${username}! You're registered as ${role === "HigherUp" ? "a higher-up" : "an intern"} for ${cohortId}. Send /help to see what you can do.`;
+    return `Hey @${username}! You're set up as ${role === "HigherUp" ? "a higher-up" : "an intern"} for ${cohortId} — send /help anytime to see what I can do.`;
   }
 
   function roleKeyboard(): InlineKeyboard {
@@ -261,14 +262,14 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       .text("Higher-up", "startrole:higherup");
   }
 
-  const NOT_ON_ROSTER_TEXT = "You're not on the roster yet — contact a higher-up to get added.";
+  const NOT_ON_ROSTER_TEXT = "You're not on the roster yet — ping a higher-up to get added, then try again.";
 
   bot.command("start", async (ctx) => {
     const from = ctx.from;
     const username = from?.username;
     if (!username || !from) {
       await ctx.reply(
-        "You don't have a Telegram username set. Set one in Telegram's " +
+        "You'll need a Telegram username first — set one in Telegram's " +
           "settings, then send /start again.",
       );
       return;
@@ -314,7 +315,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }
     if (check.kind === "absent") {
       // Row 6.
-      await ctx.reply("This bot is for the cohort's Telegram group members.");
+      await ctx.reply("This bot's for the cohort's Telegram group members — join the group first, then try /start again.");
       return;
     }
     // Row 7 — the fallback. Not "allow anyone": create nothing, same
@@ -335,7 +336,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     const username = tapper.username;
     if (!username) {
       await ctx.answerCallbackQuery({
-        text: "You don't have a Telegram username set.",
+        text: "You'll need a Telegram username set first.",
       });
       return;
     }
@@ -347,7 +348,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     const check = await checkGroupMembership(bot.api, groupChatId, tapper.id);
     if (check.kind !== "present") {
       await ctx.answerCallbackQuery({
-        text: "You're not currently a member of the cohort's group.",
+        text: "You're not currently in the cohort's group — join it first.",
       });
       return;
     }
@@ -357,7 +358,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     // overwritten via these buttons.
     const existingEntry = roster.find(normalizedUsername, options.activeCohortId);
     if (existingEntry && hasHigherUp(options.activeCohortId)) {
-      await ctx.answerCallbackQuery({ text: "You're already registered." });
+      await ctx.answerCallbackQuery({ text: "You're already registered — send /help to see what you can do." });
       return;
     }
 
@@ -395,7 +396,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     const userId = ctx.from?.id;
     if (userId === undefined) return;
     const had = await wizards.cancel(userId);
-    await ctx.reply(had ? "Cancelled." : "Nothing to cancel.");
+    await ctx.reply(had ? "Cancelled." : "Nothing to cancel — you don't have a form in progress.");
   });
 
   // ---- Not-registered guard for everything else below --------------------
@@ -411,9 +412,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       return undefined;
     }
     if (resolved.status === "not_on_roster") {
-      await ctx.reply(
-        "You're not on the roster yet — contact a higher-up to get added.",
-      );
+      await ctx.reply(NOT_ON_ROSTER_TEXT);
       return undefined;
     }
     return resolved.caller;
@@ -615,7 +614,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       registrations,
       result.value,
       caller.username,
-      `Task ${id} ("${result.value.title}") status changed to ${statusLabel(status)} by @${caller.username}. Send /task ${id} for details.`,
+      `Task ${id} ("${result.value.title}") status changed to ${STATUS_EMOJI[status]} ${statusLabel(status)} by @${caller.username}. Send /task ${id} for details.`,
     );
   }
 
@@ -738,11 +737,11 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         const status = parseStatusWord(statusText);
         if (!status) {
           await ctx.reply(
-            `I don't recognize "${statusText.trim()}" as a status. Valid statuses: ${VALID_STATUS_WORDS_TEXT}`,
+            `I don't recognize "${statusText.trim()}" as a status — valid ones are: ${VALID_STATUS_WORDS_TEXT}`,
           );
           return;
         }
-        await applyStatusChange(caller, item.ref, status, ctx, `set to ${statusLabel(status)}.`);
+        await applyStatusChange(caller, item.ref, status, ctx, `set to ${STATUS_EMOJI[status]} ${statusLabel(status)}.`);
         return;
       }
       const outcomes = await runBatch(caller, items, (item) => {
@@ -771,7 +770,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
           await ctx.reply("Usage: /done <ref>");
           return;
         }
-        await applyStatusChange(caller, item.ref, "in_review", ctx, "is now In review. Nice work!");
+        await applyStatusChange(caller, item.ref, "in_review", ctx, "is now 👀 In review. Nice work!");
         return;
       }
       const outcomes = await runBatch(caller, items, () => ({ status: "in_review" }));
@@ -794,7 +793,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
           await ctx.reply("Usage: /complete <ref>");
           return;
         }
-        await applyStatusChange(caller, item.ref, "done", ctx, "marked Done. Nice work!");
+        await applyStatusChange(caller, item.ref, "done", ctx, "marked ✅ Done. Nice work!");
         return;
       }
       const outcomes = await runBatch(caller, items, () => ({ status: "done" }));
@@ -811,7 +810,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         return;
       }
       const result = await service.clearBlocked(caller, id);
-      await ctx.reply(result.ok ? `Task ${id} is no longer blocked.` : result.error);
+      await ctx.reply(result.ok ? `Task ${id} is no longer 🚧 blocked.` : result.error);
     }),
   );
 
@@ -877,13 +876,13 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await ctx.reply(result.error);
         return;
       }
-      await ctx.reply(`Task ${id} flagged as blocked.`);
+      await ctx.reply(`Task ${id} flagged as 🚧 blocked.`);
       await notifyStatusChange(
         bot,
         registrations,
         result.value,
         caller.username,
-        `Task ${id} ("${result.value.title}", @${result.value.assigneeUsername}) was flagged as blocked: ${result.value.blockedReason}`,
+        `Task ${id} ("${result.value.title}", @${result.value.assigneeUsername}) was flagged as 🚧 blocked: ${result.value.blockedReason}`,
       );
     }),
   );
@@ -930,7 +929,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   function unknownRosterMemberReply(username: string, cohortId: string): string {
     const suggestion = suggestClosestUsername(username, memberUsernamesInCohort(cohortId));
     const suggestionText = suggestion ? ` Did you mean @${suggestion}?` : "";
-    return `@${username} isn't a known roster member in this cohort.${suggestionText}`;
+    return `I don't see @${username} on this cohort's roster.${suggestionText}`;
   }
 
   // Shared by `/addtask <args>` and the mention trigger (issue #34, which
@@ -1201,7 +1200,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     const userId = ctx.from.id;
     const state = await wizards.get(userId);
     if (!state || state.step !== "awaiting_field_choice") {
-      await ctx.answerCallbackQuery({ text: "That form has expired." });
+      await ctx.answerCallbackQuery({ text: "That form's expired — send the command again to start a new one." });
       return;
     }
     if (state.data.chatId !== undefined && state.data.chatId !== ctx.chat?.id) {
@@ -1272,7 +1271,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       // Reaching here means no bot.command() handler above matched it —
       // i.e. an unrecognized command (PRD §6).
       if (ctx.chat.type === "private" && !isAddressedToOtherBot(text, bot.botInfo.username)) {
-        await ctx.reply("Not sure what you mean — try /help");
+        await ctx.reply("Not sure what you're asking — try /help to see what I can do.");
       }
       return;
     }
@@ -1323,7 +1322,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       // not just ones meant for it — only DMs can assume every message is
       // addressed to the bot, so only reply with the fallback there.
       if (ctx.chat.type === "private") {
-        await ctx.reply("Not sure what you mean — try /help");
+        await ctx.reply("Not sure what you're asking — try /help to see what I can do.");
       }
       return;
     }
@@ -1497,7 +1496,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     const userId = ctx.from.id;
     const state = await wizards.get(userId);
     if (!state || state.step !== "awaiting_due_date_confirm") {
-      await ctx.answerCallbackQuery({ text: "That form has expired." });
+      await ctx.answerCallbackQuery({ text: "That form's expired — send the command again to start a new one." });
       return;
     }
     if (state.data.chatId !== undefined && state.data.chatId !== ctx.chat?.id) {
