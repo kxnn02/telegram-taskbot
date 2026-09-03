@@ -39,6 +39,16 @@ up the codebase later.
 > registration moved from a hand-edited config file to group-gated self-registration via `/start`,
 > plus an in-product `/roster` command for group-admin-gated roster management. See the "Roster
 > registration" entry below.
+>
+> **A fourth change restores the pre-production gate the cutover removed**
+> ([ADR-0011](./docs/adr/0011-post-cutover-dry-run-loop.md)): the dry run gets its own Telegram
+> bot, so its webhook and production's can be live at the same time — before this, one bot token
+> meant one webhook, and production owning it left nothing between a merge and the live cohort but
+> `Typecheck + fast suite`. `dry-run` becomes a force-pushed deploy target rather than a merge
+> stage, and webhook registration becomes a guarded script
+> (`npm run webhook:register`, `src/ops/webhookRegistration.ts`) instead of a remembered
+> `curl`. The operational steps live in
+> [`docs/runbooks/dry-run-loop.md`](./docs/runbooks/dry-run-loop.md).
 
 ## Glossary
 

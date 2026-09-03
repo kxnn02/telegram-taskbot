@@ -1,7 +1,9 @@
 # ADR-0004: Webhook transport, dedup, and dry-run strategy
 
 - **Status**: Accepted, implemented — webhook cut over from the dry-run deployment to production
-  2026-09-02
+  2026-09-02. The dry-run *transport* (one shared bot token) and the
+  branch flow below are **superseded by [ADR-0011](./0011-post-cutover-dry-run-loop.md)**, which
+  moves the dry run onto its own bot; the cohort-isolation and dedup decisions still stand
 - **Date**: 2026-08-31
 - **Depends on**: ADR-0001
 
@@ -48,7 +50,10 @@ Supabase/roster/group → call Telegram's API to repoint the webhook from the dr
 production → confirm the dry-run URL stops receiving traffic. This is manual because reusing one
 bot token means only one webhook URL can be active at a time — there is no automatic hand-off.
 
-**Branch flow, pre-cutover**: because `dry-run` is the only branch actually exercised against
+**Branch flow, pre-cutover** (superseded by
+[ADR-0011](./0011-post-cutover-dry-run-loop.md), which makes `dry-run` a force-pushed deploy
+target rather than a merge stage — the chain below only worked while `dry-run` was the sole
+deployed branch): because `dry-run` is the only branch actually exercised against
 live Telegram traffic (the dump group), every feature branch merges into `dry-run` first — not
 `main`. Only after it's been exercised there does `dry-run` merge into `main`. Landing on `main`
 first and periodically catching `dry-run` up (as happened for a stretch before this was written

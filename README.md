@@ -14,8 +14,11 @@ the bot day-to-day, see [`USER_GUIDE.md`](./USER_GUIDE.md).
 > [#11](https://github.com/kxnn02/telegram-taskbot/issues/11)/[#17](https://github.com/kxnn02/telegram-taskbot/issues/17)
 > (both closed) for the spec and phased implementation plan. The bot runs on a Telegram webhook
 > (`/api/telegram/webhook`), scheduled jobs run on Supabase `pg_cron`/`pg_net` plus two
-> Vercel Cron jobs, and the dashboard is the Next.js app under `app/`. The dry-run deployment used
-> during the build is decommissioned from live traffic; the real Cohort 5 group is on production.
+> Vercel Cron jobs, and the dashboard is the Next.js app under `app/`. The real Cohort 5 group is
+> on production; the `dry-run` branch deployment is the pre-production gate every change is
+> exercised through first, on its own bot and its own cohort
+> ([ADR-0011](./docs/adr/0011-post-cutover-dry-run-loop.md),
+> [runbook](./docs/runbooks/dry-run-loop.md)).
 > The setup and running instructions below still cover local development (`npm run dev` against
 > the same Supabase-backed stack), not a separate legacy mode.
 
@@ -79,6 +82,25 @@ npm run test:watch
 npm run typecheck  # tsc --noEmit
 npm run test:live  # contract tests against the real Supabase project — needs
                     # SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY; see ADR-0005
+```
+
+## Shipping a change
+
+CI (typecheck + the fast suite) gates the merge; it cannot tell you whether a real person in a
+real group gets a sensible reply. That is what the dry-run loop is for — push the branch to the
+`dry-run` deploy target, drive it by hand in the dump group as the dry-run bot, then merge:
+
+```bash
+git push --force-with-lease origin HEAD:dry-run   # deploys to the dry-run branch URL
+# exercise it in the dump group, then open/merge the PR into main
+```
+
+Merging to `main` deploys straight to production and the live cohort. Full setup, smoke list and
+rollback steps: [`docs/runbooks/dry-run-loop.md`](./docs/runbooks/dry-run-loop.md).
+
+```bash
+npm run webhook:register -- --target dry-run --check   # inspect a webhook without writing
+npm run seed:roster                                    # seed the dry-run cohort
 ```
 
 ## Project structure

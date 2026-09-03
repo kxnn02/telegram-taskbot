@@ -15,7 +15,8 @@
     "sweep:test-cohorts": "tsx scripts/sweepStaleTestCohorts.ts",
     "seed:roster": "tsx scripts/seedRosterAndCohorts.ts",
     "dev": "tsx src/bot/index.ts",
-    "start": "node dist/bot/index.js"
+    "start": "node dist/bot/index.js",
+    "webhook:register": "tsx scripts/registerWebhook.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",
