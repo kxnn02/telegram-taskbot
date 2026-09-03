@@ -33,14 +33,14 @@ describe("formatGroupDailySummary", () => {
     ];
     const text = formatGroupDailySummary(counts);
     const allowedWordPattern =
-      /^[\d\s@a-zA-Z,.:()-]+$/; // usernames, counts, punctuation, plain summary words only
+      /^[\d\s@a-zA-Z,.:()'-]+$/; // usernames, counts, punctuation, plain summary words only
     expect(text).toMatch(allowedWordPattern);
     expect(text.toLowerCase()).not.toContain("onboarding");
   });
 
   it("suppresses a fully quiet cohort with a friendly all-clear message", () => {
     const text = formatGroupDailySummary([]);
-    expect(text).toBe("Nothing to report today — the cohort has no open tasks.");
+    expect(text).toBe("Nothing to report today — everyone's clear.");
   });
 
   it("gives a plain on-track line for an intern with nothing overdue or blocked", () => {

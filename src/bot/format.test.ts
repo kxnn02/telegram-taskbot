@@ -58,7 +58,7 @@ describe("formatBlocked", () => {
 
 describe("formatBacklog (H10 — /overdue no longer calls itself Backlog)", () => {
   it("says nothing is overdue when the list is empty", () => {
-    expect(formatBacklog([])).toBe("Nothing is overdue.");
+    expect(formatBacklog([])).toBe("Nothing's overdue — nice.");
   });
 
   it("heads the list with 'Overdue:', not 'Backlog'", () => {
