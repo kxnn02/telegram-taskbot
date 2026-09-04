@@ -13,6 +13,8 @@ import { SystemClock } from "../domain/clock.js";
 import type { NotificationJobDeps } from "./notificationJobs.js";
 import type { RosterReconciliationDeps } from "./rosterReconciliation.js";
 import type { NotifierBot } from "../notifications/scheduler.js";
+import type { SetupFailureReporter } from "./jobEndpoint.js";
+import { notifyJobFailure } from "./notifyJobFailure.js";
 
 /**
  * Shared dependency-construction for every `/api/jobs/*` endpoint (mirrors
@@ -132,3 +134,48 @@ export async function buildRosterReconciliationDeps(): Promise<RosterReconciliat
     throttle: new SupabaseAlertThrottleStore(supabase),
   };
 }
+
+/**
+ * The `SetupFailureReporter` the two Vercel-Cron endpoints hand to
+ * `guardSetup` (issue #43). Infra wire-up, so untested here for the same
+ * reason as the rest of this file.
+ *
+ * `report` rebuilds the reporting path from scratch rather than receiving it,
+ * because the whole point is that it is called when the caller's own attempt
+ * to build that path threw. It may therefore throw again — `guardSetup`
+ * expects that and swallows it.
+ *
+ * `log` is what actually closes the issue's silent-failure hole. A DM needs
+ * `BOT_TOKEN`, the Supabase credentials and `MAINTAINER_USERNAME`, which is
+ * the same config whose absence brings us here, so for that subset of
+ * failures Telegram is unreachable by construction and this line is the only
+ * record that anything happened.
+ */
+export function makeSetupReporter(): SetupFailureReporter {
+  return {
+    log(jobName, error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // eslint-disable-next-line no-console
+      console.error(
+        `[job:${jobName}] setup failed before error reporting was available: ${message}`,
+      );
+    },
+    async report(jobName, error) {
+      const env = loadErrorReportingEnv();
+      const client = createSupabaseClient();
+      const deps = await buildErrorReportingDeps(client);
+      await notifyJobFailure(
+        {
+          bot: deps.bot,
+          registrations: deps.registrations,
+          throttle: deps.throttle,
+          maintainerUsername: env.maintainerUsername,
+        },
+        jobName,
+        env.activeCohortId,
+        error,
+      );
+    },
+  };
+}
+
