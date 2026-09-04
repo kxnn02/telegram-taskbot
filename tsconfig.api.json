@@ -12,5 +12,5 @@
     "noEmit": true,
     "noUncheckedIndexedAccess": true
   },
-  "include": ["api", "src"]
+  "include": ["api", "src", "scripts"]
 }
