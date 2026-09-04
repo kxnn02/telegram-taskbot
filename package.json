@@ -16,7 +16,8 @@
     "seed:roster": "tsx scripts/seedRosterAndCohorts.ts",
     "dev": "tsx src/bot/index.ts",
     "start": "node dist/bot/index.js",
-    "webhook:register": "tsx scripts/registerWebhook.ts"
+    "webhook:register": "tsx scripts/registerWebhook.ts",
+    "check:migrations": "tsx scripts/checkMigrationsApplied.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",

@@ -4,6 +4,12 @@ name: CI
 # the contract-test suite against the real Supabase project (needs live
 # network access and credentials) runs additionally on every push to main
 # only.
+#
+# ADR-0012: a third job, independent of the other two, fails a PR (and a push
+# to main) when supabase/migrations/ has a migration that has never been
+# applied to production. It runs on both events with no `if:` guard — the
+# pre-merge run is the gate, the post-merge run catches a migration reverted
+# out of the repo.
 
 on:
   push:
@@ -29,6 +35,23 @@ jobs:
       # Supabase credentials are needed since the dashboard's dynamic
       # routes aren't executed at build time, only type-checked/bundled.
       - run: npm run build:next
+
+  migrations:
+    name: Migrations applied to production
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.12.0"
+          cache: "npm"
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.109.1
+      - run: npm ci
+      - run: npm run check:migrations
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
 
   contract:
     name: Supabase contract tests (main only)

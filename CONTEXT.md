@@ -49,6 +49,15 @@ up the codebase later.
 > (`npm run webhook:register`, `src/ops/webhookRegistration.ts`) instead of a remembered
 > `curl`. The operational steps live in
 > [`docs/runbooks/dry-run-loop.md`](./docs/runbooks/dry-run-loop.md).
+>
+> **A fifth change closes the other gap ADR-0011 left open**
+> ([ADR-0012](./docs/adr/0012-migrations-applied-before-merge.md)): a `Migrations applied to
+> production` CI job (`npm run check:migrations`,
+> `scripts/checkMigrationsApplied.ts`/`src/migrations/migrationDrift.ts`) fails a PR when
+> `supabase/migrations/` has a migration that has never been applied to production. Migrations must
+> now be pushed to production before the code that needs them merges — safe only because every
+> migration in this project is additive. See
+> [`docs/runbooks/migrations.md`](./docs/runbooks/migrations.md).
 
 ## Glossary
 

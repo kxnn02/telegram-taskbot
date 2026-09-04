@@ -89,7 +89,7 @@ of which the dry-run loop addresses:
   contract suite against the real Supabase project runs afterwards in GitHub Actions — a green
   merge and a broken production deploy can coexist.
 - Database migrations are still applied by hand, with nothing verifying that the production
-  schema matches `supabase/migrations/`.
+  schema matches `supabase/migrations/`. Closed by [ADR-0012](0012-migrations-applied-before-merge.md).
 
 ## Alternatives rejected
 
