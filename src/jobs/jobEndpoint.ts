@@ -87,3 +87,66 @@ export async function reportConfigError(
   }
   return { status: 500 };
 }
+
+/**
+ * How a setup failure is announced. Split into two channels because they have
+ * different failure modes: `report` is the ADR-0007 self-DM, which needs
+ * `BOT_TOKEN`, Supabase credentials and `MAINTAINER_USERNAME` to work at all,
+ * and `log` is the deployment log, which needs nothing.
+ */
+export interface SetupFailureReporter {
+  /** The ADR-0007 maintainer DM. May legitimately be impossible — see `guardSetup`. */
+  report(jobName: string, error: unknown): Promise<void>;
+  /** Unconditional local trace. The only channel left when `report` cannot work. */
+  log(jobName: string, error: unknown): void;
+}
+
+/**
+ * Wraps a job endpoint's *setup* — the env reads and infra clients built
+ * before `handleJobEndpoint` can be called — so a misconfiguration is
+ * announced rather than thrown into an expiring log (issue #43).
+ *
+ * `handleJobEndpoint` already reports anything `work()` throws, but it cannot
+ * cover the lines that construct its own `onError`: until those succeed there
+ * is no reporting path to use. Those throws previously escaped as unhandled
+ * rejections, and because runtime logs are retained for about an hour, a job
+ * broken this way was indistinguishable from a job that had never been
+ * scheduled — which is precisely how `keep-alive` and `weekly-backup` sat
+ * dead for months.
+ *
+ * The log is emitted **before** the DM is attempted, and neither is allowed to
+ * change the response. That ordering is deliberate and load-bearing: the
+ * config whose absence lands us here — `BOT_TOKEN`, the Supabase credentials,
+ * `MAINTAINER_USERNAME` — is the same config a DM requires, so a subset of
+ * setup failures is structurally unreportable over Telegram. For those the log
+ * is the entire safety net, and it must not be conditional on the DM working.
+ *
+ * Errors from `run` are deliberately left alone: `handleJobEndpoint` owns
+ * those, and a deliberate 401/405 from it must reach the caller unchanged
+ * rather than being flattened into a 500.
+ */
+export async function guardSetup<T>(
+  jobName: string,
+  reporter: SetupFailureReporter,
+  setup: () => Promise<T>,
+  run: (built: T) => Promise<MinimalJobResponse>,
+): Promise<MinimalJobResponse> {
+  let built: T;
+  try {
+    built = await setup();
+  } catch (error) {
+    try {
+      reporter.log(jobName, error);
+    } catch {
+      // Nothing further to fall back on if even logging fails.
+    }
+    try {
+      await reporter.report(jobName, error);
+    } catch {
+      // Expected whenever the missing config is what the DM itself needs.
+    }
+    return { status: 500 };
+  }
+  return await run(built);
+}
+
