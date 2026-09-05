@@ -1,23 +1,5 @@
-import { readFileSync } from "node:fs";
-import type { RosterEntry } from "../domain/types.js";
 import { Roster } from "../domain/roster.js";
 import type { RosterStorePort } from "../storage/rosterStorePort.js";
-
-interface RosterConfigFile {
-  entries: RosterEntry[];
-}
-
-/** Loads the roster config file (PRD §2/§7, both superseded by ADR-0010).
- * Superseded in production by `loadRosterFromStore` below (ADR-0003) — a
- * gitignored file doesn't exist in a Vercel deployment. `roster.config.json`
- * itself was deleted per ADR-0010; this loader is kept only as a
- * `createBot` fallback for tests that still want a quick file-backed
- * roster, given an explicit `path`. */
-export function loadRoster(path = "roster.config.json"): Roster {
-  const raw = readFileSync(path, "utf-8");
-  const parsed = JSON.parse(raw) as RosterConfigFile;
-  return new Roster(parsed.entries);
-}
 
 /** Loads the roster from Supabase (ADR-0003): reads every row across every
  * cohort via the given `RosterStorePort` and wraps them in a `Roster`, the
