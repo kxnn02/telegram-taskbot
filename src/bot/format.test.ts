@@ -3,7 +3,6 @@ import type { TaskWithFlags } from "../service/taskService.js";
 import type { TaskStatus } from "../domain/types.js";
 import {
   chunkMessage,
-  formatAllTasksGrouped,
   formatApproved,
   formatBacklog,
   formatBlocked,
@@ -92,59 +91,6 @@ describe("formatMyTasks pagination", () => {
     expect(text).toContain("Page 2 of 2");
     expect(text).toContain("#11");
     expect(text).not.toContain("#10");
-  });
-});
-
-describe("formatAllTasksGrouped empty result (issue #65, finding H9)", () => {
-  it("reports plain emptiness when no filter was applied", () => {
-    expect(formatAllTasksGrouped([], 1)).toBe("No tasks in this cohort yet.");
-  });
-
-  it("reports the filter when a member filter matched nothing", () => {
-    expect(formatAllTasksGrouped([], 1, "@bob")).toBe("No tasks match @bob.");
-  });
-
-  it("reports the filter when a role filter matched nothing", () => {
-    expect(formatAllTasksGrouped([], 1, "intern")).toBe("No tasks match intern.");
-  });
-});
-
-describe("formatAllTasksGrouped pagination", () => {
-  it("shows no pagination footer for a small result set", () => {
-    const text = formatAllTasksGrouped(tasks(5));
-    expect(text).not.toMatch(/Page \d+ of \d+/);
-  });
-
-  it("paginates and preserves per-assignee grouping within a page", () => {
-    const aliceTasks = tasks(6, { assigneeUsername: "alice" });
-    const bobTasks = tasks(6, { assigneeUsername: "bob" }).map((t, i) => ({
-      ...t,
-      id: i + 7,
-      title: `Task ${i + 7}`,
-    }));
-    const all = [...aliceTasks, ...bobTasks];
-
-    const page1 = formatAllTasksGrouped(all, 1);
-    expect(page1).toContain("Page 1 of 2");
-    expect(page1).toContain("@alice:");
-    expect(page1).toContain("#1");
-    expect(page1).toContain("#10");
-    expect(page1).not.toContain("#11");
-
-    const page2 = formatAllTasksGrouped(all, 2);
-    expect(page2).toContain("Page 2 of 2");
-    expect(page2).toContain("#11");
-    expect(page2).toContain("#12");
-  });
-
-  it("hints at /tasks (not /alltasks) for the next page, with a filter prefix when given", () => {
-    const text = formatAllTasksGrouped(tasks(11), 1, "@alice");
-    expect(text).toContain("/tasks @alice 2");
-  });
-
-  it("hints at plain /tasks when no filter prefix is given (issue #33 renames /alltasks)", () => {
-    const text = formatAllTasksGrouped(tasks(11), 1);
-    expect(text).toContain("/tasks 2");
   });
 });
 

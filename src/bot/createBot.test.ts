@@ -175,6 +175,47 @@ function groupMessageUpdate(
   } as Update;
 }
 
+let callbackIdSeq = 1;
+
+/** An inline-button press. `chatId` and the carried `message_id` are what
+ * `editMessageText` edits in place (issue #103 items 1 and 3). */
+function callbackUpdate(
+  userId: number,
+  username: string,
+  chatId: number,
+  data: string,
+  messageId = 500,
+): Update {
+  return {
+    update_id: updateIdSeq++,
+    callback_query: {
+      id: String(callbackIdSeq++),
+      from: { id: userId, is_bot: false, first_name: "Test", username },
+      chat_instance: "1",
+      data,
+      message: {
+        message_id: messageId,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: chatId, type: "private", first_name: "Test" },
+        from: FAKE_BOT_INFO,
+        text: "previous page",
+      },
+    },
+  } as Update;
+}
+
+function lastCall(calls: RecordedCall[], method: string): RecordedCall | undefined {
+  return [...calls].reverse().find((c) => c.method === method);
+}
+
+interface RecordedKeyboard {
+  inline_keyboard: { text: string; callback_data: string }[][];
+}
+
+function keyboardOf(call: RecordedCall | undefined): RecordedKeyboard {
+  return (call?.payload.reply_markup ?? { inline_keyboard: [] }) as RecordedKeyboard;
+}
+
 function lastReplyText(calls: RecordedCall[]): string {
   const call = [...calls].reverse().find(
     (c) => c.method === "sendMessage" || c.method === "editMessageText",
@@ -382,6 +423,252 @@ describe("cohort isolation survives the strip (the one guarantee that must)", ()
 
     const text = lastReplyText(testBot.calls);
     expect(text).not.toContain("Secret task");
+  });
+});
+
+describe("paged /tasks (issue #103 items 1 and 2)", () => {
+  async function seedFor(
+    testBot: ReturnType<typeof makeTestBot>,
+    assignee: string,
+    title: string,
+  ) {
+    const created = await testBot.service.assignTask(
+      { username: "alice", cohortId: COHORT },
+      { assigneeUsername: assignee, title, dueDate: "2026-09-10" },
+    );
+    if (!created.ok) throw new Error("setup failed: " + created.error);
+    return created.value.id;
+  }
+
+  function threeMemberBot() {
+    const roster = new Roster([
+      { username: "alice", cohortId: COHORT },
+      { username: "bob", cohortId: COHORT },
+      { username: "carla", cohortId: COHORT },
+    ]);
+    return makeTestBot(roster);
+  }
+
+  it("sends the first page as HTML with a filter row and a nav row", async () => {
+    const testBot = threeMemberBot();
+    await seedFor(testBot, "alice", "Alice's task");
+    await seedFor(testBot, "bob", "Bob's task");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/tasks"));
+
+    const call = lastCall(testBot.calls, "sendMessage")!;
+    expect(call.payload.parse_mode).toBe("HTML");
+    expect(call.payload.text).toContain("📋 <b>Tasks</b>");
+    expect(call.payload.text).toContain("👤 <b>@alice</b>");
+    expect(call.payload.text).toContain("<i>(1 / 2)</i>");
+
+    const keyboard = keyboardOf(call);
+    expect(keyboard.inline_keyboard[0]).toEqual([
+      { text: "· All", callback_data: "tasks|all|0" },
+      { text: COHORT, callback_data: `tasks|${COHORT}|0` },
+    ]);
+    expect(keyboard.inline_keyboard[1]).toEqual([
+      { text: "◀ Prev", callback_data: "tasks|all|1" },
+      { text: "1 / 2", callback_data: "tasks|all|0" },
+      { text: "Next ▶", callback_data: "tasks|all|1" },
+    ]);
+  });
+
+  it("a Next press edits the same message in place instead of sending a new one", async () => {
+    const testBot = threeMemberBot();
+    await seedFor(testBot, "alice", "Alice's task");
+    await seedFor(testBot, "bob", "Bob's task");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      callbackUpdate(userId, "alice", userId, "tasks|all|1", 777),
+    );
+
+    const edit = lastCall(testBot.calls, "editMessageText")!;
+    expect(edit.payload.message_id).toBe(777);
+    expect(edit.payload.parse_mode).toBe("HTML");
+    expect(edit.payload.text).toContain("👤 <b>@bob</b>");
+    expect(edit.payload.text).toContain("<i>(2 / 2)</i>");
+    expect(lastCall(testBot.calls, "sendMessage")).toBeUndefined();
+  });
+
+  it("always answers the callback query so the button stops spinning", async () => {
+    const testBot = threeMemberBot();
+    await seedFor(testBot, "alice", "Alice's task");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(callbackUpdate(userId, "alice", userId, "tasks|all|0"));
+
+    expect(lastCall(testBot.calls, "answerCallbackQuery")).toBeDefined();
+  });
+
+  it("a filter press switches to that role filter and back to page 0", async () => {
+    const testBot = threeMemberBot();
+    await seedFor(testBot, "alice", "Alice's task");
+    await seedFor(testBot, "bob", "Bob's task");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      callbackUpdate(userId, "alice", userId, `tasks|${COHORT}|0`),
+    );
+
+    const edit = lastCall(testBot.calls, "editMessageText")!;
+    expect(edit.payload.text).toContain(`📋 <b>Tasks — ${COHORT}</b>`);
+    expect(keyboardOf(edit).inline_keyboard[0]).toEqual([
+      { text: "All", callback_data: "tasks|all|0" },
+      { text: `· ${COHORT}`, callback_data: `tasks|${COHORT}|0` },
+    ]);
+  });
+
+  it("anyone may press a button on someone else's list — no permission check (#103 rule 3)", async () => {
+    const testBot = threeMemberBot();
+    await seedFor(testBot, "alice", "Alice's task");
+    await seedFor(testBot, "bob", "Bob's task");
+    const strangerId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      callbackUpdate(strangerId, "stranger", -100, "tasks|all|1"),
+    );
+
+    const edit = lastCall(testBot.calls, "editMessageText")!;
+    expect(edit.payload.text).toContain("👤 <b>@bob</b>");
+    expect(allReplyTexts(testBot.calls).join("")).not.toMatch(/permission|not allowed/i);
+  });
+
+  it("/tasks @username filters to that member", async () => {
+    const testBot = threeMemberBot();
+    await seedFor(testBot, "alice", "Alice's task");
+    await seedFor(testBot, "bob", "Bob's task");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/tasks @bob"));
+
+    const text = lastCall(testBot.calls, "sendMessage")!.payload.text as string;
+    expect(text).toContain("👤 <b>@bob</b>");
+    expect(text).toContain("<i>(1 / 1)</i>");
+    expect(text).not.toContain("Alice&#39;s task");
+    expect(text).not.toContain("Alice's task");
+  });
+
+  it("/tasks <role> maps onto cohort_id, and an unknown role matches nothing", async () => {
+    const testBot = threeMemberBot();
+    await seedFor(testBot, "alice", "Alice's task");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, `/tasks ${COHORT}`));
+    expect(lastCall(testBot.calls, "sendMessage")!.payload.text).toContain("👤 <b>@alice</b>");
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/tasks cohort-9"));
+    expect(lastCall(testBot.calls, "sendMessage")!.payload.text).toBe(
+      "📋 <b>Tasks — cohort-9</b>\n\n<i>No active tasks for this filter.</i>",
+    );
+  });
+
+  it("cohort isolation: a callback cannot page into another cohort's tasks", async () => {
+    const roster = new Roster([
+      { username: "alice", cohortId: COHORT },
+      { username: "other", cohortId: "cohort-9" },
+    ]);
+    const testBot = makeTestBot(roster, COHORT);
+    await testBot.service.assignTask(
+      { username: "other", cohortId: "cohort-9" },
+      { assigneeUsername: "other", title: "Secret task", dueDate: "2026-09-10" },
+    );
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(callbackUpdate(userId, "alice", userId, "tasks|all|0"));
+    await testBot.bot.handleUpdate(callbackUpdate(userId, "alice", userId, "tasks|cohort-9|0"));
+
+    expect(allReplyTexts(testBot.calls).join("")).not.toContain("Secret task");
+  });
+
+  it("ignores a malformed tasks callback but still answers it", async () => {
+    const testBot = threeMemberBot();
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(callbackUpdate(userId, "alice", userId, "tasks|all|nope"));
+
+    expect(lastCall(testBot.calls, "editMessageText")).toBeUndefined();
+    expect(lastCall(testBot.calls, "answerCallbackQuery")).toBeDefined();
+  });
+});
+
+describe("standup filters (issue #103 item 3)", () => {
+  it("/standup sends the overview with Devie's five filter buttons", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/standup"));
+
+    const call = lastCall(testBot.calls, "sendMessage")!;
+    expect(call.payload.text).toContain("📊 Overview");
+    expect(keyboardOf(call).inline_keyboard[0]!.map((b) => b.callback_data)).toEqual([
+      "standup|overview|0",
+      "standup|active|0",
+      "standup|backlog|0",
+      "standup|review|0",
+      "standup|done|0",
+    ]);
+  });
+
+  it("a filter press edits the standup in place", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const created = await testBot.service.assignTask(
+      { username: "alice", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Parked idea", dueDate: "2026-09-10" },
+    );
+    if (!created.ok) throw new Error("setup failed");
+    await testBot.service.setStatus(
+      { username: "alice", cohortId: COHORT },
+      created.value.id,
+      "backlog",
+    );
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      callbackUpdate(userId, "alice", userId, "standup|backlog|0", 888),
+    );
+
+    const edit = lastCall(testBot.calls, "editMessageText")!;
+    expect(edit.payload.message_id).toBe(888);
+    expect(edit.payload.text).toContain("📦 Backlog (1)");
+    expect(edit.payload.text).toContain("Parked idea");
+    expect(keyboardOf(edit).inline_keyboard[0]!.map((b) => b.text)).toContain("· Backlog (1)");
+  });
+
+  it("ignores an unknown standup filter but still answers the callback", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(callbackUpdate(userId, "alice", userId, "standup|nope|0"));
+
+    expect(lastCall(testBot.calls, "editMessageText")).toBeUndefined();
+    expect(lastCall(testBot.calls, "answerCallbackQuery")).toBeDefined();
+  });
+
+  it("cohort isolation: a standup filter shows nothing from another cohort", async () => {
+    const roster = new Roster([
+      { username: "alice", cohortId: COHORT },
+      { username: "other", cohortId: "cohort-9" },
+    ]);
+    const testBot = makeTestBot(roster, COHORT);
+    await testBot.service.assignTask(
+      { username: "other", cohortId: "cohort-9" },
+      { assigneeUsername: "other", title: "Secret task", dueDate: "2026-09-10" },
+    );
+    const userId = nextUserId();
+
+    for (const filter of ["overview", "active", "backlog", "review", "done"]) {
+      await testBot.bot.handleUpdate(
+        callbackUpdate(userId, "alice", userId, `standup|${filter}|0`),
+      );
+    }
+
+    expect(allReplyTexts(testBot.calls).join("")).not.toContain("Secret task");
   });
 });
 
