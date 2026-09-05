@@ -20,12 +20,12 @@ export function Controls({
             What it needs
           </a>
           <a className={groupMode === "intern" ? "on" : ""} href="/?group=intern">
-            Intern
+            Member
           </a>
         </div>
       </div>
       <div className="chiprow">
-        <span className="chip-label">Intern</span>
+        <span className="chip-label">Member</span>
         <a className={`chip${!activeAssignee ? " active" : ""}`} href={groupMode === "intern" ? "/?group=intern" : "/"}>
           All
         </a>

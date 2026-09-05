@@ -67,7 +67,7 @@ function Section({
             <tr>
               <th>ID</th>
               <th>Task</th>
-              <th>Intern</th>
+              <th>Member</th>
               <th>Status</th>
               <th>Due</th>
               <th></th>

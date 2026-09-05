@@ -23,12 +23,10 @@ const STATUS_OPTIONS: Array<{ value: TaskWithFlags["status"]; label: string }> =
  * review gate and are gone; in their place, a status dropdown lets any
  * roster member set any of the six statuses directly, via the same
  * `PATCH /api/tasks/:id` route `TaskForm` already uses (extended to accept
- * an optional `status` field). The old `canEdit` gate (the Approved
- * edit-lock) is gone, but a new one takes its place (R6/#91): now that
- * interns can log in, Edit is only shown to a `HigherUp` caller, matching
- * the bot's `/edit`, which the dashboard's edit route/page also enforce
- * server-side — this is purely so an intern isn't shown a link that will
- * refuse them.
+ * an optional `status` field). There is no access-control gate any more
+ * (ADR-0013) — `canEdit` is always true, kept as a prop rather than
+ * removed outright since nothing in this ticket asks for that plumbing to
+ * be restructured.
  */
 export function RowActions({
   task,

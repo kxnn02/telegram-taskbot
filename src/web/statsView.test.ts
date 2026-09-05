@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import type { Caller } from "../domain/types.js";
 import type { CohortStats, TaskService } from "../service/taskService.js";
 import { buildStatsViewModel, loadStatsView } from "./statsView.js";
@@ -14,7 +14,7 @@ import { buildStatsViewModel, loadStatsView } from "./statsView.js";
 
 function stats(overrides: Partial<CohortStats> = {}): CohortStats {
   return {
-    completedPerIntern: [],
+    completedPerMember: [],
     completionRate: 0,
     averageTimeToSubmitHours: null,
     completedThisWeek: 0,
@@ -51,14 +51,14 @@ describe("buildStatsViewModel", () => {
   it("computes bar width percentages relative to the max completed count", () => {
     const model = buildStatsViewModel(
       stats({
-        completedPerIntern: [
+        completedPerMember: [
           { username: "alice", completed: 4 },
           { username: "bob", completed: 2 },
           { username: "carla", completed: 0 },
         ],
       }),
     );
-    expect(model.internBars).toEqual([
+    expect(model.memberBars).toEqual([
       { username: "alice", completed: 4, widthPercent: 100 },
       { username: "bob", completed: 2, widthPercent: 50 },
       { username: "carla", completed: 0, widthPercent: 0 },
@@ -68,13 +68,13 @@ describe("buildStatsViewModel", () => {
   it("doesn't divide by zero when every intern has zero completed tasks", () => {
     const model = buildStatsViewModel(
       stats({
-        completedPerIntern: [
+        completedPerMember: [
           { username: "alice", completed: 0 },
           { username: "bob", completed: 0 },
         ],
       }),
     );
-    expect(model.internBars).toEqual([
+    expect(model.memberBars).toEqual([
       { username: "alice", completed: 0, widthPercent: 0 },
       { username: "bob", completed: 0, widthPercent: 0 },
     ]);
@@ -82,23 +82,23 @@ describe("buildStatsViewModel", () => {
 });
 
 /**
- * R6/#91: once interns can log in to the dashboard, they can reach the
- * stats page and get a `fail()` back from `TaskService.getStats` (still
- * higher-up-only — that gate is untouched). `loadStatsView` is the thin
- * pass-through the page calls, so this pins down that a refusal comes back
- * as a `ServiceResult` the page can render as a clear message, not a crash.
+ * `loadStatsView` is a thin pass-through the stats page calls, so this pins
+ * down that whatever `ServiceResult` `TaskService.getStats` returns — success
+ * or failure — comes back unchanged, not as a crash. `getStats` has no
+ * access-control gate any more (ADR-0013), but the pass-through contract
+ * itself doesn't depend on that.
  */
 describe("loadStatsView", () => {
-  const caller: Caller = { username: "alice", role: "Intern", cohortId: "cohort-5" };
+  const caller: Caller = { username: "alice", cohortId: "cohort-5" };
 
   function fakeService(result: Awaited<ReturnType<TaskService["getStats"]>>): TaskService {
     return { getStats: async () => result } as unknown as TaskService;
   }
 
-  it("propagates a refusal from a non-higher-up caller instead of throwing", async () => {
-    const service = fakeService({ ok: false, error: "Only higher-ups can view cohort stats." });
+  it("propagates a failure from the service instead of throwing", async () => {
+    const service = fakeService({ ok: false, error: "Task not found." });
     const result = await loadStatsView(service, caller);
-    expect(result).toEqual({ ok: false, error: "Only higher-ups can view cohort stats." });
+    expect(result).toEqual({ ok: false, error: "Task not found." });
   });
 
   it("passes through a successful result unchanged", async () => {

@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
 import { getDashboardDeps } from "../../../../src/web/nextDashboardDeps";
 import { resolveCallerFromCookie, SESSION_COOKIE } from "../../../../src/web/requireDashboardSession";
-import { editPatchRequiresHigherUp, parseEditTaskRequest } from "../../../../src/web/taskMutationRequests";
+import { parseEditTaskRequest } from "../../../../src/web/taskMutationRequests";
 
 /**
  * Task editing (Phase 6.2, issue #17 — REST mutation, not a Server Action,
@@ -17,13 +17,9 @@ import { editPatchRequiresHigherUp, parseEditTaskRequest } from "../../../../src
  * `TaskService.setStatus` rather than folded into `editTask`'s patch, since
  * `editTask` (stage 1a) has no `status` field and isn't touched here.
  *
- * `TaskService.editTask` deliberately has no role check of its own (every
- * roster member may edit, per its own tests) because every *bot* caller of
- * it already gates at the command layer — `/edit` is higher-up-only,
- * checked in `createBot.ts` before `editTask` is ever called. This route is
- * the dashboard's equivalent entry point for those same fields, so it
- * applies the same gate itself (R6/#91) via `editPatchRequiresHigherUp`,
- * leaving the six-status free-set (#27/#28) open to everyone.
+ * `TaskService.editTask` has no access-control check of any kind
+ * (ADR-0013) — every roster member may edit every field, same as every
+ * other mutation in this codebase.
  */
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -46,10 +42,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   }
 
   const { status, ...patch } = parsed.value;
-
-  if (editPatchRequiresHigherUp(patch) && caller.role !== "HigherUp") {
-    return NextResponse.json({ ok: false, error: "Only higher-ups can edit tasks." }, { status: 403 });
-  }
 
   const editResult = await deps.service.editTask(caller, taskId, patch);
   if (!editResult.ok) {

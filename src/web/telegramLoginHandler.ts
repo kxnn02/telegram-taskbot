@@ -51,7 +51,7 @@ export function handleTelegramLoginCallback(
     };
   }
 
-  const caller: Caller = { username: entry.username, role: entry.role, cohortId: entry.cohortId };
+  const caller: Caller = { username: entry.username, cohortId: entry.cohortId };
   const cookieValue = signSession(caller, deps.sessionSecret);
   return { ok: true, cookieValue, caller };
 }

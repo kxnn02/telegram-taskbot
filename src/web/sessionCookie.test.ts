@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { signSession, verifySession } from "./sessionCookie.js";
 import type { Caller } from "../domain/types.js";
 
 const SECRET = "test-session-secret";
-const carla: Caller = { username: "carla", role: "HigherUp", cohortId: "cohort-5" };
+const carla: Caller = { username: "carla", cohortId: "cohort-5" };
 
 describe("signSession / verifySession", () => {
   it("round-trips a signed session back to the original caller", () => {
@@ -15,7 +15,7 @@ describe("signSession / verifySession", () => {
   it("rejects a cookie whose payload was tampered with", () => {
     const cookieValue = signSession(carla, SECRET);
     const [payload, signature] = cookieValue.split(".");
-    const tamperedPayload = Buffer.from(JSON.stringify({ ...carla, role: "Intern" })).toString(
+    const tamperedPayload = Buffer.from(JSON.stringify({ ...carla })).toString(
       "base64url",
     );
     const tampered = `${tamperedPayload}.${signature}`;

@@ -14,7 +14,7 @@ import { resolveCallerFromCookie } from "./requireDashboardSession.js";
  */
 
 const SECRET = "test-session-secret";
-const CALLER = { username: "carla", role: "HigherUp" as const, cohortId: "cohort-5" };
+const CALLER = { username: "carla", cohortId: "cohort-5" };
 
 describe("resolveCallerFromCookie", () => {
   it("resolves a valid signed cookie to its Caller", () => {

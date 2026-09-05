@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { FixedClock } from "../domain/clock.js";
 import { Roster } from "../domain/roster.js";
 import { TaskService } from "../service/taskService.js";
@@ -12,9 +12,9 @@ import { loadOversightView } from "./oversightData.js";
  * it — mirrors the removed Express dashboard's `GET /` handler's query-parsing +
  * filtering, minus the res/req plumbing. Authorization itself is not
  * reimplemented here: it's delegated entirely to
- * `TaskService.listAllTasks`, which already enforces "HigherUp sees
- * everyone's tasks, Intern sees only their own" (see taskService.test.ts) —
- * this module must not invent a parallel rule.
+ * `TaskService.listAllTasks`, which has no access-control gate of its own
+ * (ADR-0013) — every roster member sees every task in the cohort — this
+ * module must not invent a parallel rule.
  */
 
 const COHORT = "cohort-5";
@@ -23,19 +23,19 @@ const NOW = new Date("2026-08-31T02:00:00.000Z");
 async function makeService() {
   const store = new InMemoryTaskStore();
   const roster = new Roster([
-    { username: "alice", role: "Intern", cohortId: COHORT },
-    { username: "bob", role: "Intern", cohortId: COHORT },
-    { username: "carla", role: "HigherUp", cohortId: COHORT },
+    { username: "alice", cohortId: COHORT },
+    { username: "bob", cohortId: COHORT },
+    { username: "carla", cohortId: COHORT },
   ]);
   const service = new TaskService(store, roster, new FixedClock(NOW));
-  const higherUp = { username: "carla", role: "HigherUp" as const, cohortId: COHORT };
-  await service.assignTask(higherUp, {
+  const assigner = { username: "carla", cohortId: COHORT };
+  await service.assignTask(assigner, {
     assigneeUsername: "alice",
     title: "Alice task",
     description: "d",
     dueDate: "2026-09-05",
   });
-  await service.assignTask(higherUp, {
+  await service.assignTask(assigner, {
     assigneeUsername: "bob",
     title: "Bob task",
     description: "d",
@@ -45,18 +45,18 @@ async function makeService() {
 }
 
 describe("loadOversightView", () => {
-  it("gives a HigherUp caller every task in the cohort", async () => {
+  it("gives any caller every task in the cohort", async () => {
     const service = await makeService();
-    const result = await loadOversightView(service, { username: "carla", role: "HigherUp", cohortId: COHORT }, {});
+    const result = await loadOversightView(service, { username: "carla", cohortId: COHORT }, {});
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected ok");
     expect(result.value.allTasks.map((t) => t.title).sort()).toEqual(["Alice task", "Bob task"]);
     expect(result.value.tasks.map((t) => t.title).sort()).toEqual(["Alice task", "Bob task"]);
   });
 
-  it("gives an Intern caller the same cohort-wide list (listAllTasks is team-wide transparency, per PRD §5 — not reimplemented or narrowed here)", async () => {
+  it("gives a different caller the same cohort-wide list (listAllTasks is team-wide transparency, per PRD §5 — not reimplemented or narrowed here)", async () => {
     const service = await makeService();
-    const result = await loadOversightView(service, { username: "alice", role: "Intern", cohortId: COHORT }, {});
+    const result = await loadOversightView(service, { username: "alice", cohortId: COHORT }, {});
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected ok");
     expect(result.value.allTasks.map((t) => t.title).sort()).toEqual(["Alice task", "Bob task"]);
@@ -64,7 +64,7 @@ describe("loadOversightView", () => {
 
   it("defaults to action-grouping mode when no ?group= query param is given", async () => {
     const service = await makeService();
-    const result = await loadOversightView(service, { username: "carla", role: "HigherUp", cohortId: COHORT }, {});
+    const result = await loadOversightView(service, { username: "carla", cohortId: COHORT }, {});
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected ok");
     expect(result.value.groupMode).toBe("action");
@@ -74,7 +74,7 @@ describe("loadOversightView", () => {
     const service = await makeService();
     const result = await loadOversightView(
       service,
-      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { username: "carla", cohortId: COHORT },
       { group: "intern" },
     );
     expect(result.ok).toBe(true);
@@ -86,7 +86,7 @@ describe("loadOversightView", () => {
     const service = await makeService();
     const result = await loadOversightView(
       service,
-      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { username: "carla", cohortId: COHORT },
       { group: "nonsense" },
     );
     expect(result.ok).toBe(true);
@@ -98,7 +98,7 @@ describe("loadOversightView", () => {
     const service = await makeService();
     const result = await loadOversightView(
       service,
-      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { username: "carla", cohortId: COHORT },
       { status: "to-be-reviewed" },
     );
     expect(result.ok).toBe(true);
@@ -113,7 +113,7 @@ describe("loadOversightView", () => {
     const service = await makeService();
     const result = await loadOversightView(
       service,
-      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { username: "carla", cohortId: COHORT },
       { status: "not-a-real-group" },
     );
     expect(result.ok).toBe(true);
@@ -126,7 +126,7 @@ describe("loadOversightView", () => {
     const service = await makeService();
     const result = await loadOversightView(
       service,
-      { username: "carla", role: "HigherUp", cohortId: COHORT },
+      { username: "carla", cohortId: COHORT },
       { assignee: "bob" },
     );
     expect(result.ok).toBe(true);
@@ -139,7 +139,7 @@ describe("loadOversightView", () => {
     const service = {
       listAllTasks: async () => ({ ok: false as const, error: "boom" }),
     } as unknown as TaskService;
-    const result = await loadOversightView(service, { username: "carla", role: "HigherUp", cohortId: COHORT }, {});
+    const result = await loadOversightView(service, { username: "carla", cohortId: COHORT }, {});
     expect(result).toEqual({ ok: false, error: "boom" });
   });
 });

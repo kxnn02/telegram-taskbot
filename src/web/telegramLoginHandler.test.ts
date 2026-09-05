@@ -1,4 +1,4 @@
-import { createHash, createHmac } from "node:crypto";
+﻿import { createHash, createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { Roster } from "../domain/roster.js";
 import { verifySession } from "./sessionCookie.js";
@@ -19,8 +19,8 @@ const COHORT = "cohort-5";
 
 function makeRoster() {
   return new Roster([
-    { username: "alice", role: "Intern", cohortId: COHORT },
-    { username: "carla", role: "HigherUp", cohortId: COHORT },
+    { username: "alice", cohortId: COHORT },
+    { username: "carla", cohortId: COHORT },
   ]);
 }
 
@@ -63,7 +63,7 @@ describe("handleTelegramLoginCallback", () => {
     const result = handleTelegramLoginCallback(deps(), telegramQueryFor("carla"));
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected ok");
-    expect(result.caller).toEqual({ username: "carla", role: "HigherUp", cohortId: COHORT });
+    expect(result.caller).toEqual({ username: "carla", cohortId: COHORT });
     const verified = verifySession(result.cookieValue, SESSION_SECRET);
     expect(verified).toEqual({ ok: true, session: result.caller });
   });
@@ -72,7 +72,7 @@ describe("handleTelegramLoginCallback", () => {
     const result = handleTelegramLoginCallback(deps(), telegramQueryFor("alice"));
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected ok");
-    expect(result.caller).toEqual({ username: "alice", role: "Intern", cohortId: COHORT });
+    expect(result.caller).toEqual({ username: "alice", cohortId: COHORT });
     const verified = verifySession(result.cookieValue, SESSION_SECRET);
     expect(verified).toEqual({ ok: true, session: result.caller });
   });
@@ -92,10 +92,10 @@ describe("handleTelegramLoginCallback", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("resolves against the dashboard's own bound cohort, not just any matching username (ADR-0004 dry-run reused accounts) — same username is an Intern there and still gets a session", () => {
+  it("resolves against the dashboard's own bound cohort, not just any matching username (ADR-0004 dry-run reused accounts) — the same username there still gets a session", () => {
     const roster = new Roster([
-      { username: "carla", role: "HigherUp", cohortId: "cohort-5" },
-      { username: "carla", role: "Intern", cohortId: "cohort5-dryrun" },
+      { username: "carla", cohortId: "cohort-5" },
+      { username: "carla", cohortId: "cohort5-dryrun" },
     ]);
     const result = handleTelegramLoginCallback(
       deps({ roster, activeCohortId: "cohort5-dryrun" }),
@@ -103,13 +103,13 @@ describe("handleTelegramLoginCallback", () => {
     );
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected ok");
-    expect(result.caller).toEqual({ username: "carla", role: "Intern", cohortId: "cohort5-dryrun" });
+    expect(result.caller).toEqual({ username: "carla", cohortId: "cohort5-dryrun" });
   });
 
   it("rejects a roster member logging in against a cohort they're not a member of at all, even though the same username exists in another cohort (ADR-0004 dry-run reused accounts / cohort binding)", () => {
     const roster = new Roster([
-      { username: "carla", role: "HigherUp", cohortId: "cohort-5" },
-      { username: "carla", role: "Intern", cohortId: "cohort5-dryrun" },
+      { username: "carla", cohortId: "cohort-5" },
+      { username: "carla", cohortId: "cohort5-dryrun" },
     ]);
     const result = handleTelegramLoginCallback(
       deps({ roster, activeCohortId: "cohort-6" }),
