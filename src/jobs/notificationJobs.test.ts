@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+﻿import { describe, expect, it, vi } from "vitest";
 import { InMemoryAlertThrottleStore } from "../storage/inMemoryAlertThrottleStore.js";
 import { InMemoryOverdueNotificationStore } from "../storage/inMemoryOverdueNotificationStore.js";
 import { InMemoryRegistrationStore } from "../storage/inMemoryRegistrationStore.js";
@@ -17,8 +17,8 @@ import type { NotificationJobDeps } from "./notificationJobs.js";
 
 function makeDeps(): NotificationJobDeps & { sendMessage: ReturnType<typeof vi.fn> } {
   const roster = new Roster([
-    { username: "alice", role: "Intern", cohortId: "cohort-5" },
-    { username: "bob", role: "HigherUp", cohortId: "cohort-5" },
+    { username: "alice", cohortId: "cohort-5" },
+    { username: "bob", cohortId: "cohort-5" },
   ]);
   const service = new TaskService(new InMemoryTaskStore(), roster, new FixedClock(new Date("2026-09-01T00:00:00Z")));
   const sendMessage = vi.fn();
@@ -84,7 +84,7 @@ describe("runWeeklyDigestJob", () => {
     await deps.registrations.register(1, "alice");
     await deps.registrations.register(2, "bob");
     await deps.service.assignTask(
-      { username: "bob", role: "HigherUp", cohortId: "cohort-5" },
+      { username: "bob", cohortId: "cohort-5" },
       {
         assigneeUsername: "alice",
         title: "Do a thing",

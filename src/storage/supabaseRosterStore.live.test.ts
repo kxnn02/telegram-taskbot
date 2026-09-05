@@ -1,4 +1,4 @@
-import "dotenv/config";
+﻿import "dotenv/config";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
@@ -41,8 +41,8 @@ describe("SupabaseRosterStore (live)", () => {
 
   it("lists roster rows across cohorts, mapped to RosterEntry shape", async () => {
     const { error } = await client.from("roster").insert([
-      { username: "test_higherup", role: "HigherUp", cohort_id: cohortId },
-      { username: "test_intern", role: "Intern", cohort_id: cohortId },
+      { username: "test_higherup", cohort_id: cohortId },
+      { username: "test_intern", cohort_id: cohortId },
     ]);
     if (error) throw new Error(`Failed to seed roster rows: ${error.message}`);
 
@@ -53,19 +53,17 @@ describe("SupabaseRosterStore (live)", () => {
     expect(forThisCohort).toHaveLength(2);
     expect(forThisCohort).toContainEqual({
       username: "test_higherup",
-      role: "HigherUp",
       cohortId,
     });
     expect(forThisCohort).toContainEqual({
       username: "test_intern",
-      role: "Intern",
       cohortId,
     });
   });
 
   it("upsert creates a new roster entry and records who set it", async () => {
     const store = new SupabaseRosterStore(client);
-    await store.upsert({ username: "test_new", role: "Intern", cohortId }, "test_setter");
+    await store.upsert({ username: "test_new", cohortId }, "test_setter");
 
     const { data, error } = await client
       .from("roster")
@@ -77,7 +75,6 @@ describe("SupabaseRosterStore (live)", () => {
 
     expect(data).toMatchObject({
       username: "test_new",
-      role: "Intern",
       cohort_id: cohortId,
       role_set_by: "test_setter",
     });
@@ -86,8 +83,8 @@ describe("SupabaseRosterStore (live)", () => {
 
   it("upsert on an existing (cohortId, username) updates in place rather than duplicating", async () => {
     const store = new SupabaseRosterStore(client);
-    await store.upsert({ username: "test_existing", role: "Intern", cohortId }, "test_setter_1");
-    await store.upsert({ username: "test_existing", role: "HigherUp", cohortId }, "test_setter_2");
+    await store.upsert({ username: "test_existing", cohortId }, "test_setter_1");
+    await store.upsert({ username: "test_existing", cohortId }, "test_setter_2");
 
     const { data, error } = await client
       .from("roster")
@@ -99,14 +96,13 @@ describe("SupabaseRosterStore (live)", () => {
     expect(data).toHaveLength(1);
     expect(data?.[0]).toMatchObject({
       username: "test_existing",
-      role: "HigherUp",
       role_set_by: "test_setter_2",
     });
   });
 
   it("remove deletes a roster entry", async () => {
     const store = new SupabaseRosterStore(client);
-    await store.upsert({ username: "test_removable", role: "Intern", cohortId }, "test_setter");
+    await store.upsert({ username: "test_removable", cohortId }, "test_setter");
 
     await store.remove(cohortId, "test_removable");
 

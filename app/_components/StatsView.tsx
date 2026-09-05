@@ -38,16 +38,16 @@ export function StatsView({ stats }: { stats: CohortStats }) {
       </div>
       <section className="panel">
         <div className="panel-head">
-          <h2 style={{ color: "#0F172A" }}>Tasks completed per intern</h2>
+          <h2 style={{ color: "#0F172A" }}>Tasks completed per member</h2>
         </div>
         <table>
           <tbody>
-            {model.internBars.length === 0 ? (
+            {model.memberBars.length === 0 ? (
               <tr>
-                <td style={{ padding: "14px 20px" }}>No interns in this cohort.</td>
+                <td style={{ padding: "14px 20px" }}>No members in this cohort.</td>
               </tr>
             ) : (
-              model.internBars.map((bar) => (
+              model.memberBars.map((bar) => (
                 <tr key={bar.username}>
                   <td>
                     <div className="cell-user">

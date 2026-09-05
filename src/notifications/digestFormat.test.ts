@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { formatGroupDailySummary, type InternDailyCounts } from "./digestFormat.js";
+import { formatGroupDailySummary, type MemberDailyCounts } from "./digestFormat.js";
 
 describe("formatGroupDailySummary", () => {
-  it("shows aggregate counts across all interns", () => {
-    const counts: InternDailyCounts[] = [
+  it("shows aggregate counts across all members", () => {
+    const counts: MemberDailyCounts[] = [
       { username: "alice", onTrack: 2, overdue: 1, blocked: 0 },
       { username: "bob", onTrack: 3, overdue: 1, blocked: 1 },
     ];
@@ -13,8 +13,8 @@ describe("formatGroupDailySummary", () => {
     expect(text).toContain("1 blocked");
   });
 
-  it("includes one status line per intern", () => {
-    const counts: InternDailyCounts[] = [
+  it("includes one status line per member", () => {
+    const counts: MemberDailyCounts[] = [
       { username: "alice", onTrack: 2, overdue: 1, blocked: 0 },
       { username: "bob", onTrack: 1, overdue: 0, blocked: 0 },
     ];
@@ -28,7 +28,7 @@ describe("formatGroupDailySummary", () => {
     // extra fields; formatGroupDailySummary's declared input shape has no
     // room for that, but this test locks in the *output* contract too: only
     // digits, "on track"/"overdue"/"blocked" words, and @usernames appear.
-    const counts: InternDailyCounts[] = [
+    const counts: MemberDailyCounts[] = [
       { username: "alice", onTrack: 1, overdue: 0, blocked: 0 },
     ];
     const text = formatGroupDailySummary(counts);
@@ -43,16 +43,16 @@ describe("formatGroupDailySummary", () => {
     expect(text).toBe("Nothing to report today — everyone's clear.");
   });
 
-  it("gives a plain on-track line for an intern with nothing overdue or blocked", () => {
-    const counts: InternDailyCounts[] = [
+  it("gives a plain on-track line for a member with nothing overdue or blocked", () => {
+    const counts: MemberDailyCounts[] = [
       { username: "carla", onTrack: 3, overdue: 0, blocked: 0 },
     ];
     const text = formatGroupDailySummary(counts);
     expect(text).toContain("@carla: on track");
   });
 
-  it("gives a 'no open tasks' line for an intern with zero tasks at all", () => {
-    const counts: InternDailyCounts[] = [
+  it("gives a 'no open tasks' line for a member with zero tasks at all", () => {
+    const counts: MemberDailyCounts[] = [
       { username: "dan", onTrack: 0, overdue: 0, blocked: 0 },
     ];
     const text = formatGroupDailySummary(counts);

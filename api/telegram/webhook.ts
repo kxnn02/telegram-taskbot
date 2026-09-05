@@ -4,9 +4,7 @@ import { createBot, registerBotCommands } from "../../src/bot/createBot.js";
 import { createSupabaseClient } from "../../src/storage/supabaseClient.js";
 import { SupabaseTaskStore } from "../../src/storage/supabaseTaskStore.js";
 import { SupabaseRegistrationStore } from "../../src/storage/supabaseRegistrationStore.js";
-import { SupabaseWizardStateStore } from "../../src/storage/supabaseWizardStateStore.js";
 import { SupabaseRosterStore } from "../../src/storage/supabaseRosterStore.js";
-import { SupabaseCohortStore } from "../../src/storage/supabaseCohortStore.js";
 import { SupabaseProcessedUpdatesStore } from "../../src/storage/supabaseProcessedUpdatesStore.js";
 import { loadRosterFromStore } from "../../src/config/roster.js";
 import { handleTelegramWebhook, type WebhookHandlerDeps } from "../../src/webhook/webhookHandler.js";
@@ -53,8 +51,6 @@ async function buildDeps(): Promise<WebhookHandlerDeps> {
     token,
     taskStore: new SupabaseTaskStore(supabase),
     registrationStore: new SupabaseRegistrationStore(supabase),
-    wizardStateStore: new SupabaseWizardStateStore(supabase),
-    cohorts: new SupabaseCohortStore(supabase),
     rosterStore,
     roster,
     activeCohortId,

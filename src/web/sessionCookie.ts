@@ -72,7 +72,6 @@ export function verifySession(
     typeof payload !== "object" ||
     payload === null ||
     typeof payload.username !== "string" ||
-    typeof payload.role !== "string" ||
     typeof payload.cohortId !== "string" ||
     typeof payload.exp !== "number"
   ) {
@@ -83,8 +82,8 @@ export function verifySession(
     return { ok: false, reason: "expired" };
   }
 
-  const { username, role, cohortId } = payload;
-  return { ok: true, session: { username, role: role as Caller["role"], cohortId } };
+  const { username, cohortId } = payload;
+  return { ok: true, session: { username, cohortId } };
 }
 
 function safeHexEqual(a: string, b: string): boolean {

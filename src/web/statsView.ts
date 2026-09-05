@@ -14,10 +14,9 @@ import type { CohortStats, TaskService } from "../service/taskService.js";
 /**
  * Thin data-fetching wrapper the stats page calls, mirroring
  * `oversightData.ts`'s `loadOversightView` split so the "did this caller
- * get refused" branch is directly unit-testable (R6/#91) instead of only
- * reachable by rendering the page. `TaskService.getStats` stays the one
- * place that decides who may see stats (higher-up only, unrelated to the
- * dashboard's login gate) — this just calls it and returns whatever
+ * get refused" branch is directly unit-testable instead of only reachable
+ * by rendering the page. `TaskService.getStats` has no access-control gate
+ * of its own any more (ADR-0013) — this just calls it and returns whatever
  * `ServiceResult` comes back, success or failure, unchanged.
  */
 export async function loadStatsView(
@@ -27,10 +26,10 @@ export async function loadStatsView(
   return service.getStats(caller);
 }
 
-export interface InternBarViewModel {
+export interface MemberBarViewModel {
   username: string;
   completed: number;
-  /** 0-100, relative to whichever intern has the most completed tasks. */
+  /** 0-100, relative to whichever member has the most completed tasks. */
   widthPercent: number;
 }
 
@@ -38,7 +37,7 @@ export interface StatsViewModel {
   completionRatePercentLabel: string;
   averageTimeToSubmitLabel: string;
   completedThisWeek: number;
-  internBars: InternBarViewModel[];
+  memberBars: MemberBarViewModel[];
 }
 
 export function buildStatsViewModel(stats: CohortStats): StatsViewModel {
@@ -48,8 +47,8 @@ export function buildStatsViewModel(stats: CohortStats): StatsViewModel {
       ? "No submitted tasks yet"
       : `${stats.averageTimeToSubmitHours.toFixed(1)} hours`;
 
-  const maxCompleted = Math.max(1, ...stats.completedPerIntern.map((s) => s.completed));
-  const internBars: InternBarViewModel[] = stats.completedPerIntern.map((s) => ({
+  const maxCompleted = Math.max(1, ...stats.completedPerMember.map((s) => s.completed));
+  const memberBars: MemberBarViewModel[] = stats.completedPerMember.map((s) => ({
     username: s.username,
     completed: s.completed,
     widthPercent: Math.round((s.completed / maxCompleted) * 100),
@@ -59,6 +58,6 @@ export function buildStatsViewModel(stats: CohortStats): StatsViewModel {
     completionRatePercentLabel,
     averageTimeToSubmitLabel,
     completedThisWeek: stats.completedThisWeek,
-    internBars,
+    memberBars,
   };
 }

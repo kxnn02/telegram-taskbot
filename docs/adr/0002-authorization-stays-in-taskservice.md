@@ -1,6 +1,9 @@
 # ADR-0002: Authorization stays in TaskService; RLS is a deny-by-default backstop
 
-- **Status**: Accepted, implemented
+- **Status**: Superseded by [ADR-0013](./0013-remove-access-control-for-devie-parity.md) — the
+  authorization *content* this ADR assumed TaskService would hold (roles, permission checks,
+  ownership rules) was deleted for the DevieBot carbon-copy port (#106); RLS-as-backstop and the
+  service_role-key discipline below are unaffected and remain accurate.
 - **Date**: 2026-08-31
 - **Depends on**: [ADR-0001](./0001-replatform-to-vercel-supabase.md)
 

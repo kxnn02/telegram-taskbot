@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { Roster } from "./roster.js";
 
 describe("Roster with the same username in more than one cohort", () => {
@@ -7,10 +7,10 @@ describe("Roster with the same username in more than one cohort", () => {
   // guaranteed unique across the whole roster.
   function makeRoster() {
     return new Roster([
-      { username: "kxnn02", role: "HigherUp", cohortId: "cohort-5" },
-      { username: "chiaia_0702", role: "Intern", cohortId: "cohort-5" },
-      { username: "kxnn02", role: "HigherUp", cohortId: "cohort5-dryrun" },
-      { username: "chiaia_0702", role: "Intern", cohortId: "cohort5-dryrun" },
+      { username: "kxnn02", cohortId: "cohort-5" },
+      { username: "chiaia_0702", cohortId: "cohort-5" },
+      { username: "kxnn02", cohortId: "cohort5-dryrun" },
+      { username: "chiaia_0702", cohortId: "cohort5-dryrun" },
     ]);
   }
 
@@ -24,12 +24,13 @@ describe("Roster with the same username in more than one cohort", () => {
     expect(roster.find("kxnn02", "cohort5-dryrun")?.cohortId).toBe("cohort5-dryrun");
   });
 
-  it("isIntern/isHigherUp still scope correctly by cohort", () => {
+  it("isMember still scopes correctly by cohort", () => {
     const roster = makeRoster();
-    expect(roster.isHigherUp("kxnn02", "cohort-5")).toBe(true);
-    expect(roster.isHigherUp("kxnn02", "cohort5-dryrun")).toBe(true);
-    expect(roster.isIntern("chiaia_0702", "cohort-5")).toBe(true);
-    expect(roster.isIntern("chiaia_0702", "cohort5-dryrun")).toBe(true);
+    expect(roster.isMember("kxnn02", "cohort-5")).toBe(true);
+    expect(roster.isMember("kxnn02", "cohort5-dryrun")).toBe(true);
+    expect(roster.isMember("chiaia_0702", "cohort-5")).toBe(true);
+    expect(roster.isMember("chiaia_0702", "cohort5-dryrun")).toBe(true);
+    expect(roster.isMember("chiaia_0702", "cohort-9")).toBe(false);
   });
 
   it("find(username) with no cohortId returns a deterministic (first-inserted) match", () => {
@@ -41,32 +42,28 @@ describe("Roster with the same username in more than one cohort", () => {
 describe("Roster.replaceAll", () => {
   it("swaps the entries and lookups reflect the new contents", () => {
     const roster = new Roster([
-      { username: "kxnn02", role: "HigherUp", cohortId: "cohort-5" },
-      { username: "chiaia_0702", role: "Intern", cohortId: "cohort-5" },
+      { username: "kxnn02", cohortId: "cohort-5" },
+      { username: "chiaia_0702", cohortId: "cohort-5" },
     ]);
 
     roster.replaceAll([
-      { username: "kxnn02", role: "Intern", cohortId: "cohort-5" },
-      { username: "newperson", role: "HigherUp", cohortId: "cohort-5" },
+      { username: "kxnn02", cohortId: "cohort-5" },
+      { username: "newperson", cohortId: "cohort-5" },
     ]);
 
     expect(roster.all()).toHaveLength(2);
-    expect(roster.roleOf("kxnn02")).toBe("Intern");
-    expect(roster.find("newperson", "cohort-5")?.role).toBe("HigherUp");
-    expect(roster.isHigherUp("newperson", "cohort-5")).toBe(true);
-    expect(roster.isIntern("kxnn02", "cohort-5")).toBe(true);
+    expect(roster.isMember("kxnn02", "cohort-5")).toBe(true);
     expect(roster.isMember("newperson", "cohort-5")).toBe(true);
   });
 
   it("a username present before replaceAll and absent afterward is no longer found", () => {
     const roster = new Roster([
-      { username: "chiaia_0702", role: "Intern", cohortId: "cohort-5" },
+      { username: "chiaia_0702", cohortId: "cohort-5" },
     ]);
 
-    roster.replaceAll([{ username: "kxnn02", role: "HigherUp", cohortId: "cohort-5" }]);
+    roster.replaceAll([{ username: "kxnn02", cohortId: "cohort-5" }]);
 
     expect(roster.find("chiaia_0702", "cohort-5")).toBeUndefined();
     expect(roster.isMember("chiaia_0702", "cohort-5")).toBe(false);
-    expect(roster.roleOf("chiaia_0702")).toBeUndefined();
   });
 });

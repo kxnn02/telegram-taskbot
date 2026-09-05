@@ -1,50 +1,33 @@
 import "dotenv/config";
-import { existsSync, readFileSync } from "node:fs";
 import { createSupabaseClient } from "../src/storage/supabaseClient.js";
-import { buildSeedPlan, type RosterEntry } from "../src/ops/rosterSeedPlan.js";
+import { buildSeedPlan } from "../src/ops/rosterSeedPlan.js";
 
 /**
- * Seed script for the `cohorts` and `roster` tables (ADR-0003/ADR-0006), run
- * manually rather than as a migration: a SQL migration is committed to a
- * public repo, and real Telegram usernames shouldn't be (the same reason
- * `roster.local.json` is gitignored — see ADR-0003's Context section). This
- * script contains no real usernames itself; it reads them from
- * `roster.local.json` (gitignored) and from the `DRYRUN_*` env vars in this
- * worktree's local `.env` (also gitignored), so it's safe to commit.
+ * Seed script for the `cohorts` table (ADR-0003/ADR-0006), run manually
+ * rather than as a migration: a SQL migration is committed to a public
+ * repo, and a cohort's live group chat id shouldn't be.
  *
  *   npm run seed:roster                          # dry-run cohort only (default)
  *   npm run seed:roster -- --include-production  # also the live cohort
  *
  * **Defaults to the dry-run cohort only** (ADR-0011). Before the cutover this
  * script wrote both cohorts unconditionally, which was safe when the real
- * cohort had no live group chat and no self-registered roster. Neither is
- * true any more: the live cohort's rows are now production data — its
- * `group_chat_id` is where every digest is delivered, and its roster is built
- * by `/start` (ADR-0010), not by `roster.local.json`, which is now a stale
- * local file. Touching them takes a deliberate flag; what the plan writes in
- * either mode is decided (and unit-tested) in `src/ops/rosterSeedPlan.ts`.
+ * cohort had no live group chat. That's no longer true: the live cohort's
+ * row is now production data — its `group_chat_id` is where every digest
+ * and standup is delivered. Touching it takes a deliberate flag; what the
+ * plan writes in either mode is decided (and unit-tested) in
+ * `src/ops/rosterSeedPlan.ts`.
+ *
+ * No longer seeds the `roster` table (ADR-0013): the roster is now
+ * populated by the bot's auto-registration on first contact, not by an
+ * admin-maintained `roster.local.json` — see the ticket for #106. This
+ * script cannot write live roster rows from a stale file any more, because
+ * it no longer reads one at all.
  *
  * Idempotent: every write is an upsert keyed on the table's real unique
- * constraint (`cohort_id` for cohorts, `(cohort_id, username)` for roster),
- * so re-running it just updates rows in place rather than erroring or
- * duplicating.
+ * constraint (`cohort_id`), so re-running it just updates the row in place
+ * rather than erroring or duplicating.
  */
-
-interface RosterConfigFile {
-  entries: RosterEntry[];
-}
-
-function readRosterEntries(): RosterEntry[] {
-  const rosterPath = process.env.ROSTER_PATH ?? "roster.local.json";
-  if (!existsSync(rosterPath)) {
-    throw new Error(
-      `${rosterPath} not found — --include-production reads real roster entries from it. ` +
-        "See docs/adr/0010-group-gated-registration-and-roster-management.md for the roster row shape.",
-    );
-  }
-  const parsed = JSON.parse(readFileSync(rosterPath, "utf-8")) as RosterConfigFile;
-  return parsed.entries;
-}
 
 async function main() {
   const includeProduction = process.argv.slice(2).includes("--include-production");
@@ -70,9 +53,6 @@ async function main() {
     dryRunCohortId: process.env.DRYRUN_COHORT_ID,
     dryRunGroupChatId: process.env.DRYRUN_GROUP_CHAT_ID,
     existingGroupChatIds,
-    rosterEntries: includeProduction ? readRosterEntries() : [],
-    dryRunHigherUpUsername: process.env.DRYRUN_HIGHERUP_USERNAME,
-    dryRunInternUsername: process.env.DRYRUN_INTERN_USERNAME,
   });
 
   /* eslint-disable no-console */
@@ -82,35 +62,18 @@ async function main() {
       : "Scope: dry-run cohort only. Pass --include-production to also write the live cohort.",
   );
 
-  if (plan.cohortRows.length === 0 && plan.rosterRows.length === 0) {
+  if (plan.cohortRows.length === 0) {
     console.log("Nothing to seed — is DRYRUN_COHORT_ID set?");
     return;
   }
 
-  if (plan.cohortRows.length > 0) {
-    const { error } = await supabase
-      .from("cohorts")
-      .upsert(plan.cohortRows, { onConflict: "cohort_id" });
-    if (error) {
-      throw new Error(`Failed to seed cohorts: ${error.message}`);
-    }
-    console.log(`Seeded cohorts: ${plan.cohortRows.map((c) => c.cohort_id).join(", ")}`);
+  const { error } = await supabase
+    .from("cohorts")
+    .upsert(plan.cohortRows, { onConflict: "cohort_id" });
+  if (error) {
+    throw new Error(`Failed to seed cohorts: ${error.message}`);
   }
-
-  if (plan.rosterRows.length > 0) {
-    const { error } = await supabase
-      .from("roster")
-      .upsert(plan.rosterRows, { onConflict: "cohort_id,username" });
-    if (error) {
-      throw new Error(`Failed to seed roster: ${error.message}`);
-    }
-    console.log(
-      `Seeded ${plan.rosterRows.length} roster row(s) across: ` +
-        `${[...new Set(plan.rosterRows.map((r) => r.cohort_id))].join(", ")}`,
-    );
-  } else {
-    console.log("No roster rows to seed.");
-  }
+  console.log(`Seeded cohorts: ${plan.cohortRows.map((c) => c.cohort_id).join(", ")}`);
   /* eslint-enable no-console */
 }
 

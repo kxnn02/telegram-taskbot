@@ -15,7 +15,7 @@ import { Icon, Logo } from "./icons";
 
 type NavKey = "tasks" | "stats";
 
-function Sidebar({ active, username, role }: { active: NavKey; username: string; role: string }) {
+function Sidebar({ active, username }: { active: NavKey; username: string }) {
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -31,18 +31,15 @@ function Sidebar({ active, username, role }: { active: NavKey; username: string;
           <Icon name="clipboard" />
           <span>Task oversight</span>
         </a>
-        {role === "HigherUp" ? (
-          <a className={`nav-item${active === "stats" ? " active" : ""}`} href="/stats">
-            <Icon name="chart" />
-            <span>Stats</span>
-          </a>
-        ) : null}
+        <a className={`nav-item${active === "stats" ? " active" : ""}`} href="/stats">
+          <Icon name="chart" />
+          <span>Stats</span>
+        </a>
       </div>
       <div className="side-user">
         <div className="av">{initialsFor(username)}</div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="un">@{username}</div>
-          <div className="ur">{role}</div>
         </div>
         <a style={{ color: "var(--fg-on-dark-3)", display: "flex" }} href="/api/auth/logout" title="Log out">
           <Icon name="logout" size={18} />
@@ -72,7 +69,7 @@ export interface DashboardShellProps {
 export function DashboardShell({ active, title, actions, caller, children }: DashboardShellProps) {
   return (
     <div className="app">
-      <Sidebar active={active} username={caller.username} role={caller.role} />
+      <Sidebar active={active} username={caller.username} />
       <div className="main">
         <Topbar title={title} actions={actions} />
         <div className="content">{children}</div>

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+﻿import { beforeEach, describe, expect, it, vi } from "vitest";
 import { InMemoryTaskStore } from "../storage/inMemoryTaskStore.js";
 import { FixedClock } from "../domain/clock.js";
 import { Roster } from "../domain/roster.js";
@@ -10,17 +10,17 @@ const OTHER_COHORT = "cohort-4";
 
 function makeRoster() {
   return new Roster([
-    { username: "alice", role: "Intern", cohortId: COHORT },
-    { username: "bob", role: "Intern", cohortId: COHORT },
-    { username: "carla", role: "HigherUp", cohortId: COHORT },
-    { username: "dave", role: "HigherUp", cohortId: COHORT },
-    { username: "erin", role: "Intern", cohortId: OTHER_COHORT },
-    { username: "frank", role: "HigherUp", cohortId: OTHER_COHORT },
+    { username: "alice", cohortId: COHORT },
+    { username: "bob", cohortId: COHORT },
+    { username: "carla", cohortId: COHORT },
+    { username: "dave", cohortId: COHORT },
+    { username: "erin", cohortId: OTHER_COHORT },
+    { username: "frank", cohortId: OTHER_COHORT },
   ]);
 }
 
-function caller(username: string, role: "Intern" | "HigherUp", cohortId = COHORT): Caller {
-  return { username, role, cohortId };
+function caller(username: string, cohortId = COHORT): Caller {
+  return { username, cohortId };
 }
 
 const NOW = new Date("2026-08-31T02:00:00.000Z"); // 2026-08-31 10:00 Asia/Manila
@@ -32,10 +32,10 @@ function makeService(now: Date = NOW) {
   return { service: new TaskService(store, roster, clock), store };
 }
 
-const carla = caller("carla", "HigherUp");
-const dave = caller("dave", "HigherUp");
-const alice = caller("alice", "Intern");
-const bob = caller("bob", "Intern");
+const carla = caller("carla");
+const dave = caller("dave");
+const alice = caller("alice");
+const bob = caller("bob");
 
 function assign(service: TaskService, overrides: Partial<{
   assigneeUsername: string;
@@ -176,7 +176,7 @@ describe("setStatus — the free-set status model", () => {
     const { service } = makeService();
     const created = await assign(service); // cohort-5
     if (!created.ok) throw new Error("setup failed");
-    const otherCaller = caller("frank", "HigherUp", OTHER_COHORT);
+    const otherCaller = caller("frank", OTHER_COHORT);
     const result = await service.setStatus(otherCaller, created.value.id, "done");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/doesn't exist/i);
@@ -247,7 +247,7 @@ describe("getTask", () => {
     const { service } = makeService();
     const created = await assign(service); // cohort-5
     if (!created.ok) throw new Error("setup failed");
-    const otherCaller = caller("frank", "HigherUp", OTHER_COHORT);
+    const otherCaller = caller("frank", OTHER_COHORT);
     const result = await service.getTask(otherCaller, created.value.id);
     expect(result.ok).toBe(false);
   });
@@ -525,7 +525,7 @@ describe("cohort scoping", () => {
   it("listAllTasks never leaks another cohort's tasks", async () => {
     const { service } = makeService();
     await assign(service); // cohort-5
-    const otherCaller = caller("frank", "HigherUp", OTHER_COHORT);
+    const otherCaller = caller("frank", OTHER_COHORT);
     await service.assignTask(otherCaller, {
       assigneeUsername: "erin",
       title: "other cohort task",
@@ -543,7 +543,7 @@ describe("cohort scoping", () => {
   it("task ids are independently sequential per cohort", async () => {
     const { service } = makeService();
     const c5task = await assign(service);
-    const otherCaller = caller("frank", "HigherUp", OTHER_COHORT);
+    const otherCaller = caller("frank", OTHER_COHORT);
     const c4task = await service.assignTask(otherCaller, {
       assigneeUsername: "erin",
       title: "other cohort task",
@@ -556,7 +556,7 @@ describe("cohort scoping", () => {
 });
 
 describe("listMyTasks", () => {
-  it("a HigherUp who holds an assigned task gets it back from listMyTasks rather than a refusal", async () => {
+  it("any member who holds an assigned task gets it back from listMyTasks rather than a refusal", async () => {
     const { service } = makeService();
     const created = await assign(service, { assigneeUsername: "dave" });
     if (!created.ok) throw new Error("setup failed");
@@ -650,10 +650,10 @@ describe("listBlocked", () => {
 });
 
 describe("getStats", () => {
-  it("only higher-ups can view cohort stats — the dashboard's audience gate, unrelated to the workflow gates", async () => {
+  it("has no access-control gate (ADR-0013) — any roster member can view cohort stats", async () => {
     const { service } = makeService();
     const result = await service.getStats(alice);
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
   });
 
   it("counts tasks completed (done) per roster member, including members with zero", async () => {
@@ -667,7 +667,7 @@ describe("getStats", () => {
     const result = await service.getStats(carla);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.completedPerIntern).toEqual(
+    expect(result.value.completedPerMember).toEqual(
       expect.arrayContaining([
         { username: "alice", completed: 1 },
         { username: "bob", completed: 0 },
@@ -675,7 +675,7 @@ describe("getStats", () => {
     );
   });
 
-  it("a task assigned to a HigherUp comes back from getStats", async () => {
+  it("a task assigned to any member comes back from getStats", async () => {
     const { service } = makeService();
     const created = await assign(service, { assigneeUsername: "dave" });
     if (!created.ok) throw new Error("setup failed");
@@ -684,7 +684,7 @@ describe("getStats", () => {
     const result = await service.getStats(carla);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.completedPerIntern).toEqual(
+    expect(result.value.completedPerMember).toEqual(
       expect.arrayContaining([{ username: "dave", completed: 1 }]),
     );
   });
@@ -750,24 +750,23 @@ describe("getStats", () => {
   it("scopes all stats to the caller's cohort", async () => {
     const { service } = makeService();
     await assign(service, { assigneeUsername: "alice" });
-    const result = await service.getStats(caller("frank", "HigherUp", OTHER_COHORT));
+    const result = await service.getStats(caller("frank", OTHER_COHORT));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.completedPerIntern).toEqual(
+    expect(result.value.completedPerMember).toEqual(
       expect.arrayContaining([{ username: "erin", completed: 0 }]),
     );
     expect(result.value.completionRate).toBe(0);
   });
 });
 
-describe("dashboard login gate — roster/cohort membership, not role (R6/#91)", () => {
+describe("dashboard login gate — roster/cohort membership only (ADR-0013)", () => {
   it("keeps rejecting a login with no roster entry, outside of TaskService entirely (pinning the check still exists)", async () => {
     // This isn't a workflow gate exercised through TaskService — it's
-    // telegramLoginHandler.ts's audience gate (the Express dashboard's
-    // dashboardServer.ts carried the same check before its removal in
-    // Stage 8, #57). R6/#91 dropped the `entry.role !== "HigherUp"` half of
-    // this gate (interns may now log in) but kept the `!entry` half —
-    // roster membership in the deployment's bound cohort is still required.
+    // telegramLoginHandler.ts's audience gate. ADR-0013 removed every
+    // role-based check (`entry.role !== "HigherUp"` no longer exists
+    // anywhere) but kept the `!entry` half — roster membership in the
+    // deployment's bound cohort is still required to log in at all.
     // Pinned here as a source-level assertion so a future edit that drops
     // the remaining `!entry` check is caught by a grep-able assertion
     // rather than relying on an e2e dashboard test in this stage.
@@ -777,7 +776,7 @@ describe("dashboard login gate — roster/cohort membership, not role (R6/#91)",
       "utf8",
     );
     expect(loginHandlerSrc).toMatch(/if \(!entry\)/);
-    expect(loginHandlerSrc).not.toMatch(/entry\.role !== "HigherUp"/);
+    expect(loginHandlerSrc).not.toMatch(/\.role/);
   });
 });
 
@@ -848,7 +847,7 @@ describe("listTasksForMember (issue #33 — /tasks @username)", () => {
   it("never leaks another cohort's tasks even when a username is shared across cohorts", async () => {
     const { service } = makeService();
     await assign(service, { assigneeUsername: "alice" }); // cohort-5
-    const otherCaller = caller("frank", "HigherUp", OTHER_COHORT);
+    const otherCaller = caller("frank", OTHER_COHORT);
     await service.assignTask(otherCaller, {
       assigneeUsername: "erin",
       title: "other cohort task",
@@ -861,51 +860,10 @@ describe("listTasksForMember (issue #33 — /tasks @username)", () => {
   });
 });
 
-describe("listTasksForRole (issue #33 — /tasks intern|higherup)", () => {
-  it("filters to tasks assigned to interns only", async () => {
-    const { service } = makeService();
-    await assign(service, { assigneeUsername: "alice" }); // Intern
-    await assign(service, { assigneeUsername: "dave" }); // HigherUp
-
-    const result = await service.listTasksForRole(carla, "Intern");
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value).toHaveLength(1);
-      expect(result.value[0]!.assigneeUsername).toBe("alice");
-    }
-  });
-
-  it("filters to tasks assigned to higher-ups only", async () => {
-    const { service } = makeService();
-    await assign(service, { assigneeUsername: "alice" });
-    await assign(service, { assigneeUsername: "dave" });
-
-    const result = await service.listTasksForRole(alice, "HigherUp");
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value).toHaveLength(1);
-      expect(result.value[0]!.assigneeUsername).toBe("dave");
-    }
-  });
-
-  it("scopes the role's roster resolution to the caller's own cohort", async () => {
-    const { service } = makeService();
-    await assign(service, { assigneeUsername: "alice" }); // cohort-5 Intern
-    const otherCaller = caller("frank", "HigherUp", OTHER_COHORT);
-    // erin is an Intern in the OTHER cohort — must not bleed into cohort-5's result.
-    await service.assignTask(otherCaller, {
-      assigneeUsername: "erin",
-      title: "other cohort task",
-      description: "d",
-      dueDate: "2026-09-05",
-    });
-
-    const result = await service.listTasksForRole(carla, "Intern");
-    expect(result.ok && result.value.map((t) => t.title)).toEqual([
-      "Write the onboarding doc",
-    ]);
-  });
-});
+// listTasksForRole (the old /tasks intern|higherup filter) was deleted by
+// #106/ADR-0013 along with the Role type it filtered on — there is no
+// replacement, since /tasks now only supports a bare page number or an
+// @username filter.
 
 describe("listDeadlines (issue #33 — /deadlines)", () => {
   it("includes an open task due within the next 7 days", async () => {

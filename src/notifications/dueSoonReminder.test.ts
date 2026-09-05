@@ -65,7 +65,7 @@ describe("findDueTomorrow", () => {
     expect(result).toHaveLength(1);
   });
 
-  it("includes a task assigned to a HigherUp — eligibility isn't role-scoped", () => {
+  it("includes a task regardless of assignee — eligibility isn't role-scoped", () => {
     const result = findDueTomorrow(
       [task({ id: 9, assigneeUsername: "dave", status: "todo" })],
       NOW,

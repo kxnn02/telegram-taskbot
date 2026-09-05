@@ -30,7 +30,6 @@ export const BACKUP_TABLES = [
   "registrations",
   "cohort_counters",
   "processed_telegram_updates",
-  "wizard_state",
   "alert_throttle",
 ] as const;
 

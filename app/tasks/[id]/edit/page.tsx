@@ -17,13 +17,8 @@ import { TaskForm } from "../../../_components/TaskForm";
  * itself, so a task that changed between this page load and the save still
  * fails safely there rather than here.
  *
- * Higher-up-only (R6/#91): the bot's equivalent `/edit <task_id>` command
- * refuses a non-higher-up before it does anything else, so this page does
- * the same before even loading the task, rather than silently being more
- * permissive than the bot now that interns can reach it. `PATCH
- * /api/tasks/:id` enforces the same rule independently for the actual save
- * (`editPatchRequiresHigherUp` in `taskMutationRequests.ts`), so this check
- * is a clean early refusal, not the only line of defense.
+ * No access-control gate any more (ADR-0013): any logged-in cohort member
+ * can reach this page, same as the bot's `/addtask`/`/update`.
  */
 
 export const dynamic = "force-dynamic";
@@ -39,19 +34,6 @@ export default async function EditTaskPage({ params }: { params: Promise<{ id: s
     redirect("/login");
   }
   const typedCaller: Caller = caller;
-
-  if (typedCaller.role !== "HigherUp") {
-    return (
-      <DashboardShell active="tasks" title="Edit task" caller={typedCaller}>
-        <MessageCard
-          title="Only higher-ups can edit tasks"
-          message="Your account isn't registered as a higher-up for this cohort, so you can't edit task details here."
-          backHref="/"
-          backLabel="Back to dashboard"
-        />
-      </DashboardShell>
-    );
-  }
 
   if (!Number.isInteger(taskId)) {
     return (

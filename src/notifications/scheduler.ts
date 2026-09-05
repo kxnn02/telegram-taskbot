@@ -36,12 +36,12 @@ export interface SchedulerDeps {
   cohorts: CohortStorePort;
 }
 
-/** A synthetic caller used only to reach TaskService.listAllTasks (which
- * isn't role-restricted — it returns the whole cohort regardless of caller
- * role) so the scheduler can read raw cohort task state. Never used for
- * anything that enforces a permission check. */
+/** A synthetic caller used only to reach TaskService.listAllTasks so the
+ * scheduler can read raw cohort task state. There is no access-control
+ * check anywhere in TaskService any more (ADR-0013), so this exists purely
+ * to satisfy the method's signature. */
 function schedulerCaller(cohortId: string): Caller {
-  return { username: "__scheduler__", role: "HigherUp", cohortId };
+  return { username: "__scheduler__", cohortId };
 }
 
 /** Best-effort DM send, mirroring src/bot/notify.ts's notifyUser: silently
@@ -66,10 +66,10 @@ export async function sendDM(
   }
 }
 
-/** Overdue-crossing check (PRD §8): notifies both the intern and the
- * assigning higher-up exactly once per task, the first time this check
- * observes it as overdue. Safe to call repeatedly/often — already-notified
- * tasks are skipped via OverdueNotificationRepository. */
+/** Overdue-crossing check (PRD §8): notifies both the assignee and the
+ * assigner exactly once per task, the first time this check observes it as
+ * overdue. Safe to call repeatedly/often — already-notified tasks are
+ * skipped via OverdueNotificationRepository. */
 export async function runOverdueCrossingCheck(
   deps: SchedulerDeps,
   cohortId: string,
@@ -118,18 +118,18 @@ export async function runDueSoonReminderCheck(
   }
 }
 
-/** Combines a HigherUp's own open-task digest (same shape an Intern gets)
- * with their oversight digest, since assignment is no longer intern-only
- * (issue #27/#29) — without this, a HigherUp holding an assigned task would
- * never see it, only ever the cohort-wide oversight view. `null` only when
- * both halves have nothing to report. */
-async function higherUpCombinedDigest(
+/** Combines a member's own open-task digest with the cohort-wide oversight
+ * digest (ADR-0013 — there is no role tier to split these by any more,
+ * so every member gets both halves) — without this, a member holding an
+ * assigned task would never see it, only ever the oversight view. `null`
+ * only when both halves have nothing to report. */
+async function memberCombinedDigest(
   digestBuilder: DigestBuilder,
   username: string,
   cohortId: string,
   oversight: () => Promise<string | null>,
 ): Promise<string | null> {
-  const own = await digestBuilder.internDigest(username, cohortId);
+  const own = await digestBuilder.ownTasksDigest(username, cohortId);
   const oversightText = await oversight();
   const parts = [own, oversightText].filter((p): p is string => p !== null);
   return parts.length === 0 ? null : parts.join("\n\n");
@@ -145,12 +145,9 @@ export async function runDailyDigest(
   const entries = deps.roster.all().filter((e) => e.cohortId === cohortId);
   for (const entry of entries) {
     try {
-      const text =
-        entry.role === "Intern"
-          ? await digestBuilder.internDigest(entry.username, cohortId)
-          : await higherUpCombinedDigest(digestBuilder, entry.username, cohortId, () =>
-              digestBuilder.higherUpDailyDigest(entry.username, cohortId),
-            );
+      const text = await memberCombinedDigest(digestBuilder, entry.username, cohortId, () =>
+        digestBuilder.oversightDailyDigest(entry.username, cohortId),
+      );
       if (text) {
         await sendDM(
           deps.bot,
@@ -178,10 +175,10 @@ export async function runDailyDigest(
   }
 }
 
-/** Weekly Monday digest (PRD §8): interns get open tasks (same shape as the
- * daily individual digest); higher-ups get pending review plus what was
- * Approved in the past week. Suppressed per-recipient when there's nothing
- * to report. */
+/** Weekly Monday digest (PRD §8): every member gets their own open tasks
+ * plus pending review and what was marked done in the past week (ADR-0013
+ * — no role split). Suppressed per-recipient when there's nothing to
+ * report. */
 export async function runWeeklyDigest(
   deps: SchedulerDeps,
   digestBuilder: DigestBuilder,
@@ -191,12 +188,9 @@ export async function runWeeklyDigest(
   const entries = deps.roster.all().filter((e) => e.cohortId === cohortId);
   for (const entry of entries) {
     try {
-      const text =
-        entry.role === "Intern"
-          ? await digestBuilder.internDigest(entry.username, cohortId)
-          : await higherUpCombinedDigest(digestBuilder, entry.username, cohortId, () =>
-              digestBuilder.higherUpWeeklyDigest(entry.username, cohortId, now),
-            );
+      const text = await memberCombinedDigest(digestBuilder, entry.username, cohortId, () =>
+        digestBuilder.oversightWeeklyDigest(entry.username, cohortId, now),
+      );
       if (text) {
         await sendDM(
           deps.bot,

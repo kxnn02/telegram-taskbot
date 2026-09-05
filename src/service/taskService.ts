@@ -6,7 +6,6 @@ import {
   fail,
   ok,
   type Caller,
-  type Role,
   type ServiceResult,
   type Task,
   type TaskStatus,
@@ -26,7 +25,7 @@ export interface TaskWithFlags extends Task {
   daysOverdue: number;
 }
 
-export interface InternCompletionStats {
+export interface MemberCompletionStats {
   username: string;
   completed: number;
 }
@@ -36,10 +35,8 @@ export interface InternCompletionStats {
  * per-field doc comments on `getStats` for the exact definitions used. */
 export interface CohortStats {
   /** `done`-task count per known roster member in the cohort, including
-   * members with zero — covers every roster member, not just interns,
-   * since assignment is open to the whole roster (issue #27/#28). Sorted
-   * by username. */
-  completedPerIntern: InternCompletionStats[];
+   * members with zero. Sorted by username. */
+  completedPerMember: MemberCompletionStats[];
   /** done / (all tasks) for the cohort. 0 when there are no tasks at all.
    * There is no more `Cancelled` status to exclude from the denominator
    * (issue #27). */
@@ -311,10 +308,9 @@ export class TaskService {
     return ok(this.withFlags(found.value));
   }
 
-  /** Caller's own open (non-`done`) tasks. Open to any roster member — a
-   * `HigherUp` holding an assigned task gets it back from here too, now
-   * that assignment isn't intern-only (issue #28's second, separate change
-   * to this method). */
+  /** Caller's own open (non-`done`) tasks. Open to any roster member —
+   * assignment isn't restricted to any subset of the roster (issue #28's
+   * second, separate change to this method). */
   async listMyTasks(caller: Caller): Promise<ServiceResult<TaskWithFlags[]>> {
     const all = await this.store.listTasksByCohort(caller.cohortId);
     const mine = all.filter(
@@ -347,16 +343,11 @@ export class TaskService {
     return ok(blocked.map((t) => this.withFlags(t)));
   }
 
-  /** Cohort-wide stats for the dashboard's stats view (issue #4). Higher-up
-   * only — this is the dashboard's audience gate, not a workflow gate, and
-   * is unrelated to the workflow gates removed elsewhere in this file. See
-   * `CohortStats` for exact field definitions and the judgment calls
-   * behind them. */
+  /** Cohort-wide stats for the dashboard's stats view (issue #4). No
+   * audience gate any more (ADR-0013) — every roster member can see it,
+   * same as every other read in this file. See `CohortStats` for exact
+   * field definitions and the judgment calls behind them. */
   async getStats(caller: Caller): Promise<ServiceResult<CohortStats>> {
-    if (caller.role !== "HigherUp") {
-      return fail("Only higher-ups can view cohort stats.");
-    }
-
     const all = await this.store.listTasksByCohort(caller.cohortId);
     const done = all.filter((t) => t.status === "done");
 
@@ -373,7 +364,7 @@ export class TaskService {
         (completedByMember.get(task.assigneeUsername) ?? 0) + 1,
       );
     }
-    const completedPerIntern: InternCompletionStats[] = [...completedByMember.entries()]
+    const completedPerMember: MemberCompletionStats[] = [...completedByMember.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([username, completed]) => ({ username, completed }));
 
@@ -394,15 +385,14 @@ export class TaskService {
     ).length;
 
     return ok({
-      completedPerIntern,
+      completedPerMember,
       completionRate,
       averageTimeToSubmitHours,
       completedThisWeek,
     });
   }
 
-  /** Overdue tasks, cohort-wide for every caller regardless of role
-   * (issue #28 drops the old scope-by-role-not-reject-interns shape). */
+  /** Overdue tasks, cohort-wide for every caller. */
   async listBacklog(caller: Caller): Promise<ServiceResult<TaskWithFlags[]>> {
     const all = await this.store.listTasksByCohort(caller.cohortId);
     const overdue = all.map((t) => this.withFlags(t)).filter((t) => t.overdue);
@@ -426,23 +416,6 @@ export class TaskService {
     const all = await this.store.listTasksByCohort(caller.cohortId);
     const mine = all.filter((t) => t.assigneeUsername === normalized);
     return ok(mine.map((t) => this.withFlags(t)));
-  }
-
-  /** Tasks assigned to any roster member of the given role, cohort-wide
-   * (issue #33's `/tasks intern|higherup` — the meaningful filter axis for
-   * a single-cohort-per-group deployment, in place of Devie's cohort
-   * filter). Role is resolved against the caller's own cohort so a
-   * username shared across cohorts (the dry-run reuse, ADR-0004) can't
-   * leak the wrong cohort's role assignment into the filter. */
-  async listTasksForRole(
-    caller: Caller,
-    role: Role,
-  ): Promise<ServiceResult<TaskWithFlags[]>> {
-    const all = await this.store.listTasksByCohort(caller.cohortId);
-    const filtered = all.filter(
-      (t) => this.roster.find(t.assigneeUsername, caller.cohortId)?.role === role,
-    );
-    return ok(filtered.map((t) => this.withFlags(t)));
   }
 
   /** Open (non-`done`) tasks due within the next 7 days, cohort-wide,

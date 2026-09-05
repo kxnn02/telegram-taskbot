@@ -87,20 +87,6 @@ const VALID_STATUSES: TaskStatus[] = [
  * `editTask` (issue #27/#29's PATCH extension). */
 export type EditTaskRequestBody = EditTaskInput & { status?: TaskStatus };
 
-/**
- * Whether an edit patch touches any of the four `/edit`-only fields
- * (assignee/title/description/due date), as opposed to being a pure
- * status change. The bot's `/edit <task_id>` command is higher-up-only,
- * checked before it calls `TaskService.editTask` (which deliberately has
- * no role check of its own, per `taskService.test.ts`); the dashboard's
- * `PATCH /api/tasks/:id` route calls this to apply the same gate before it
- * forwards a patch to `editTask`, so an intern can still change a task's
- * status (open to everyone, #27/#28) but not its title, description,
- * assignee, or due date. */
-export function editPatchRequiresHigherUp(patch: EditTaskRequestBody): boolean {
-  return EDIT_TASK_FIELDS.some((field) => patch[field] !== undefined);
-}
-
 export function parseEditTaskRequest(body: unknown): ParsedRequest<EditTaskRequestBody> {
   const record = asRecord(body);
   if (!record) return fail("Request body must be a JSON object.");

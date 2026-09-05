@@ -1,4 +1,4 @@
-import type { RosterEntry, Role } from "./types.js";
+import type { RosterEntry } from "./types.js";
 
 /**
  * The roster: every known person for a cohort, mapped from Telegram username
@@ -67,26 +67,12 @@ export class Roster {
     return this.entries.find((entry) => normalizeUsername(entry.username) === normalized);
   }
 
-  isIntern(username: string, cohortId: string): boolean {
-    const entry = this.find(username, cohortId);
-    return entry?.role === "Intern" && entry.cohortId === cohortId;
-  }
-
-  isHigherUp(username: string, cohortId: string): boolean {
-    const entry = this.find(username, cohortId);
-    return entry?.role === "HigherUp" && entry.cohortId === cohortId;
-  }
-
-  /** Any known roster member in this cohort, regardless of role — used
-   * where assignment/read access is open to the whole roster rather than
-   * restricted to interns (issue #27/#28). */
+  /** Any known roster member in this cohort — there is no role tier any
+   * more (ADR-0013): assignment/read/write access is open to the whole
+   * roster. */
   isMember(username: string, cohortId: string): boolean {
     const entry = this.find(username, cohortId);
     return entry !== undefined && entry.cohortId === cohortId;
-  }
-
-  roleOf(username: string): Role | undefined {
-    return this.find(username)?.role;
   }
 
   all(): RosterEntry[] {
