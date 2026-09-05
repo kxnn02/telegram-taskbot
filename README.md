@@ -47,6 +47,8 @@ Fill in `.env`:
 | `ROSTER_PATH` | no (defaults to `roster.config.json`) | Path to a local roster JSON file — used only by `loadRoster`'s `createBot` fallback and by tests; production reads the roster from Supabase (ADR-0003) |
 | `BOT_USERNAME` | yes, for the dashboard | Must match the bot behind `BOT_TOKEN` |
 | `DASHBOARD_PORT` | no (defaults to `3000`) | Port the dashboard listens on |
+| `GROQ_API_KEY` | only to exercise the real model | Used by `src/nlp/groqTextModel.ts` (issue #102) — the active `TextModel` implementation — for bulk-task extraction, status parsing, and intent routing via `qwen/qwen3.6-27b` on Groq's free tier. Get one at https://console.groq.com. The module's test suite runs against a fake `TextModel` and needs no key |
+| `ANTHROPIC_API_KEY` | no, unused | `src/nlp/anthropicTextModel.ts` (issue #102's original `claude-haiku-4-5` choice) is kept but not wired up — the account behind it has no billing credit |
 
 **Roster**: per [ADR-0010](./docs/adr/0010-group-gated-registration-and-roster-management.md),
 `roster.config.json` has been deleted and the roster is no longer collected upfront or seeded from
