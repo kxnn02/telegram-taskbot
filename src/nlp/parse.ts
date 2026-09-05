@@ -178,7 +178,7 @@ const URL_RE = /https?:\/\/\S+/g;
  * position unchanged — a matched span's `index`/`text` from the masked
  * text is therefore still valid to cut out of the *original* text. */
 export function maskUrls(text: string): string {
-  return text.replace(URL_RE, (match) => " ".repeat(match.length));
+  return text.replace(URL_RE, (match) => " ".repeat(match.length));
 }
 
 /** Tidies up whatever's left after a deadline phrase is cut out: a
@@ -485,7 +485,8 @@ Rules:
 - If no priority mentioned, default to "medium".
 - If no assignee (@mention) present, omit assignedTo or set to null.
 - Extract due date from natural language and convert to YYYY-MM-DD format. If no deadline mentioned, set dueDate to null.
-- If the user references a task by partial title OR by number (e.g. "task 23", "#23"), find the closest match from recent tasks above and use its exact number as taskId.
+- Task references come in several equivalent forms, all meaning the same numeric id: "task 23", "#23", "23", "t23", "T23", "T-023". Whenever the message references a task this way, strip any "t"/"T"/"T-"/"#" prefix and leading zeros to get the number, and use that exact number as taskId if it appears in the recent-tasks list above (e.g. "/done t3" against a list containing "[#3] ..." means taskId 3 — do not return null just because the reference used a "t" prefix instead of a bare number).
+- If the user references a task by partial title instead of a number, find the closest match from recent tasks above and use its exact number as taskId.
 - If the intent is clearly a status update but no task matches recent tasks, still return the update intent with taskId set to null.
 - Only use intent:"unknown" for genuine chitchat with zero task/project relevance.
 - Always return ONLY raw JSON, no markdown, no explanation.`;
