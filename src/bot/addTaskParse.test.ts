@@ -68,6 +68,39 @@ describe("parseAddTaskArgs", () => {
   });
 });
 
+describe("parseAddTaskArgs priority flag (issue #101)", () => {
+  it("omitting it leaves priority undefined (caller applies the medium default)", () => {
+    const result = ok(parseAddTaskArgs("Fix the login page", REFERENCE));
+    expect(result.priority).toBeUndefined();
+  });
+
+  it("parses a priority flag out of the argument string", () => {
+    const result = ok(parseAddTaskArgs("Fix the login page !urgent", REFERENCE));
+    expect(result.title).toBe("Fix the login page");
+    expect(result.priority).toBe("urgent");
+  });
+
+  it("is case-insensitive on the priority word", () => {
+    const result = ok(parseAddTaskArgs("Fix the login page !URGENT", REFERENCE));
+    expect(result.priority).toBe("urgent");
+  });
+
+  it("combines with a date and an assignee, in any position", () => {
+    const result = ok(
+      parseAddTaskArgs("fix the login !high by Friday @jean", REFERENCE),
+    );
+    expect(result.title).toBe("fix the login");
+    expect(result.priority).toBe("high");
+    expect(result.assigneeUsername).toBe("jean");
+    expect(result.dueDate?.isoDate).toBe("2026-09-04");
+  });
+
+  it("an unrecognised priority word is a usage error, not a silently-ignored token", () => {
+    const result = parseAddTaskArgs("Fix the login page !whenever", REFERENCE);
+    expect("error" in result).toBe(true);
+  });
+});
+
 describe("parseAddTaskArgs anchors the date on an explicit 'by' (issue #49/#51, finding F2)", () => {
   it("walks 'by' occurrences last-to-first: 'fix the bug found by QA by next Friday'", () => {
     const result = ok(

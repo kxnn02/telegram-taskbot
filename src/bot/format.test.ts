@@ -29,6 +29,8 @@ function task(overrides: Partial<TaskWithFlags> = {}): TaskWithFlags {
     notes: [],
     previousStatus: "in_progress",
     blockedReason: "waiting on API access",
+    priority: "medium",
+    orderIndex: 0,
     createdAt: "2026-09-01T00:00:00.000Z",
     updatedAt: "2026-09-01T00:00:00.000Z",
     overdue: false,
@@ -212,6 +214,30 @@ describe("formatTaskLine", () => {
     const text = formatTaskLine(task({ status: "in_progress", previousStatus: null, blockedReason: null }));
     expect(text).toContain("In progress");
     expect(text).not.toContain("in_progress");
+  });
+
+  it("renders an urgent task's priority badge with a leading space (issue #101)", () => {
+    const text = formatTaskLine(task({ priority: "urgent" }));
+    expect(text).toContain("#1 🔴");
+  });
+
+  it("renders a high task's priority badge with a leading space", () => {
+    const text = formatTaskLine(task({ priority: "high" }));
+    expect(text).toContain("#1 🟠");
+  });
+
+  it("renders nothing at all for medium priority — absence is the case to assert", () => {
+    const text = formatTaskLine(task({ priority: "medium" }));
+    expect(text).not.toContain("🔴");
+    expect(text).not.toContain("🟠");
+    expect(text).toContain(`#1 ${task().title}`);
+  });
+
+  it("renders nothing at all for low priority", () => {
+    const text = formatTaskLine(task({ priority: "low" }));
+    expect(text).not.toContain("🔴");
+    expect(text).not.toContain("🟠");
+    expect(text).toContain(`#1 ${task().title}`);
   });
 });
 

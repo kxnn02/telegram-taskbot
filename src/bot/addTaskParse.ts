@@ -1,4 +1,5 @@
 import { parseDueDate, type ParsedDueDate } from "../date/parseDueDate.js";
+import type { TaskPriority } from "../domain/types.js";
 
 export interface AddTaskParsed {
   title: string;
@@ -7,6 +8,9 @@ export interface AddTaskParsed {
   /** Undefined means no "by <date>" clause was found — the caller applies
    * the coming-Friday default (issue #27). */
   dueDate?: ParsedDueDate;
+  /** Undefined means no `!priority` flag was found — the caller applies
+   * the medium default (issue #101). */
+  priority?: TaskPriority;
 }
 
 export interface AddTaskParseError {
@@ -14,7 +18,7 @@ export interface AddTaskParseError {
 }
 
 export const ADDTASK_USAGE =
-  "Usage: /addtask <title> [by <date>] [@username], or bare /addtask to use the step-by-step form.";
+  "Usage: /addtask <title> [!priority] [by <date>] [@username], or bare /addtask to use the step-by-step form.";
 const USAGE = ADDTASK_USAGE;
 
 // Matches a whole `@username` token anywhere in the string, with the
@@ -22,6 +26,17 @@ const USAGE = ADDTASK_USAGE;
 // comes before or after a "by <date>" clause (issue #30 — "combine, in
 // either order").
 const MENTION_RE = /(?:^|\s)@(\w+)(?=\s|$)/;
+
+// Matches a whole `!priority` token anywhere in the string (issue #101),
+// same shape as MENTION_RE — stripped before "by"/date parsing so it can't
+// be mistaken for part of the title or the date phrase.
+const PRIORITY_FLAG_RE = /(?:^|\s)!(\w+)(?=\s|$)/;
+const PRIORITIES: readonly TaskPriority[] = ["low", "medium", "high", "urgent"];
+
+function parsePriorityWord(word: string): TaskPriority | undefined {
+  const lower = word.toLowerCase();
+  return (PRIORITIES as readonly string[]).includes(lower) ? (lower as TaskPriority) : undefined;
+}
 
 // Every ` by ` occurrence is a candidate split point (issue #49/#51,
 // finding F2/D2) — walked last to first below.
@@ -52,6 +67,11 @@ const TRAILING_PUNCTUATION_ONLY_RE = /^[.,!?;:]*$/;
  * (trailing words after the date defeat full consumption — safe, since it
  * never drops user text), and "write the doc by end of week" likewise,
  * because chrono does not parse "end of week".
+ *
+ * A `!priority` flag (issue #101/#102, e.g. `!urgent`) is stripped the same
+ * way as the `@mention`, before the "by" split, so it can never be mistaken
+ * for part of the title or the date phrase. An unrecognised word after `!`
+ * is a usage error, not a silently-ignored token.
  */
 export function parseAddTaskArgs(
   raw: string,
@@ -66,6 +86,22 @@ export function parseAddTaskArgs(
     text = (
       text.slice(0, mentionMatch.index) +
       text.slice(mentionMatch.index + mentionMatch[0].length)
+    )
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  const priorityMatch = text.match(PRIORITY_FLAG_RE);
+  let priority: TaskPriority | undefined;
+  if (priorityMatch && priorityMatch.index !== undefined) {
+    const word = priorityMatch[1]!;
+    priority = parsePriorityWord(word);
+    if (!priority) {
+      return { error: `"${word}" isn't a priority. Use low, medium, high, or urgent.` };
+    }
+    text = (
+      text.slice(0, priorityMatch.index) +
+      text.slice(priorityMatch.index + priorityMatch[0].length)
     )
       .replace(/\s+/g, " ")
       .trim();
@@ -100,5 +136,5 @@ export function parseAddTaskArgs(
     return { error: USAGE };
   }
 
-  return { title, assigneeUsername, dueDate };
+  return { title, assigneeUsername, dueDate, priority };
 }

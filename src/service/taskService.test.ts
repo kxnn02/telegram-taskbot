@@ -42,6 +42,7 @@ function assign(service: TaskService, overrides: Partial<{
   title: string;
   description: string;
   dueDate: string;
+  priority: "low" | "medium" | "high" | "urgent";
 }> = {}) {
   return service.assignTask(carla, {
     assigneeUsername: "alice",
@@ -150,6 +151,60 @@ describe("assignTask", () => {
     const result = await assign(service, { description: "line one\nline two" });
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value.description).toBe("line one\nline two");
+  });
+});
+
+describe("assignTask priority (issue #101)", () => {
+  it("defaults to medium when omitted", async () => {
+    const { service } = makeService();
+    const result = await assign(service);
+    expect(result.ok && result.value.priority).toBe("medium");
+  });
+
+  it("stores the given priority", async () => {
+    const { service } = makeService();
+    const result = await assign(service, { priority: "urgent" });
+    expect(result.ok && result.value.priority).toBe("urgent");
+  });
+});
+
+describe("setPriority (issue #101) — no authorization check, mirrors setStatus", () => {
+  it("lets any roster member set priority on a task that isn't theirs", async () => {
+    const { service } = makeService();
+    const created = await assign(service); // alice's task
+    if (!created.ok) throw new Error("setup failed");
+    const result = await service.setPriority(bob, created.value.id, "high");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.priority).toBe("high");
+  });
+
+  it("a caller cannot touch a task in another cohort", async () => {
+    const { service } = makeService();
+    const created = await assign(service); // cohort-5
+    if (!created.ok) throw new Error("setup failed");
+    const otherCaller = caller("frank", OTHER_COHORT);
+    const result = await service.setPriority(otherCaller, created.value.id, "high");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/doesn't exist/i);
+  });
+
+  it("rejects a nonexistent task id", async () => {
+    const { service } = makeService();
+    const result = await service.setPriority(alice, 999, "high");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/doesn't exist/i);
+  });
+
+  it("reports a stale row_version as a conflict, not a silent overwrite", async () => {
+    const { service, store } = makeService();
+    const created = await assign(service);
+    if (!created.ok) throw new Error("setup failed");
+    vi.spyOn(store, "updateTask").mockResolvedValue({ outcome: "conflict" });
+
+    const result = await service.setPriority(alice, created.value.id, "urgent");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/changed by someone else/i);
   });
 });
 
