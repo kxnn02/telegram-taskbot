@@ -1,5 +1,5 @@
 import type { TaskService, TaskWithFlags } from "../service/taskService.js";
-import type { Caller, Note, TaskPriority, TaskStatus } from "../domain/types.js";
+import type { Caller, Note, TaskPriority } from "../domain/types.js";
 import { normalizeUsername, type Roster } from "../domain/roster.js";
 import { formatTaskRef } from "./taskRef.js";
 
@@ -279,13 +279,3 @@ export function buildTasksPage(
 
   return { text, keyboard };
 }
-
-/** Re-exported for the standup filter table's benefit — both views agree on
- * which statuses count as "not done". */
-export const NON_DONE_STATUSES: readonly TaskStatus[] = [
-  "blocked",
-  "in_progress",
-  "in_review",
-  "todo",
-  "backlog",
-];
