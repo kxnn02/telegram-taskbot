@@ -385,6 +385,150 @@ describe("cohort isolation survives the strip (the one guarantee that must)", ()
   });
 });
 
+describe("/update's link: and note: riders (issue #103 item 6)", () => {
+  async function seedTask(testBot: ReturnType<typeof makeTestBot>, title: string) {
+    const created = await testBot.service.assignTask(
+      { username: "alice", cohortId: COHORT },
+      { assigneeUsername: "alice", title, dueDate: "2026-09-10" },
+    );
+    if (!created.ok) throw new Error("setup failed");
+    return created.value.id;
+  }
+
+  it("attaches both a link and a note, and echoes them back on the reply", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const id = await seedTask(testBot, "Fix the login bug");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(
+        userId,
+        "alice",
+        userId,
+        `/update ${id} done link:https://example.com/pr/1 note: ready for QA`,
+      ),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("🔗 https://example.com/pr/1");
+    expect(text).toContain("📝 ready for QA");
+
+    const task = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, id);
+    if (!task.ok) throw new Error("read failed");
+    expect(task.value.status).toBe("done");
+    expect(task.value.notes.map((n) => n.text)).toEqual([
+      "https://example.com/pr/1",
+      "ready for QA",
+    ]);
+  });
+
+  it("attaches a note on its own", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const id = await seedTask(testBot, "Fix the login bug");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, `/update ${id} review note: needs a second pair of eyes`),
+    );
+
+    expect(lastReplyText(testBot.calls)).toContain("📝 needs a second pair of eyes");
+    const task = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, id);
+    if (!task.ok) throw new Error("read failed");
+    expect(task.value.notes.map((n) => n.text)).toEqual(["needs a second pair of eyes"]);
+  });
+
+  it("attaches a link on its own", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const id = await seedTask(testBot, "Fix the login bug");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, `/update ${id} done link:https://example.com/pr/9`),
+    );
+
+    expect(lastReplyText(testBot.calls)).toContain("🔗 https://example.com/pr/9");
+    const task = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, id);
+    if (!task.ok) throw new Error("read failed");
+    expect(task.value.notes.map((n) => n.text)).toEqual(["https://example.com/pr/9"]);
+  });
+
+  it("carries a per-item note through a mixed-status batch", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const first = await seedTask(testBot, "Fix the login bug");
+    const second = await seedTask(testBot, "Write the docs");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(
+        userId,
+        "alice",
+        userId,
+        `/update t${first} done note: shipped, t${second} review`,
+      ),
+    );
+
+    const text = allReplyTexts(testBot.calls).join("\n");
+    expect(text).toContain("📝 shipped");
+
+    const firstTask = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, first);
+    const secondTask = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, second);
+    if (!firstTask.ok || !secondTask.ok) throw new Error("read failed");
+    expect(firstTask.value.notes.map((n) => n.text)).toEqual(["shipped"]);
+    expect(secondTask.value.notes).toEqual([]);
+  });
+
+  it("a plain /update with no riders attaches nothing", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const id = await seedTask(testBot, "Fix the login bug");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, `/update ${id} done`));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).not.toContain("🔗");
+    expect(text).not.toContain("📝");
+    const task = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, id);
+    if (!task.ok) throw new Error("read failed");
+    expect(task.value.notes).toEqual([]);
+  });
+
+  it("cohort isolation: a rider cannot be attached to another cohort's task", async () => {
+    const roster = new Roster([
+      { username: "alice", cohortId: COHORT },
+      { username: "other", cohortId: "cohort-9" },
+    ]);
+    const testBot = makeTestBot(roster, COHORT);
+    const foreign = await testBot.service.assignTask(
+      { username: "other", cohortId: "cohort-9" },
+      { assigneeUsername: "other", title: "Secret task", dueDate: "2026-09-10" },
+    );
+    if (!foreign.ok) throw new Error("setup failed");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(
+        userId,
+        "alice",
+        userId,
+        `/update ${foreign.value.id} done link:https://example.com/leak note: leak`,
+      ),
+    );
+
+    const task = await testBot.service.getTask(
+      { username: "other", cohortId: "cohort-9" },
+      foreign.value.id,
+    );
+    if (!task.ok) throw new Error("read failed");
+    expect(task.value.notes).toEqual([]);
+    expect(task.value.status).not.toBe("done");
+  });
+});
+
 describe("trailing /addtask entry point (issue #103 item 4)", () => {
   it("a message whose final line is exactly /addtask creates a task from the text above it", async () => {
     const roster = new Roster([]);
