@@ -517,6 +517,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       assigneeUsername,
       title: parsed.title,
       dueDate,
+      priority: parsed.priority,
     });
     if (!result.ok) {
       await ctx.reply(`Couldn't create the task: ${result.error}`);

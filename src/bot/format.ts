@@ -1,6 +1,6 @@
 import { DateTime } from "luxon";
 import type { TaskWithFlags } from "../service/taskService.js";
-import type { TaskStatus } from "../domain/types.js";
+import type { TaskPriority, TaskStatus } from "../domain/types.js";
 import { MANILA_ZONE } from "../domain/overdue.js";
 
 /** Display labels for the six free-set statuses (#27's normative status
@@ -27,6 +27,17 @@ export const STATUS_EMOJI: Record<TaskStatus, string> = {
   backlog: "📦",
   blocked: "🚧",
   done: "✅",
+};
+
+/** Devie's bot-layer priority rendering (issue #101, `lib/standup.ts:20`):
+ * an emoji badge with a leading space, not the `Low`/`Medium`/`High`/
+ * `Urgent` word labels — those belong to the dashboard (#105) only.
+ * `medium`/`low` deliberately render nothing at all. */
+export const PRIORITY_BADGE: Record<TaskPriority, string> = {
+  urgent: " 🔴",
+  high: " 🟠",
+  medium: "",
+  low: "",
 };
 
 /** Tasks per page for the paginated list commands (/alltasks, /mytasks) —
@@ -73,7 +84,7 @@ export function formatTaskLine(task: TaskWithFlags): string {
   if (task.overdue) flags.push(`⚠️ OVERDUE ${task.daysOverdue}d`);
   if (task.status === "blocked") flags.push("🚧 BLOCKED");
   const flagText = flags.length > 0 ? ` [${flags.join(", ")}]` : "";
-  return `#${task.id} ${task.title} — ${STATUS_EMOJI[task.status]} ${statusLabel(task.status)} (due ${task.dueDate})${flagText}`;
+  return `#${task.id}${PRIORITY_BADGE[task.priority]} ${task.title} — ${STATUS_EMOJI[task.status]} ${statusLabel(task.status)} (due ${task.dueDate})${flagText}`;
 }
 
 export function formatMyTasks(tasks: TaskWithFlags[], page = 1): string {
@@ -207,7 +218,7 @@ export function formatTaskDetail(task: TaskWithFlags): string {
           .join("\n");
 
   return [
-    `Task ${task.id}: ${task.title}`,
+    `Task ${task.id}${PRIORITY_BADGE[task.priority]}: ${task.title}`,
     `Status: ${statusLabel(task.status)}${flagLine}`,
     `Assignee: @${task.assigneeUsername}`,
     `Assigned by: @${task.assignedByUsername}`,

@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Note, Task, TaskStatus } from "../domain/types.js";
+import type { Note, Task, TaskPriority, TaskStatus } from "../domain/types.js";
 import type { TaskRecord, TaskStorePort, UpdateOutcome } from "./taskStorePort.js";
 
 interface TaskRow {
@@ -13,6 +13,8 @@ interface TaskRow {
   status: TaskStatus;
   previous_status: TaskStatus | null;
   blocked_reason: string | null;
+  priority: TaskPriority;
+  order_index: number;
   row_version: number;
   created_at: string;
   updated_at: string;
@@ -89,6 +91,8 @@ export class SupabaseTaskStore implements TaskStorePort {
         status: task.status,
         previous_status: task.previousStatus,
         blocked_reason: task.blockedReason,
+        priority: task.priority,
+        order_index: task.orderIndex,
         updated_at: task.updatedAt,
         row_version: task.rowVersion + 1,
       })
@@ -188,6 +192,8 @@ function toInsertRow(task: Task) {
     status: task.status,
     previous_status: task.previousStatus,
     blocked_reason: task.blockedReason,
+    priority: task.priority,
+    order_index: task.orderIndex,
     created_at: task.createdAt,
     updated_at: task.updatedAt,
   };
@@ -206,6 +212,8 @@ function toRecord(row: TaskRow, notes: Note[]): TaskRecord {
     notes,
     previousStatus: row.previous_status,
     blockedReason: row.blocked_reason,
+    priority: row.priority,
+    orderIndex: row.order_index,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     rowVersion: row.row_version,

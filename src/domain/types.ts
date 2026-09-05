@@ -15,6 +15,12 @@ export type TaskStatus =
   | "blocked"
   | "done";
 
+/** The four priority levels DevieBot's language parser infers from a
+ * pasted message (issue #101/#102) — copied in shape, not behaviour, this
+ * stage. Every task has one; the column defaults to `"medium"`, so this is
+ * required, not optional, on `Task`. */
+export type TaskPriority = "low" | "medium" | "high" | "urgent";
+
 export interface Note {
   text: string;
   authorUsername: string;
@@ -40,6 +46,10 @@ export interface Task {
    * blocked, or was never blocked. */
   previousStatus: TaskStatus | null;
   blockedReason: string | null;
+  priority: TaskPriority;
+  /** Drives the dashboard board's drag-ordering (issue #105) — nothing
+   * reads or writes this yet (issue #101 is schema-only for this field). */
+  orderIndex: number;
   createdAt: string;
   updatedAt: string;
 }

@@ -24,6 +24,8 @@ function makeTask(cohortId: string, overrides: Partial<Task> = {}): Task {
     notes: [],
     previousStatus: null,
     blockedReason: null,
+    priority: "medium",
+    orderIndex: 0,
     createdAt: "2026-08-31T02:00:00.000Z",
     updatedAt: "2026-08-31T02:00:00.000Z",
     ...overrides,
@@ -153,6 +155,34 @@ export function runTaskStoreContractTests(
         expect(result.outcome).toBe("updated");
         if (result.outcome === "updated") {
           expect(result.task.notes).toHaveLength(1);
+        }
+      });
+    });
+
+    describe("priority (issue #101)", () => {
+      it("stores 'medium' when insertTask isn't given a priority", async () => {
+        const { store, cohortId } = fixture;
+        const inserted = await store.insertTask(makeTask(cohortId));
+        expect(inserted.priority).toBe("medium");
+      });
+
+      it("round-trips a non-default priority through insertTask/findTaskById", async () => {
+        const { store, cohortId } = fixture;
+        await store.insertTask(makeTask(cohortId, { priority: "urgent" }));
+        const found = await store.findTaskById(cohortId, 1);
+        expect(found?.priority).toBe("urgent");
+      });
+
+      it("updateTask changes priority and bumps rowVersion, same as any other field", async () => {
+        const { store, cohortId } = fixture;
+        const inserted = await store.insertTask(makeTask(cohortId));
+
+        const result = await store.updateTask({ ...inserted, priority: "high" });
+
+        expect(result.outcome).toBe("updated");
+        if (result.outcome === "updated") {
+          expect(result.task.priority).toBe("high");
+          expect(result.task.rowVersion).toBe(2);
         }
       });
     });

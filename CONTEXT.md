@@ -466,6 +466,31 @@ until one exists — anyone can re-run `/start` and tap the other role button to
 themselves. Once a cohort has at least one Higher-up, that recovery path closes for everyone with
 an existing roster row, and role changes must go through `/roster role @user <role>` instead.
 
+### Priority, order_index, tags and audit_logs land as additive schema (issue #101)
+
+The Cohort 4 port's stage 1 (`20260905134102_task_priority_tags_and_audit.sql`) adds `tasks.priority`
+(text + CHECK, `low`/`medium`/`high`/`urgent`, default `medium` — same pattern as `status`, not a
+Postgres enum, per ADR-0006) and `tasks.order_index` (integer, default 0), plus three new tables:
+cohort-scoped `tags` (`id`, `cohort_id`, `name`, `color`, unique on `(cohort_id, name)` — unlike
+Devie's global tags, since this bot is multi-cohort), `task_tags` (join table, cascades on both
+`tags` and `tasks`), and `audit_logs` (`cohort_id`, `action`, `status`, `message`, `meta` jsonb).
+All three get RLS enabled with zero policies, matching every other table.
+
+This stage is schema-only: `Task.priority`/`orderIndex` are set at creation (`TaskService.assignTask`,
+defaulting to `medium`) and by `TaskService.setPriority` (no authorization check, same as
+`setStatus`), and the bot renders priority as an emoji badge (`format.ts`'s `PRIORITY_BADGE` —
+`🔴` urgent, `🟠` high, nothing for medium/low, copying Devie's bot rendering rather than the
+dashboard's word labels). `order_index`, `tags`, `task_tags` and `audit_logs` exist but nothing
+reads or writes them yet — issue #105 builds the tag UI and audit-log view over them, and the
+dashboard board's drag-ordering over `order_index`.
+
+`taskRef.ts`'s `parseTaskRef` now also accepts the hyphenated `T-001` form (`T-23`, `t-023`,
+`T-001`, alongside the existing `23`/`t23`), and a new `formatTaskRef` renders an id that way
+(zero-padded to 3 digits, unpadded past 999). `/addtask` accepts an optional `!priority` flag
+(e.g. `!urgent`) parsed the same way as the existing `@mention`/`by <date>` clauses — this specific
+`!`-prefixed syntax is a judgment call made in the absence of a verified source for Devie's actual
+argument grammar, not a confirmed carbon copy of it.
+
 ## Out of scope (deferred to v2)
 
 Mini App UI, file attachments, CSV export, recurring tasks, and standup response-collection were

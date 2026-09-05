@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseTaskRef } from "./taskRef.js";
+import { formatTaskRef, parseTaskRef } from "./taskRef.js";
 
 describe("parseTaskRef (issue #31's shared task-ref parser)", () => {
   it("accepts a bare number", () => {
@@ -36,5 +36,42 @@ describe("parseTaskRef (issue #31's shared task-ref parser)", () => {
 
   it("trims surrounding whitespace", () => {
     expect(parseTaskRef("  t23  ")).toBe(23);
+  });
+});
+
+describe("parseTaskRef accepts Devie's hyphenated T-001 form (issue #101)", () => {
+  it("accepts an uppercase T-hyphen ref", () => {
+    expect(parseTaskRef("T-23")).toBe(23);
+  });
+
+  it("accepts a lowercase t-hyphen ref with leading zeros", () => {
+    expect(parseTaskRef("t-023")).toBe(23);
+  });
+
+  it("accepts the padded T-001 form", () => {
+    expect(parseTaskRef("T-001")).toBe(1);
+  });
+
+  it("rejects a bare hyphen with no digits", () => {
+    expect(parseTaskRef("T-")).toBeUndefined();
+  });
+
+  it("rejects T-0 — ids are 1-indexed", () => {
+    expect(parseTaskRef("T-0")).toBeUndefined();
+  });
+
+  it("rejects a hyphen with no leading t", () => {
+    expect(parseTaskRef("-23")).toBeUndefined();
+  });
+});
+
+describe("formatTaskRef (issue #101)", () => {
+  it("zero-pads to 3 digits", () => {
+    expect(formatTaskRef(1)).toBe("T-001");
+    expect(formatTaskRef(23)).toBe("T-023");
+  });
+
+  it("renders 4+ digit ids unpadded, never truncated", () => {
+    expect(formatTaskRef(1000)).toBe("T-1000");
   });
 });

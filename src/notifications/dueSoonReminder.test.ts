@@ -18,6 +18,8 @@ function task(overrides: Partial<Task> = {}): Task {
     notes: [],
     previousStatus: null,
     blockedReason: null,
+    priority: "medium",
+    orderIndex: 0,
     createdAt: "2026-09-01T00:00:00.000Z",
     updatedAt: "2026-09-01T00:00:00.000Z",
     ...overrides,

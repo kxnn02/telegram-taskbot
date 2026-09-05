@@ -8,6 +8,7 @@ import {
   type Caller,
   type ServiceResult,
   type Task,
+  type TaskPriority,
   type TaskStatus,
 } from "../domain/types.js";
 
@@ -16,9 +17,15 @@ export interface AssignTaskInput {
   title: string;
   description?: string;
   dueDate: string; // ISO yyyy-MM-dd, already resolved by the bot's date parser
+  /** Defaults to `"medium"` when omitted (issue #101/#102 — inferred by the
+   * language parser from words like "urgent"/"asap"). */
+  priority?: TaskPriority;
 }
 
-export type EditTaskInput = Partial<AssignTaskInput>;
+// `priority` is deliberately excluded here: #106 deletes `/edit` entirely,
+// so there's no editTask patch path for it — priority is only ever set at
+// creation (assignTask) or directly (setPriority), matching Devie.
+export type EditTaskInput = Partial<Omit<AssignTaskInput, "priority">>;
 
 export interface TaskWithFlags extends Task {
   overdue: boolean;
@@ -168,6 +175,8 @@ export class TaskService {
       notes: [],
       previousStatus: null,
       blockedReason: null,
+      priority: input.priority ?? "medium",
+      orderIndex: 0,
       createdAt: now,
       updatedAt: now,
     };
@@ -227,6 +236,25 @@ export class TaskService {
     const task = found.value;
 
     transitionStatus(task, status);
+    task.updatedAt = this.clock.now().toISOString();
+    return this.persist(task);
+  }
+
+  /** Sets a task's priority directly — no authorization check at all (#106
+   * removes every one of them): any roster member may set any priority on
+   * any task in their own cohort, matching Devie. Priority is otherwise set
+   * only at creation time (`assignTask`); this is the parser's (#102) and
+   * the dashboard's (#105) write path. */
+  async setPriority(
+    caller: Caller,
+    taskId: number,
+    priority: TaskPriority,
+  ): Promise<ServiceResult<Task>> {
+    const found = await this.mustFindInCallerCohort(caller, taskId);
+    if (!found.ok) return fail(found.error);
+    const task = found.value;
+
+    task.priority = priority;
     task.updatedAt = this.clock.now().toISOString();
     return this.persist(task);
   }
