@@ -1,8 +1,6 @@
 // Core domain types shared by the task-service layer, the bot layer, and
 // (later) the dashboard. Kept free of any Telegram- or HTTP-specific types.
 
-export type Role = "Intern" | "HigherUp";
-
 /**
  * The six free-set statuses (ADR-0009 / issue #27's normative status
  * table), replacing the old gated Assigned/InProgress/Submitted/Approved/
@@ -28,7 +26,7 @@ export interface Task {
   cohortId: string;
   title: string;
   description?: string; // optional (issue #27/#28) — fillable later via /edit or /note
-  assigneeUsername: string; // any roster member, not just an Intern (issue #27)
+  assigneeUsername: string; // any roster member (issue #27)
   assignedByUsername: string; // whoever created it
   dueDate: string; // ISO date (yyyy-MM-dd), Asia/Manila-resolved
   status: TaskStatus;
@@ -46,17 +44,19 @@ export interface Task {
   updatedAt: string;
 }
 
-/** Identity of the caller making a service-layer request. */
+/** Identity of the caller making a service-layer request. There is no
+ * access-control tier (ADR-0013 supersedes ADR-0002/ADR-0010): any roster
+ * member may act on any task in their own cohort — cohort scoping is the
+ * only boundary that survives. */
 export interface Caller {
   username: string;
-  role: Role;
   cohortId: string;
 }
 
-/** A roster entry: who someone is, independent of whether they've /start'd yet. */
+/** A roster entry: who someone is, independent of whether they've /start'd
+ * yet. Populated by auto-registration (ADR-0013) rather than by an admin. */
 export interface RosterEntry {
   username: string;
-  role: Role;
   cohortId: string;
 }
 
