@@ -12,9 +12,8 @@ import { MANILA_ZONE } from "../domain/overdue.js";
  * A due-tomorrow reminder is meaningful for every status except `done`
  * (issue #27/#29) — free-set statuses have no terminal-but-not-done state
  * left to carve out an allowlist for, so this is a blocklist of one rather
- * than the old `REMINDABLE_STATUSES` allowlist. Eligibility never depends
- * on the assignee's role — a task assigned to a `HigherUp` reminds exactly
- * like one assigned to an `Intern`.
+ * than the old `REMINDABLE_STATUSES` allowlist. There is no role tier any
+ * more (ADR-0013) — eligibility never depended on one anyway.
  */
 export function findDueTomorrow(tasks: Task[], now: Date): Task[] {
   const tomorrow = DateTime.fromJSDate(now, { zone: MANILA_ZONE })

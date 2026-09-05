@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { FixedClock } from "../domain/clock.js";
 import { Roster } from "../domain/roster.js";
 import type { Caller } from "../domain/types.js";
@@ -10,19 +10,19 @@ const COHORT = "cohort-5";
 
 function makeRoster() {
   return new Roster([
-    { username: "alice", role: "Intern", cohortId: COHORT },
-    { username: "bob", role: "Intern", cohortId: COHORT },
-    { username: "carla", role: "HigherUp", cohortId: COHORT },
-    { username: "dave", role: "HigherUp", cohortId: COHORT },
+    { username: "alice", cohortId: COHORT },
+    { username: "bob", cohortId: COHORT },
+    { username: "carla", cohortId: COHORT },
+    { username: "dave", cohortId: COHORT },
   ]);
 }
 
-function caller(username: string, role: "Intern" | "HigherUp"): Caller {
-  return { username, role, cohortId: COHORT };
+function caller(username: string): Caller {
+  return { username, cohortId: COHORT };
 }
 
-const carla = caller("carla", "HigherUp");
-const alice = caller("alice", "Intern");
+const carla = caller("carla");
+const alice = caller("alice");
 
 // 2026-09-04 10:00 Asia/Manila
 const NOW = new Date("2026-09-04T02:00:00.000Z");
@@ -48,31 +48,31 @@ function assign(
   return service.assignTask(carla, {
     assigneeUsername: "alice",
     title: "Write the onboarding doc",
-    description: "Draft the intern onboarding checklist",
+    description: "Draft the onboarding checklist",
     dueDate: "2026-09-10",
     ...overrides,
   });
 }
 
-describe("DigestBuilder.internDigest", () => {
-  it("returns null (suppressed) when the intern has no open tasks", async () => {
+describe("DigestBuilder.ownTasksDigest", () => {
+  it("returns null (suppressed) when the member has no open tasks", async () => {
     const { builder } = makeBuilder();
-    expect(await builder.internDigest("alice", COHORT)).toBeNull();
+    expect(await builder.ownTasksDigest("alice", COHORT)).toBeNull();
   });
 
-  it("returns digest text when the intern has open tasks", async () => {
+  it("returns digest text when the member has open tasks", async () => {
     const { builder, service } = makeBuilder();
     await assign(service);
-    const text = await builder.internDigest("alice", COHORT);
+    const text = await builder.ownTasksDigest("alice", COHORT);
     expect(text).not.toBeNull();
     expect(text).toContain("onboarding doc");
   });
 });
 
-describe("DigestBuilder.higherUpDailyDigest", () => {
+describe("DigestBuilder.oversightDailyDigest", () => {
   it("returns null (suppressed) when there's nothing pending/blocked/overdue", async () => {
     const { builder } = makeBuilder();
-    expect(await builder.higherUpDailyDigest("dave", COHORT)).toBeNull();
+    expect(await builder.oversightDailyDigest("dave", COHORT)).toBeNull();
   });
 
   it("includes pending-review tasks", async () => {
@@ -80,7 +80,7 @@ describe("DigestBuilder.higherUpDailyDigest", () => {
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
     await service.setStatus(alice, created.value.id, "in_review");
-    const text = await builder.higherUpDailyDigest("dave", COHORT);
+    const text = await builder.oversightDailyDigest("dave", COHORT);
     expect(text).not.toBeNull();
     expect(text).toContain(`#${created.value.id}`);
   });
@@ -90,7 +90,7 @@ describe("DigestBuilder.higherUpDailyDigest", () => {
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
     await service.setBlocked(alice, created.value.id, "stuck on access");
-    const text = await builder.higherUpDailyDigest("dave", COHORT);
+    const text = await builder.oversightDailyDigest("dave", COHORT);
     expect(text).not.toBeNull();
     expect(text).toContain("stuck on access");
   });
@@ -100,16 +100,16 @@ describe("DigestBuilder.higherUpDailyDigest", () => {
     const { builder, service } = makeBuilder(past);
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
-    const text = await builder.higherUpDailyDigest("dave", COHORT);
+    const text = await builder.oversightDailyDigest("dave", COHORT);
     expect(text).not.toBeNull();
     expect(text).toContain(`#${created.value.id}`);
   });
 });
 
-describe("DigestBuilder.higherUpWeeklyDigest", () => {
+describe("DigestBuilder.oversightWeeklyDigest", () => {
   it("returns null (suppressed) when nothing pending and nothing approved recently", async () => {
     const { builder } = makeBuilder();
-    expect(await builder.higherUpWeeklyDigest("dave", COHORT, NOW)).toBeNull();
+    expect(await builder.oversightWeeklyDigest("dave", COHORT, NOW)).toBeNull();
   });
 
   it("includes tasks approved within the past week", async () => {
@@ -118,7 +118,7 @@ describe("DigestBuilder.higherUpWeeklyDigest", () => {
     if (!created.ok) throw new Error("setup failed");
     await service.setStatus(alice, created.value.id, "in_review");
     await service.setStatus(carla, created.value.id, "done");
-    const text = await builder.higherUpWeeklyDigest("dave", COHORT, NOW);
+    const text = await builder.oversightWeeklyDigest("dave", COHORT, NOW);
     expect(text).not.toBeNull();
     expect(text).toContain(`#${created.value.id}`);
   });
@@ -130,13 +130,13 @@ describe("DigestBuilder.higherUpWeeklyDigest", () => {
     if (!created.ok) throw new Error("setup failed");
     await service.setStatus(alice, created.value.id, "in_review");
     await service.setStatus(carla, created.value.id, "done");
-    const text = await builder.higherUpWeeklyDigest("dave", COHORT, NOW); // NOW is a month later
+    const text = await builder.oversightWeeklyDigest("dave", COHORT, NOW); // NOW is a month later
     expect(text).toBeNull();
   });
 });
 
 describe("DigestBuilder.groupDailyCounts", () => {
-  it("aggregates on-track/overdue/blocked counts per intern", async () => {
+  it("aggregates on-track/overdue/blocked counts per member", async () => {
     const { builder, service } = makeBuilder();
     await assign(service, { assigneeUsername: "alice" });
     await assign(service, { assigneeUsername: "bob", dueDate: "2026-09-01" }); // overdue relative to NOW
@@ -148,7 +148,7 @@ describe("DigestBuilder.groupDailyCounts", () => {
     expect(bobCounts).toEqual({ username: "bob", onTrack: 0, overdue: 1, blocked: 0 });
   });
 
-  it("gives a zeroed line for an intern with no tasks at all", async () => {
+  it("gives a zeroed line for a member with no tasks at all", async () => {
     const { builder, service } = makeBuilder();
     await assign(service, { assigneeUsername: "alice" });
     const counts = await builder.groupDailyCounts(COHORT);
@@ -156,7 +156,7 @@ describe("DigestBuilder.groupDailyCounts", () => {
     expect(bobCounts).toEqual({ username: "bob", onTrack: 0, overdue: 0, blocked: 0 });
   });
 
-  it("includes a HigherUp holding a task — assignment isn't intern-only (issue #27/#29)", async () => {
+  it("includes any member holding a task, not just the one who created it", async () => {
     const { builder, service } = makeBuilder();
     await assign(service, { assigneeUsername: "dave" });
     const counts = await builder.groupDailyCounts(COHORT);

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+﻿import { describe, expect, it, vi } from "vitest";
 import { InMemoryAlertThrottleStore } from "../storage/inMemoryAlertThrottleStore.js";
 import { InMemoryRegistrationStore } from "../storage/inMemoryRegistrationStore.js";
 import { InMemoryCohortStore } from "../storage/inMemoryCohortStore.js";
@@ -27,9 +27,9 @@ function makeMembershipApi(byUserId: Record<number, { status: string; is_member?
 
 function makeDeps(overrides: Partial<RosterReconciliationDeps> = {}) {
   const roster = new Roster([
-    { username: "alice", role: "Intern", cohortId: "cohort-5" },
-    { username: "bob", role: "HigherUp", cohortId: "cohort-5" },
-    { username: "carol", role: "HigherUp", cohortId: "cohort-5" },
+    { username: "alice", cohortId: "cohort-5" },
+    { username: "bob", cohortId: "cohort-5" },
+    { username: "carol", cohortId: "cohort-5" },
   ]);
   const sendMessage = vi.fn();
   const deps: RosterReconciliationDeps = {
@@ -45,7 +45,7 @@ function makeDeps(overrides: Partial<RosterReconciliationDeps> = {}) {
 }
 
 describe("runRosterReconciliationJob", () => {
-  it("flags an absent member and DMs every HigherUp in the cohort", async () => {
+  it("flags an absent member and DMs every other member of the cohort", async () => {
     const { deps, sendMessage } = makeDeps({
       api: makeMembershipApi({ 1: { status: "left" } }),
     });
@@ -130,10 +130,10 @@ describe("runRosterReconciliationJob", () => {
 
   it("scopes reconciliation per cohort: an absence in one cohort does not affect another", async () => {
     const roster = new Roster([
-      { username: "alice", role: "Intern", cohortId: "cohort-5" },
-      { username: "bob", role: "HigherUp", cohortId: "cohort-5" },
-      { username: "dave", role: "Intern", cohortId: "cohort-6" },
-      { username: "erin", role: "HigherUp", cohortId: "cohort-6" },
+      { username: "alice", cohortId: "cohort-5" },
+      { username: "bob", cohortId: "cohort-5" },
+      { username: "dave", cohortId: "cohort-6" },
+      { username: "erin", cohortId: "cohort-6" },
     ]);
     const sendMessage = vi.fn();
     const registrations = new InMemoryRegistrationStore();

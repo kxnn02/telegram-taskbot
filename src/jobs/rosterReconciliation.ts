@@ -10,7 +10,7 @@ import { checkGroupMembership, type MembershipApi } from "../bot/groupMembership
  * How long a `(cohortId, username)` "left the group" flag stays throttled
  * before it can be re-reported (ticket R5/#89 — "do not repeat the same
  * warning every day"). The job runs daily, so a 1-day window would DM every
- * HigherUp on every single run for as long as the person stays gone. 7 days
+ * other member on every single run for as long as the person stays gone. 7 days
  * matches the daily cadence the ticket asks for ("reported roughly weekly,
  * not daily") — a standing absence is still surfaced regularly enough that
  * it can't be forgotten, but stops being noise after the first DM.
@@ -31,7 +31,9 @@ export interface RosterReconciliationDeps {
 /**
  * Daily roster-reconciliation job (ticket R5/#90): walks one cohort's
  * roster, flags members who have left the cohort's Telegram group, and DMs
- * every `HigherUp` in that cohort about them. Never removes anyone — see
+ * every other member of that cohort about them (ADR-0013 — there is no
+ * more privileged tier to single out; every roster member gets the same
+ * report). Never removes anyone — see
  * the ticket/CONTEXT.md for why auto-removal is deliberately out of scope
  * (composes badly with #89's "refuse removal while open tasks exist" rule,
  * and trusts one Telegram API answer more than it should).
@@ -89,8 +91,8 @@ export async function runRosterReconciliationJob(
   if (toReport.length === 0) return;
 
   const text = `Roster reconciliation: the following member(s) appear to have left the cohort group and no longer show as present: ${toReport.join(", ")}. They still hold roster access — review and remove them manually if they've actually left.`;
-  const higherUps = entries.filter((entry) => entry.role === "HigherUp");
-  for (const higherUp of higherUps) {
-    await sendDM(deps.bot, deps.registrations, higherUp.username, text);
+  const remaining = entries.filter((entry) => !absentUsernames.includes(entry.username));
+  for (const member of remaining) {
+    await sendDM(deps.bot, deps.registrations, member.username, text);
   }
 }

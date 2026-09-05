@@ -9,7 +9,7 @@ import type { Roster } from "../domain/roster.js";
 import type { Caller } from "../domain/types.js";
 import type { TaskService } from "../service/taskService.js";
 import { approvedInPastWeek } from "./weeklyApproved.js";
-import type { InternDailyCounts } from "./digestFormat.js";
+import type { MemberDailyCounts } from "./digestFormat.js";
 
 export interface DigestBuilderDeps {
   service: TaskService;
@@ -22,25 +22,29 @@ export interface DigestBuilderDeps {
  * PRD §8 / issue #2. Deliberately thin: no new business rules, just
  * aggregation + formatting on top of `listMyTasks`, `listPending`,
  * `listBlocked`, `listBacklog`, and `listAllTasks`.
+ *
+ * There is no role tier any more (ADR-0013), so every roster member gets
+ * the same shape of digest: their own open tasks plus the cohort-wide
+ * oversight view (pending review, blocked, overdue) — previously the
+ * oversight half was higher-up-only.
  */
 export class DigestBuilder {
   constructor(private readonly deps: DigestBuilderDeps) {}
 
-  /** Daily and weekly individual DM digest for one intern — same shape for
-   * both cadences (PRD §8). Returns null when the intern has nothing open. */
-  async internDigest(username: string, cohortId: string): Promise<string | null> {
-    const caller: Caller = { username, role: "Intern", cohortId };
+  /** Own-open-tasks digest — same shape for daily and weekly cadences (PRD
+   * §8). Returns null when the member has nothing open. */
+  async ownTasksDigest(username: string, cohortId: string): Promise<string | null> {
+    const caller: Caller = { username, cohortId };
     const result = await this.deps.service.listMyTasks(caller);
     if (!result.ok || result.value.length === 0) return null;
     return formatMyTasks(result.value);
   }
 
-  /** Daily individual DM digest for one higher-up: pending review, blocked,
-   * and overdue, cohort-wide (not scoped to tasks they personally assigned —
-   * PRD §2's any-higher-up-any-task rule). Returns null when there's
-   * nothing to report. */
-  async higherUpDailyDigest(username: string, cohortId: string): Promise<string | null> {
-    const caller: Caller = { username, role: "HigherUp", cohortId };
+  /** Daily oversight digest: pending review, blocked, and overdue,
+   * cohort-wide (not scoped to tasks the member personally assigned).
+   * Returns null when there's nothing to report. */
+  async oversightDailyDigest(username: string, cohortId: string): Promise<string | null> {
+    const caller: Caller = { username, cohortId };
     const pending = await this.deps.service.listPending(caller);
     const blocked = await this.deps.service.listBlocked(caller);
     const overdue = await this.deps.service.listBacklog(caller);
@@ -64,15 +68,15 @@ export class DigestBuilder {
     return sections.join("\n\n");
   }
 
-  /** Weekly Monday individual DM digest for one higher-up: pending review
-   * plus what was Approved in the past 7 days (PRD §8). Returns null when
-   * there's nothing to report. */
-  async higherUpWeeklyDigest(
+  /** Weekly Monday oversight digest: pending review plus what was marked
+   * done in the past 7 days (PRD §8). Returns null when there's nothing to
+   * report. */
+  async oversightWeeklyDigest(
     username: string,
     cohortId: string,
     now: Date,
   ): Promise<string | null> {
-    const caller: Caller = { username, role: "HigherUp", cohortId };
+    const caller: Caller = { username, cohortId };
     const pending = await this.deps.service.listPending(caller);
     const all = await this.deps.service.listAllTasks(caller);
 
@@ -91,20 +95,16 @@ export class DigestBuilder {
     return sections.join("\n\n");
   }
 
-  /** Per-member counts for the daily group-chat summary (PRD §8) — deliberately
-   * counts-only, see `InternDailyCounts`. Includes every roster member in the
-   * cohort, even ones with zero tasks, for full-cohort visibility — not just
-   * interns, since assignment is open to the whole roster (issue #27/#29). */
-  async groupDailyCounts(cohortId: string): Promise<InternDailyCounts[]> {
+  /** Per-member counts for the daily group-chat summary (PRD §8) —
+   * deliberately counts-only, see `MemberDailyCounts`. Includes every
+   * roster member in the cohort, even ones with zero tasks, for
+   * full-cohort visibility. */
+  async groupDailyCounts(cohortId: string): Promise<MemberDailyCounts[]> {
     const members = this.deps.roster.all().filter((entry) => entry.cohortId === cohortId);
 
     return Promise.all(
       members.map(async (entry) => {
-        const caller: Caller = {
-          username: entry.username,
-          role: entry.role,
-          cohortId,
-        };
+        const caller: Caller = { username: entry.username, cohortId };
         const result = await this.deps.service.listMyTasks(caller);
         const tasks = result.ok ? result.value : [];
         const overdue = tasks.filter((t) => t.overdue).length;

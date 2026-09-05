@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+﻿import { describe, expect, it, vi } from "vitest";
 import { InMemoryOverdueNotificationStore } from "../storage/inMemoryOverdueNotificationStore.js";
 import { InMemoryRegistrationStore } from "../storage/inMemoryRegistrationStore.js";
 import { InMemoryCohortStore } from "../storage/inMemoryCohortStore.js";
@@ -22,19 +22,19 @@ const COHORT = "cohort-5";
 
 function makeRoster() {
   return new Roster([
-    { username: "alice", role: "Intern", cohortId: COHORT },
-    { username: "bob", role: "Intern", cohortId: COHORT },
-    { username: "carla", role: "HigherUp", cohortId: COHORT },
-    { username: "dave", role: "HigherUp", cohortId: COHORT },
+    { username: "alice", cohortId: COHORT },
+    { username: "bob", cohortId: COHORT },
+    { username: "carla", cohortId: COHORT },
+    { username: "dave", cohortId: COHORT },
   ]);
 }
 
-function caller(username: string, role: "Intern" | "HigherUp"): Caller {
-  return { username, role, cohortId: COHORT };
+function caller(username: string): Caller {
+  return { username, cohortId: COHORT };
 }
 
-const carla = caller("carla", "HigherUp");
-const alice = caller("alice", "Intern");
+const carla = caller("carla");
+const alice = caller("alice");
 
 // 2026-09-04 10:00 Asia/Manila
 const NOW = new Date("2026-09-04T02:00:00.000Z");
@@ -103,7 +103,7 @@ function assign(
   return service.assignTask(carla, {
     assigneeUsername: "alice",
     title: "Write the onboarding doc",
-    description: "Draft the intern onboarding checklist",
+    description: "Draft the onboarding checklist",
     dueDate: "2026-09-10",
     ...overrides,
   });
@@ -128,7 +128,7 @@ describe("sendDM (issue #59/H3)", () => {
 });
 
 describe("runOverdueCrossingCheck", () => {
-  it("notifies both the intern and the assigning higher-up exactly once", async () => {
+  it("notifies both the assignee and the assigner exactly once", async () => {
     const past = new Date("2026-09-20T02:00:00.000Z"); // after 2026-09-10 due date
     const { deps, service, bot, overdueNotifications } = await makeDeps(past);
     const created = await assign(service);
@@ -196,7 +196,7 @@ describe("runDueSoonReminderCheck", () => {
 });
 
 describe("runDailyDigest", () => {
-  it("DMs interns and higher-ups with something to report, and posts a counts-only group summary", async () => {
+  it("DMs every member with something to report, and posts a counts-only group summary", async () => {
     const { deps, service, bot } = await makeDeps();
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
@@ -205,17 +205,18 @@ describe("runDailyDigest", () => {
     const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
     await runDailyDigest(deps, digestBuilder, COHORT);
 
-    // alice has an open (submitted) task -> DM; dave/carla have a pending
-    // review -> DM each; bob has nothing -> suppressed.
+    // alice has an open (submitted) task -> DM. Every member also gets the
+    // cohort-wide oversight half (pending review) now that there's no role
+    // tier to restrict it to (ADR-0013), so bob/carla/dave all get one too.
     const dmCount = bot.sent.filter((m) => typeof m.chatId === "number").length;
-    expect(dmCount).toBe(3);
+    expect(dmCount).toBe(4);
 
     const groupMessage = bot.sent.find((m) => m.chatId === "-100999");
     expect(groupMessage).toBeDefined();
     expect(groupMessage!.text.toLowerCase()).not.toContain("onboarding");
   });
 
-  it("a HigherUp holding their own task sees it, not just the oversight view (issue #27/#29)", async () => {
+  it("a member holding their own task sees it, not just the oversight view", async () => {
     const { deps, service, bot } = await makeDeps();
     const created = await assign(service, { assigneeUsername: "dave" });
     if (!created.ok) throw new Error("setup failed");
@@ -240,10 +241,11 @@ describe("runDailyDigest", () => {
     const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
     await runDailyDigest(deps, digestBuilder, COHORT);
 
-    // carla and dave both have a pending review -> DM each, despite alice's
-    // lookup blowing up first in roster order.
+    // bob, carla, and dave all get the cohort-wide oversight digest
+    // (pending review) despite alice's lookup blowing up first in roster
+    // order — alice herself is skipped since her own send fails.
     const dmCount = bot.sent.filter((m) => typeof m.chatId === "number").length;
-    expect(dmCount).toBe(2);
+    expect(dmCount).toBe(3);
 
     const groupMessage = bot.sent.find((m) => m.chatId === "-100999");
     expect(groupMessage).toBeDefined();
@@ -251,15 +253,15 @@ describe("runDailyDigest", () => {
 });
 
 describe("runWeeklyDigest", () => {
-  it("suppresses higher-ups with nothing pending and nothing approved recently", async () => {
+  it("suppresses members with nothing open, pending, or approved recently", async () => {
     const { deps, service, bot } = await makeDeps();
     await assign(service); // Assigned only, not submitted/approved -> nothing for higher-ups
     const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
     await runWeeklyDigest(deps, digestBuilder, COHORT, NOW);
 
-    const higherUpDms = bot.sent.filter((m) => m.text.includes("Weekly digest"));
-    // Only alice (intern, has an open task) should get a weekly DM.
-    expect(higherUpDms).toHaveLength(1);
+    const weeklyDms = bot.sent.filter((m) => m.text.includes("Weekly digest"));
+    // Only alice (has an open task) should get a weekly DM.
+    expect(weeklyDms).toHaveLength(1);
   });
 
   it("a broken lookup for the middle roster member still reaches the last one (issue #59/H3)", async () => {
