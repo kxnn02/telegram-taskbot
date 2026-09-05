@@ -385,6 +385,119 @@ describe("cohort isolation survives the strip (the one guarantee that must)", ()
   });
 });
 
+describe("trailing /addtask entry point (issue #103 item 4)", () => {
+  it("a message whose final line is exactly /addtask creates a task from the text above it", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, "Fix the login bug\n/addtask"),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("created");
+    const tasks = await testBot.service.listAllTasks({ username: "alice", cohortId: COHORT });
+    if (!tasks.ok) throw new Error("read failed");
+    expect(tasks.value.map((t) => t.title)).toEqual(["Fix the login bug"]);
+  });
+
+  it("works in a group chat too, not just a DM", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(userId, "alice", -100, "Ship the release notes\n/addtask"),
+    );
+
+    expect(lastReplyText(testBot.calls)).toContain("created");
+  });
+
+  it("does NOT route when /addtask is the last token on a line with text before it", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, "Fix the login bug /addtask"),
+    );
+
+    const tasks = await testBot.service.listAllTasks({ username: "alice", cohortId: COHORT });
+    if (!tasks.ok) throw new Error("read failed");
+    expect(tasks.value).toEqual([]);
+    expect(lastReplyText(testBot.calls)).not.toContain("created");
+  });
+
+  it("does NOT route when /addtask sits mid-text", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, "Fix the login bug\n/addtask\nand the signup one"),
+    );
+
+    const tasks = await testBot.service.listAllTasks({ username: "alice", cohortId: COHORT });
+    if (!tasks.ok) throw new Error("read failed");
+    expect(tasks.value).toEqual([]);
+  });
+
+  it("does NOT route when the message starts with one of the ten commands", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/tasks\n/addtask"));
+
+    const tasks = await testBot.service.listAllTasks({ username: "alice", cohortId: COHORT });
+    if (!tasks.ok) throw new Error("read failed");
+    expect(tasks.value).toEqual([]);
+  });
+
+  it("a bare /addtask still gets the existing usage reply", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/addtask"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/^Usage: \/addtask/);
+  });
+
+  it("carries the assignee and date grammar through, same as /addtask", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const bobId = nextUserId();
+    await testBot.bot.handleUpdate(messageUpdate(bobId, "bob", bobId, "/help"));
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, "Fix the login bug @bob\n/addtask"),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("@bob");
+  });
+
+  it("cohort isolation: the created task lands only in the caller's cohort", async () => {
+    const roster = new Roster([{ username: "other", cohortId: "cohort-9" }]);
+    const testBot = makeTestBot(roster, "cohort-5");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, "Trailing-scoped task\n/addtask"),
+    );
+
+    const otherCohort = await testBot.service.listAllTasks({
+      username: "other",
+      cohortId: "cohort-9",
+    });
+    if (!otherCohort.ok) throw new Error("read failed");
+    expect(otherCohort.value).toEqual([]);
+  });
+});
+
 describe("mention trigger (issue #34, widened by #103)", () => {
   it("a newly accepted phrase creates a task from a group message", async () => {
     const roster = new Roster([]);

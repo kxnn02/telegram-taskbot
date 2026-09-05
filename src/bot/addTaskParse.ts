@@ -17,6 +17,48 @@ export interface AddTaskParseError {
   error: string;
 }
 
+/**
+ * DevieBot's trailing-`/addtask` entry point, copied from
+ * `app/api/telegram/webhook/route.ts:713-720` @ `632a22c` (issue #103 item
+ * 4). A message whose **final line is exactly `/addtask`** — optionally
+ * `@bot`-suffixed — is treated as `/addtask` with everything before it as
+ * the body, so someone can paste a description and then decide to file it.
+ *
+ * The `\r?\n` is load-bearing and is the whole point of the regex: Devie
+ * requires `/addtask` to occupy its own final line, not merely to be the
+ * last *token* of the message. "fix the login bug /addtask" does nothing.
+ *
+ * Devie guards the check by skipping it whenever the first token is already
+ * one of its ten commands, so `/tasks foo\n/addtask` stays a `/tasks` call.
+ * An *unrecognised* `/word` first token is not guarded and does route, with
+ * the slash-word swept into the task body — carbon-copied (#103 rule 2)
+ * rather than tidied.
+ *
+ * Returns the body (Devie's `rest`), or `undefined` when the message does
+ * not take this path at all. `handledCommands` is the bare command names,
+ * i.e. `HANDLED_COMMANDS` from `createBot.ts`.
+ */
+const TRAILING_ADDTASK_RE = /^([\s\S]*?)\r?\n\s*\/addtask(?:@\w+)?\s*$/i;
+
+export function parseTrailingAddTask(
+  text: string,
+  handledCommands: ReadonlySet<string>,
+): string | undefined {
+  // Devie's own normalisation: strip a `@bot` suffix off a leading command
+  // (`/help@MyBot` -> `/help`) so the ten-command guard below sees the bare
+  // name, then trim.
+  const normalized = text.replace(/^(\/\w+)@\w+/, "$1").trim();
+  const firstToken = normalized.split(/\s+/, 1)[0] ?? "";
+  if (
+    firstToken.startsWith("/") &&
+    handledCommands.has(firstToken.slice(1).toLowerCase())
+  ) {
+    return undefined;
+  }
+  const match = TRAILING_ADDTASK_RE.exec(normalized);
+  return match ? match[1]!.trim() : undefined;
+}
+
 export const ADDTASK_USAGE =
   "Usage: /addtask <title> [!priority] [by <date>] [@username], or bare /addtask to use the step-by-step form.";
 const USAGE = ADDTASK_USAGE;

@@ -6,7 +6,7 @@ import type { TaskStorePort } from "../storage/taskStorePort.js";
 import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
 import type { RosterStorePort } from "../storage/rosterStorePort.js";
 import { comingFriday, parseDueDate } from "../date/parseDueDate.js";
-import { parseAddTaskArgs, ADDTASK_USAGE } from "./addTaskParse.js";
+import { parseAddTaskArgs, parseTrailingAddTask, ADDTASK_USAGE } from "./addTaskParse.js";
 import { parseMentionTrigger } from "./mentionParse.js";
 import { resolveCaller } from "./callerResolution.js";
 import { notifyUser, notifyStatusChange } from "./notify.js";
@@ -559,6 +559,25 @@ export function createBot(options: CreateBotOptions): CreatedBot {
 
   bot.on("message:text", async (ctx) => {
     const text = ctx.message.text;
+
+    // Trailing `/addtask` (issue #103 item 4). Checked ahead of the
+    // leading-slash branch below because Devie's guard only skips its own
+    // ten commands: a message that opens with an *unrecognised* /word and
+    // ends with a `/addtask` line still routes here, with the slash-word
+    // swept into the task body. See parseTrailingAddTask for the regex and
+    // why the newline is load-bearing.
+    const trailingBody = parseTrailingAddTask(text, HANDLED_COMMANDS);
+    if (trailingBody !== undefined) {
+      const caller = await requireCaller(ctx);
+      if (!caller) return;
+      if (trailingBody.length === 0) {
+        await ctx.reply(ADDTASK_USAGE);
+        return;
+      }
+      await handleAddTaskArgs(ctx, caller, trailingBody);
+      return;
+    }
+
     if (text.startsWith("/")) {
       // Reaching here means no bot.command() handler above matched it —
       // i.e. an unrecognized/removed command name. No stack trace, no
