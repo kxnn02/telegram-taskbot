@@ -254,68 +254,43 @@ describe("formatTaskDetail", () => {
 });
 
 describe("formatHelp", () => {
-  it("says nothing has changed for an unregistered caller", () => {
-    expect(formatHelp(undefined)).toContain("/start");
+  it("lists /addtask, not the removed /assign", () => {
+    const text = formatHelp();
+    expect(text).toContain("/addtask");
+    expect(text).not.toContain("/assign");
   });
 
-  it("doesn't reference the deleted review gate for interns", () => {
-    const text = formatHelp("Intern");
-    expect(text.toLowerCase()).not.toContain("only higher-ups");
-  });
-
-  it("doesn't reference the deleted review gate for higher-ups", () => {
-    const text = formatHelp("HigherUp");
-    expect(text.toLowerCase()).not.toContain("decide on a submitted task");
-  });
-
-  it("lists /addtask, not the removed /assign, for everyone (issue #30)", () => {
-    const internText = formatHelp("Intern");
-    expect(internText).toContain("/addtask");
-    expect(internText).not.toContain("/assign");
-
-    const higherUpText = formatHelp("HigherUp");
-    expect(higherUpText).toContain("/addtask");
-    expect(higherUpText).not.toContain("/assign");
-  });
-
-  it("describes direct /edit usage (issue #30/#31)", () => {
-    const text = formatHelp("HigherUp");
-    expect(text).toMatch(/\/edit <ref> <field> <value>/);
-  });
-
-  it("lists /update, /done, /complete, /overdue, /unblock — not the removed review-gate commands (issue #27/#31)", () => {
-    const text = formatHelp("Intern");
+  it("lists the surviving update commands, not any removed-command name", () => {
+    const text = formatHelp();
     expect(text).toContain("/update");
     expect(text).toContain("/done");
     expect(text).toContain("/complete");
-    expect(text).toContain("/overdue");
-    expect(text).toContain("/unblock");
     expect(text).not.toMatch(/\/submit\b/);
     expect(text).not.toMatch(/\/approve\b/);
     expect(text).not.toMatch(/\/revise\b/);
     expect(text).not.toMatch(/\/canceltask\b/);
-    expect(text).not.toContain("/unblocked");
+    expect(text).not.toContain("/unblock");
     expect(text).not.toMatch(/\/backlog\b/);
+    expect(text).not.toContain("/edit");
+    expect(text).not.toContain("/note");
+    expect(text).not.toContain("/roster");
+    expect(text).not.toContain("/dashboard");
+    expect(text).not.toContain("/whoami");
+    expect(text).not.toContain("/cancel");
+    expect(text).not.toContain("/mytasks");
+    expect(text).not.toContain("/overdue");
+    expect(text).not.toContain("/pending");
   });
 
-  it("/pending and /dashboard are listed for everyone, not split into a higher-up-only section (issue #27/#35)", () => {
-    const internText = formatHelp("Intern");
-    expect(internText).toContain("/pending");
-    expect(internText).toContain("/dashboard");
-  });
-
-  it("has one section, not a role split — HigherUp and Intern see the same commands bar /edit's note (issue #27/#35)", () => {
-    expect(formatHelp("Intern")).toBe(formatHelp("HigherUp"));
-  });
-
-  it("mentions the /tasks role filter that the command menu advertises (issue #66/H18)", () => {
-    const text = formatHelp("Intern");
-    expect(text).toContain("/tasks intern");
-    expect(text).toContain("/tasks higherup");
+  it("has no access-control wording of any kind", () => {
+    const text = formatHelp().toLowerCase();
+    expect(text).not.toContain("higher-up");
+    expect(text).not.toContain("intern");
+    expect(text).not.toContain("restricted");
   });
 
   it("has a dedicated Statuses section listing all six statuses with a one-line meaning each", () => {
-    const text = formatHelp("Intern");
+    const text = formatHelp();
     expect(text).toMatch(/Statuses/);
     expect(text).toMatch(/backlog.*not.*started/i);
     expect(text).toMatch(/todo.*ready/i);
@@ -326,10 +301,10 @@ describe("formatHelp", () => {
   });
 });
 
-describe("BOT_COMMANDS / formatHelp coherence (issue #27/#35)", () => {
+describe("BOT_COMMANDS / formatHelp coherence", () => {
   it("every command Telegram's autocomplete menu offers also appears in /help", async () => {
     const { BOT_COMMANDS } = await import("./createBot.js");
-    const helpText = formatHelp("HigherUp");
+    const helpText = formatHelp();
     for (const { command } of BOT_COMMANDS) {
       expect(helpText).toContain(`/${command}`);
     }

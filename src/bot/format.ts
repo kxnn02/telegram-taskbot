@@ -1,6 +1,6 @@
 import { DateTime } from "luxon";
 import type { TaskWithFlags } from "../service/taskService.js";
-import type { Role, RosterEntry, TaskStatus } from "../domain/types.js";
+import type { TaskStatus } from "../domain/types.js";
 import { MANILA_ZONE } from "../domain/overdue.js";
 
 /** Display labels for the six free-set statuses (#27's normative status
@@ -171,20 +171,6 @@ export function formatBlocked(tasks: TaskWithFlags[]): string {
   ].join("\n");
 }
 
-/** Renders `/roster`'s list view (R4/#89) — already sorted by username by
- * the service, one line per member. */
-export function formatRoster(members: RosterEntry[]): string {
-  if (members.length === 0) {
-    return "The roster is empty.";
-  }
-  return [
-    "Roster:",
-    ...members.map(
-      (m) => `- @${m.username} — ${m.role === "HigherUp" ? "Higher-up" : "Intern"}`,
-    ),
-  ].join("\n");
-}
-
 export function formatApproved(tasks: TaskWithFlags[]): string {
   if (tasks.length === 0) {
     return "Nothing was approved in the past week.";
@@ -234,26 +220,17 @@ export function formatTaskDetail(task: TaskWithFlags): string {
   ].join("\n");
 }
 
-// Almost nothing here is role-gated any more (issue #27/#35) — free-set
-// statuses and open reads mean one shared list covers both roles. /edit's
-// direct-edit form is the sole exception (still restricted to higher-ups,
-// issue #27/#31), so it's called out inline instead of living in its own
-// role-specific section the way the pre-#27 help text split things.
+// No access control of any kind (ADR-0013): the bot's command surface now
+// matches Devie's one-for-one, so there's one shared list for everyone —
+// no role-specific sections, no "restricted to" notes.
 const HELP_SECTIONS: { heading: string; lines: string[] }[] = [
   {
     heading: "📋 View",
     lines: [
       "/tasks — browse tasks by member (paginated)",
       "/tasks @username — filter by member",
-      "/tasks intern | /tasks higherup — filter by role",
-      "/mytasks — your open tasks",
-      "/task <ref> — full detail on one task (ref is 23 or t23)",
       "/deadlines — show upcoming deadlines",
       "/standup — send the standup report",
-      "/overdue — overdue tasks",
-      "/pending — review queue (tasks in review)",
-      "/blocked — blocked tasks",
-      "/dashboard — get the dashboard link",
     ],
   },
   {
@@ -262,7 +239,6 @@ const HELP_SECTIONS: { heading: string; lines: string[] }[] = [
       "/addtask <title> — add a task (defaults to the coming Friday)",
       "/addtask <title> by Friday — add a task with a specific deadline",
       "/addtask <title> @username — add a task and assign it to someone",
-      "/addtask — bare, starts the step-by-step form instead",
       '@-mention the bot, "pls work on <title>" — same as /addtask, works in group chats too',
       '@-mention the bot, "add task <title> @username" — tag + assign in one go',
     ],
@@ -272,27 +248,12 @@ const HELP_SECTIONS: { heading: string; lines: string[] }[] = [
     lines: [
       "/done <ref> — mark as in review (e.g. /done 23)",
       "/done t21,t22,t23 — bulk mark as in review",
-      "/complete <ref> — mark as done (e.g. /complete 23)",
+      "/complete <ref> (or /completed <ref>) — mark as done (e.g. /complete 23)",
       "/complete t21,t22,t23 — bulk mark as done",
       "/update <ref> <status> — single update",
       "/update t21,t22,t23 done — bulk shared status",
       "/update t21 done, t22 review, t23 inprogress — bulk mixed status",
       "/update, one ref+status per line — bulk multiline",
-      "/blocked <ref> <reason> — flag a task as blocked",
-      "/unblock <ref> — restore a blocked task to its previous status",
-      "/note <ref> <text> — attach a feedback note",
-      "/edit <ref> <field> <value> — edit assignee, title, description, or duedate directly (restricted to higher-ups)",
-      "/edit <ref> — bare, starts the field-choice form instead (restricted to higher-ups)",
-    ],
-  },
-  {
-    heading: "👥 Roster",
-    lines: [
-      "/roster — list the cohort's roster (restricted to higher-ups)",
-      "/roster add @user [intern|higherup] — add a member, defaults to intern (adding as intern restricted to higher-ups)",
-      "/roster role @user intern|higherup — change a member's role",
-      "/roster remove @user — remove a member",
-      "Adding someone as higher-up, changing a role, or removing someone requires being an admin of the cohort's Telegram group — your roster role alone isn't enough for those.",
     ],
   },
   {
@@ -308,12 +269,7 @@ const HELP_SECTIONS: { heading: string; lines: string[] }[] = [
   },
   {
     heading: "⚙️ Other",
-    lines: [
-      "/start — register yourself against the roster",
-      "/help — this list",
-      "/cancel — abort an in-progress wizard",
-      "/whoami — show who the bot thinks you are",
-    ],
+    lines: ["/start — say hello and register yourself", "/help — this list"],
   },
 ];
 
@@ -354,10 +310,7 @@ export function chunkMessage(text: string, limit = 4000): string[] {
   return chunks.length > 0 ? chunks : [""];
 }
 
-export function formatHelp(role: Role | undefined): string {
-  if (!role) {
-    return "You're not registered yet — send /start to link your Telegram account to the roster.";
-  }
+export function formatHelp(): string {
   return [
     "Available Commands",
     "",

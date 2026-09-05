@@ -3,9 +3,7 @@ import { createBot, registerBotCommands } from "./createBot.js";
 import { createSupabaseClient } from "../storage/supabaseClient.js";
 import { SupabaseTaskStore } from "../storage/supabaseTaskStore.js";
 import { SupabaseRegistrationStore } from "../storage/supabaseRegistrationStore.js";
-import { SupabaseWizardStateStore } from "../storage/supabaseWizardStateStore.js";
 import { SupabaseRosterStore } from "../storage/supabaseRosterStore.js";
-import { SupabaseCohortStore } from "../storage/supabaseCohortStore.js";
 import { loadRosterFromStore } from "../config/roster.js";
 
 /**
@@ -43,8 +41,6 @@ async function main() {
     token,
     taskStore: new SupabaseTaskStore(supabase),
     registrationStore: new SupabaseRegistrationStore(supabase),
-    wizardStateStore: new SupabaseWizardStateStore(supabase),
-    cohorts: new SupabaseCohortStore(supabase),
     rosterStore,
     roster,
     activeCohortId,

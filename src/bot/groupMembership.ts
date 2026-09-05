@@ -1,10 +1,14 @@
-import type { ChatMember, ChatMemberAdministrator, ChatMemberOwner } from "@grammyjs/types/manage.js";
+import type { ChatMember } from "@grammyjs/types/manage.js";
 
 /**
- * Result of checking whether a Telegram user belongs to a cohort's group
- * (ticket R3/#88). Three outcomes, not two: a bare boolean would either
- * open a hole (treating "we couldn't check" as "present") or a lockout
- * (treating it as "absent") — see `checkGroupMembership`'s doc comment.
+ * Result of checking whether a Telegram user belongs to a cohort's group.
+ * Three outcomes, not two: a bare boolean would either open a hole
+ * (treating "we couldn't check" as "present") or a lockout (treating it as
+ * "absent") — see `checkGroupMembership`'s doc comment.
+ *
+ * Only used by `src/jobs/rosterReconciliation.ts` (ADR-0013 removed this
+ * module's other use, the `/start`/`/roster` access-control checks, along
+ * with the group-admin variant `checkGroupAdmin` that only they called).
  */
 export type GroupCheck =
   | { kind: "present" }
@@ -16,13 +20,6 @@ export type GroupCheck =
  * this is unit-testable with a plain object and no network. */
 export interface MembershipApi {
   getChatMember(chatId: number | string, userId: number): Promise<ChatMember>;
-}
-
-/** Narrow slice of grammy's api this module needs for an admin check. */
-export interface AdminApi {
-  getChatAdministrators(
-    chatId: number | string,
-  ): Promise<(ChatMemberOwner | ChatMemberAdministrator)[]>;
 }
 
 /**
@@ -63,31 +60,4 @@ export async function checkGroupMembership(
   }
   // "left" or "kicked"
   return { kind: "absent" };
-}
-
-/**
- * Same three-outcome shape as `checkGroupMembership`, over
- * `getChatAdministrators` instead — a later ticket (#89) consumes this to
- * gate an admin-only action. Kept in this module since both checks share
- * the same "Telegram membership" knowledge.
- */
-export async function checkGroupAdmin(
-  api: AdminApi,
-  groupChatId: string | undefined | null,
-  userId: number,
-): Promise<GroupCheck> {
-  if (groupChatId === undefined || groupChatId === null) {
-    return { kind: "unavailable", reason: "no group configured" };
-  }
-
-  let admins: (ChatMemberOwner | ChatMemberAdministrator)[];
-  try {
-    admins = await api.getChatAdministrators(groupChatId);
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    return { kind: "unavailable", reason };
-  }
-
-  const isAdmin = admins.some((admin) => admin.user.id === userId);
-  return isAdmin ? { kind: "present" } : { kind: "absent" };
 }

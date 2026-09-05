@@ -1,11 +1,11 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { InMemoryTaskStore } from "../storage/inMemoryTaskStore.js";
 import { FixedClock } from "../domain/clock.js";
 import { Roster } from "../domain/roster.js";
 import type { Caller } from "../domain/types.js";
 import { TaskService } from "../service/taskService.js";
 import { formatGroupDailySummary } from "../notifications/digestFormat.js";
-import type { InternDailyCounts } from "../notifications/digestFormat.js";
+import type { MemberDailyCounts } from "../notifications/digestFormat.js";
 import { buildStandup, formatStandup } from "./standup.js";
 
 const COHORT = "cohort-5";
@@ -13,14 +13,14 @@ const NOW = new Date("2026-09-01T02:00:00.000Z"); // Tuesday
 
 function makeRoster() {
   return new Roster([
-    { username: "carla", role: "HigherUp", cohortId: COHORT },
-    { username: "alice", role: "Intern", cohortId: COHORT },
-    { username: "bob", role: "Intern", cohortId: COHORT },
+    { username: "carla", cohortId: COHORT },
+    { username: "alice", cohortId: COHORT },
+    { username: "bob", cohortId: COHORT },
   ]);
 }
 
-const carla: Caller = { username: "carla", role: "HigherUp", cohortId: COHORT };
-const alice: Caller = { username: "alice", role: "Intern", cohortId: COHORT };
+const carla: Caller = { username: "carla", cohortId: COHORT };
+const alice: Caller = { username: "alice", cohortId: COHORT };
 
 function makeService() {
   const store = new InMemoryTaskStore();
@@ -256,8 +256,8 @@ describe("formatStandup (standup redesign)", () => {
     expect(formatStandup).not.toBe(formatGroupDailySummary as unknown as typeof formatStandup);
   });
 
-  it("standup's own detail shape carries a task title field the digest's InternDailyCounts structurally has no room for", () => {
-    const digestShape: InternDailyCounts = { username: "alice", onTrack: 1, overdue: 0, blocked: 0 };
+  it("standup's own detail shape carries a task title field the digest's MemberDailyCounts structurally has no room for", () => {
+    const digestShape: MemberDailyCounts = { username: "alice", onTrack: 1, overdue: 0, blocked: 0 };
     expect(Object.keys(digestShape)).not.toContain("tasks");
   });
 });

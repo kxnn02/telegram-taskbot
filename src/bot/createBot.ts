@@ -1,41 +1,28 @@
-import { Bot, InlineKeyboard } from "grammy";
-import { loadRoster } from "../config/roster.js";
+import { Bot } from "grammy";
 import { normalizeUsername } from "../domain/roster.js";
 import { SystemClock } from "../domain/clock.js";
 import { TaskService } from "../service/taskService.js";
-import { RosterService } from "../service/rosterService.js";
 import type { TaskStorePort } from "../storage/taskStorePort.js";
 import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
-import type { WizardStateStorePort } from "../storage/wizardStateStorePort.js";
-import type { CohortStorePort } from "../storage/cohortStorePort.js";
 import type { RosterStorePort } from "../storage/rosterStorePort.js";
-import { checkGroupMembership, checkGroupAdmin } from "./groupMembership.js";
 import { comingFriday, parseDueDate } from "../date/parseDueDate.js";
-import { parseAddTaskArgs } from "./addTaskParse.js";
+import { parseAddTaskArgs, ADDTASK_USAGE } from "./addTaskParse.js";
 import { parseMentionTrigger } from "./mentionParse.js";
 import { resolveCaller } from "./callerResolution.js";
-import { WizardManager, type WizardState, type EditField } from "./wizard.js";
 import { notifyUser, notifyStatusChange } from "./notify.js";
 import { suggestClosestUsername } from "./usernameSuggest.js";
-import { parseTaskRef } from "./taskRef.js";
 import { parseStatusWord, VALID_STATUS_WORDS_TEXT } from "./statusParse.js";
 import { parseRefListItems, parseUpdateItems, type BatchItem } from "./updateBatch.js";
 import {
   chunkMessage,
   formatAllTasksGrouped,
-  formatBacklog,
-  formatBlocked,
   formatDeadlines,
   formatHelp,
-  formatMyTasks,
-  formatPending,
-  formatRoster,
-  formatTaskDetail,
   statusLabel,
   STATUS_EMOJI,
 } from "./format.js";
 import { buildStandup, formatStandup } from "./standup.js";
-import type { Caller, Role, TaskStatus } from "../domain/types.js";
+import type { Caller, TaskStatus } from "../domain/types.js";
 import { isPastDate } from "../domain/overdue.js";
 import type { Roster } from "../domain/roster.js";
 
@@ -48,10 +35,6 @@ export interface CreateBotOptions {
    * (PRD §7). Production code passes a `SupabaseRegistrationStore`; tests
    * pass an `InMemoryRegistrationStore`. */
   registrationStore: RegistrationStorePort;
-  /** Storage port for in-progress bare-/addtask and bare-/edit wizard state
-   * (ADR-0006). Production code passes a `SupabaseWizardStateStore`; tests
-   * pass an `InMemoryWizardStateStore`. */
-  wizardStateStore: WizardStateStorePort;
   /** The cohort this deployed bot instance serves (ADR-0004/CONTEXT.md's
    * cohort-binding note). Every real deployment serves exactly one
    * cohort — the real cohort or the dry-run cohort, never both — so
@@ -60,26 +43,21 @@ export interface CreateBotOptions {
    * username (the dry run intentionally reuses real accounts across
    * cohorts). */
   activeCohortId: string;
-  rosterPath?: string;
   dashboardUrl: string;
-  /** Storage port for the `cohorts` table (R3/#88) — used by `/start` to
-   * look up the cohort's Telegram group chat id, so it can verify the
-   * caller is actually a member of that group before offering to register
-   * them. Production code passes a `SupabaseCohortStore`; tests pass an
-   * `InMemoryCohortStore`. */
-  cohorts: CohortStorePort;
-  /** Storage port `/start` writes to directly (R3/#88, building on R2/#87's
-   * `upsert`) — `/start` now creates the roster row itself instead of
-   * requiring one to already exist. Production code passes a
-   * `SupabaseRosterStore`; tests pass R2's `InMemoryRosterStore`. */
+  /** Storage port `resolveCaller`'s auto-registration writes to (ADR-0013):
+   * anyone who messages the bot gets a roster row in this cohort on first
+   * contact. Production code passes a `SupabaseRosterStore`; tests pass an
+   * `InMemoryRosterStore`. */
   rosterStore: RosterStorePort;
   /** Injected Bot instance — used by tests to avoid a real network `getMe`
    * call and to intercept outgoing API calls via `bot.api.config.use(...)`.
    * Production code always omits this and gets a freshly constructed Bot. */
   bot?: Bot;
-  /** Injected Roster — used by tests to seed roster data without reading a
-   * config file from disk. Production code always omits this. */
-  roster?: Roster;
+  /** The in-process roster, kept current by `resolveCaller`'s
+   * auto-registration and (per-request) `webhookHandler.ts`'s refresh.
+   * Production code loads this via `loadRosterFromStore`; tests construct
+   * one directly. */
+  roster: Roster;
 }
 
 /** Appended to a reply when a resolved due date is already in the past
@@ -87,12 +65,11 @@ export interface CreateBotOptions {
  * legitimate. */
 const PAST_DUE_WARNING = "⚠️ That due date is already in the past.";
 
-/** Per-status next-step hint appended to `/task <id>`'s detail reply (#27's
- * status table). There's no more gated "you can't act on this" case — any
- * roster member may move a task to any status — so every hint just
- * suggests the obvious next command rather than describing a permission.
- * Plain text, no Markdown: the bot sends no `parse_mode` anywhere, so
- * backticks would render literally instead of as code formatting (H5). */
+/** Per-status next-step hint appended to a task detail reply (#27's status
+ * table) — any roster member may move a task to any status, so every hint
+ * just suggests the obvious next command. Plain text, no Markdown: the bot
+ * sends no `parse_mode` anywhere, so backticks would render literally
+ * instead of as code formatting (H5). */
 const NEXT_STEP_HINT: Record<TaskStatus, string> = {
   backlog: "Send /update <id> todo to move it to To do status.",
   todo: "Send /update <id> in progress once you start it.",
@@ -107,93 +84,88 @@ export interface CreatedBot {
   service: TaskService;
   roster: Roster;
   registrations: RegistrationStorePort;
-  wizards: WizardManager;
 }
 
-/** Telegram's command-autocomplete menu (issue #27/#35) — descriptions
- * mirror `formatHelp`'s EVERYONE_HELP list one-for-one, kept short since
- * Telegram truncates the menu entry. Excludes the removed-command redirect
- * handlers below (e.g. `/submit`, `/backlog`) on purpose: those exist only
- * to point old muscle memory at the replacement, not to be offered as live
- * commands. */
+/** Telegram's command-autocomplete menu — Devie's exact 10-command surface
+ * (#106/ADR-0013), replacing this bot's old 21. `completed` is a real menu
+ * entry, not just an alias handled silently, since Devie's own menu lists
+ * both `/complete` and `/completed`. */
 export const BOT_COMMANDS = [
-  { command: "start", description: "Register yourself against the roster" },
+  { command: "start", description: "Say hello and register yourself" },
   { command: "help", description: "Show the commands available to you" },
-  { command: "cancel", description: "Abort an in-progress wizard" },
-  { command: "addtask", description: "Create a task in one line, or start the step-by-step form" },
-  { command: "tasks", description: "List cohort tasks, optionally filtered by @username or role" },
-  { command: "mytasks", description: "Show your open tasks" },
-  { command: "task", description: "Show full detail on one task" },
-  { command: "update", description: "Set a task's status (or bulk-update several)" },
+  { command: "tasks", description: "List cohort tasks, optionally filtered by @username" },
+  { command: "deadlines", description: "Open tasks due in the next 7 days" },
+  { command: "addtask", description: "Create a task in one line" },
   { command: "done", description: "Mark a task In review" },
   { command: "complete", description: "Mark a task Done" },
-  { command: "overdue", description: "List overdue tasks" },
-  { command: "pending", description: "Review queue (tasks In review)" },
-  { command: "deadlines", description: "Open tasks due in the next 7 days" },
+  { command: "completed", description: "Mark a task Done" },
+  { command: "update", description: "Set a task's status (or bulk-update several)" },
   { command: "standup", description: "On-demand standup report for the cohort" },
-  { command: "blocked", description: "List blocked tasks, or flag one as blocked" },
-  { command: "unblock", description: "Restore a blocked task to its previous status" },
-  { command: "note", description: "Attach a feedback note to a task" },
-  { command: "edit", description: "Edit a task's assignee, title, description, or due date (higher-ups only)" },
-  { command: "roster", description: "List, add, re-role, or remove roster members" },
-  { command: "dashboard", description: "Get the dashboard link" },
-  { command: "whoami", description: "Show who the bot thinks you are" },
 ] as const;
 
 /** Every command name this bot actually handles via `bot.command(...)`
- * below — `BOT_COMMANDS` (the Telegram-menu list) plus the removed-command
- * redirect handlers, which are real handlers even though they're excluded
- * from the menu on purpose (see the comment on `BOT_COMMANDS`). Used by the
- * mid-wizard interruption middleware (issue #63, finding H6) to decide
- * whether an incoming `/word` is a command that's actually going to run —
- * a typo'd command must not auto-cancel an in-progress form. Keep this set
- * in step with the `bot.command(...)` registrations below it. */
-export const HANDLED_COMMANDS: ReadonlySet<string> = new Set([
-  ...BOT_COMMANDS.map((c) => c.command),
-  "submit",
-  "approve",
-  "revise",
-  "canceltask",
-  "unblocked",
-  "alltasks",
-  "backlog",
-  "blocked",
-  "complete",
-]);
+ * below — used by the edited-message guard (issue #63, finding H6) to
+ * decide whether an incoming `/word` is a command that's actually going to
+ * run, so it can be told "I don't pick up edits" rather than silently
+ * ignored. No redirect handlers any more (#106) — removed means removed. */
+export const HANDLED_COMMANDS: ReadonlySet<string> = new Set(BOT_COMMANDS.map((c) => c.command));
 
 /** Registers `BOT_COMMANDS` with Telegram so the client's command-
- * autocomplete menu is populated (issue #27/#35 — this had never been
- * called anywhere in the repo before this stage). Idempotent: safe to call
- * on every cold start, since it just overwrites Telegram's stored list with
- * the same values when nothing changed. */
+ * autocomplete menu is populated. Idempotent: safe to call on every cold
+ * start, since it just overwrites Telegram's stored list with the same
+ * values when nothing changed. */
 export async function registerBotCommands(bot: Bot): Promise<void> {
   await bot.api.setMyCommands([...BOT_COMMANDS]);
 }
 
 export function createBot(options: CreateBotOptions): CreatedBot {
   const bot = options.bot ?? new Bot(options.token);
-  const roster = options.roster ?? loadRoster(options.rosterPath);
+  const roster = options.roster;
   const registrations = options.registrationStore;
   const clock = new SystemClock();
   // TaskService talks only through the TaskStorePort (ADR-0005) — see
   // bot/index.ts for how production wires this to SupabaseTaskStore.
   const service = new TaskService(options.taskStore, roster, clock);
-  // RosterService talks only through RosterStorePort/TaskStorePort (R4/#89)
-  // — see rosterService.ts for the authority table it enforces.
-  const rosterService = new RosterService(options.rosterStore, roster, options.taskStore);
-  const wizards = new WizardManager(options.wizardStateStore);
 
-  function requireCaller(userId: number) {
-    return resolveCaller(userId, registrations, roster, options.activeCohortId);
+  const NEEDS_USERNAME_TEXT =
+    "You'll need a Telegram username first — set one in Telegram's settings, then try again.";
+
+  /** Auto-registers the sender (ADR-0013 — matches Devie's `syncMember`:
+   * insert on first contact, update on every later one, no gate of any
+   * kind) and resolves them to a service-layer `Caller`. The only failure
+   * left is a Telegram account with no username set, since both the
+   * registration and roster rows are keyed by username. */
+  async function requireCaller(ctx: import("grammy").Context): Promise<Caller | undefined> {
+    const from = ctx.from;
+    if (!from) return undefined;
+    const resolved = await resolveCaller(
+      { id: from.id, username: from.username },
+      registrations,
+      options.rosterStore,
+      roster,
+      options.activeCohortId,
+    );
+    if (resolved.status === "no_username") {
+      await ctx.reply(NEEDS_USERNAME_TEXT);
+      return undefined;
+    }
+    return resolved.caller;
   }
 
-  // ---- /start ---------------------------------------------------------
+  function withCaller(
+    handler: (ctx: import("grammy").Context, caller: Caller) => Promise<void>,
+  ) {
+    return async (ctx: import("grammy").Context) => {
+      const caller = await requireCaller(ctx);
+      if (!caller) return;
+      await handler(ctx, caller);
+    };
+  }
 
   // ---- Outermost error guard (issue #49/#50, finding F1/D1) -------------
-  // Registered first, ahead of every other middleware including the
-  // wizard interrupter below: the webhook path (bot.handleUpdate) never
-  // consults bot.catch (see grammy's bot.js handleUpdate, which rethrows
-  // as a BotError instead of routing to the error handler — only the
+  // Registered first: the webhook path (bot.handleUpdate) never consults
+  // bot.catch (see grammy's bot.js handleUpdate, which rethrows as a
+  // BotError instead of routing to the error handler — only the
   // long-polling bot.start() path does that). Without this guard, any
   // thrown error escapes handleTelegramWebhook as a 500 after the update
   // id has already been claimed for dedup, so Telegram never retries and
@@ -205,7 +177,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       console.error(err);
       try {
         await ctx.reply(
-          "Something went wrong on my end — that didn't go through. Try again in a moment, or send /task <ref> to check whether it actually saved.",
+          "Something went wrong on my end — that didn't go through. Try again in a moment.",
         );
       } catch (replyErr) {
         console.error(replyErr);
@@ -213,231 +185,26 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }
   });
 
-  // ---- Mid-wizard command interruption (PRD §6) --------------------------
-  // Registered second so it fires ahead of every command handler below,
-  // including /start: sending any recognized command while a wizard is in
-  // progress is treated as an implicit "never mind" that auto-cancels the
-  // wizard, then the actual command still runs normally.
+  // ---- /start -----------------------------------------------------------
+  // Devie's version (#106/ADR-0013): register the sender and say hello.
+  // No role question, no group-membership check — auto-registration
+  // already happened inside requireCaller by the time this runs.
 
-  bot.use(async (ctx, next) => {
-    const text = ctx.message?.text;
-    const userId = ctx.from?.id;
-    if (text && text.startsWith("/") && userId !== undefined) {
-      const commandName = parseCommandName(text);
-      if (commandName !== "cancel" && HANDLED_COMMANDS.has(commandName)) {
-        const state = await wizards.get(userId);
-        if (
-          state &&
-          (state.data.chatId === undefined || state.data.chatId === ctx.chat?.id)
-        ) {
-          await wizards.cancel(userId);
-          await ctx.reply(
-            "No worries — I cancelled your in-progress form since you sent a new command.",
-          );
-        }
-      }
-    }
-    await next();
-  });
-
-  /** True when `cohortId` already has at least one roster entry with role
-   * `HigherUp` (R3/#88) — the recovery-path guard: the first person to
-   * register in a fresh cohort must be able to become a higher-up, and
-   * once one exists, self-promotion via the buttons is refused. Reads the
-   * in-process `roster` (kept current by the per-request refresh in
-   * `webhookHandler.ts`/R1's `roster.replaceAll`), not a fresh store read,
-   * so this stays consistent with the `roster.find` lookups right next to
-   * it in the same handler. */
-  function hasHigherUp(cohortId: string): boolean {
-    return roster.all().some((e) => e.cohortId === cohortId && e.role === "HigherUp");
-  }
-
-  function welcomeReply(username: string, role: Role, cohortId: string): string {
-    return `Hey @${username}! You're set up as ${role === "HigherUp" ? "a higher-up" : "an intern"} for ${cohortId} — send /help anytime to see what I can do.`;
-  }
-
-  function roleKeyboard(): InlineKeyboard {
-    return new InlineKeyboard()
-      .text("Intern", "startrole:intern")
-      .text("Higher-up", "startrole:higherup");
-  }
-
-  const NOT_ON_ROSTER_TEXT = "You're not on the roster yet — ping a higher-up to get added, then try again.";
-
-  bot.command("start", async (ctx) => {
-    const from = ctx.from;
-    const username = from?.username;
-    if (!username || !from) {
+  bot.command(
+    "start",
+    withCaller(async (ctx, caller) => {
       await ctx.reply(
-        "You'll need a Telegram username first — set one in Telegram's " +
-          "settings, then send /start again.",
+        `Hey @${caller.username}! You're set up for ${caller.cohortId} — send /help anytime to see what I can do.`,
       );
-      return;
-    }
-    const normalizedUsername = normalizeUsername(username);
-    const entry = roster.find(normalizedUsername, options.activeCohortId);
-
-    if (entry) {
-      // Roster row already exists (decision table rows 1-4).
-      if (hasHigherUp(entry.cohortId)) {
-        // Row 1: group check not performed — re-link and report the role
-        // they already have.
-        await registrations.register(from.id, normalizedUsername);
-        await ctx.reply(welcomeReply(entry.username, entry.role, entry.cohortId));
-        return;
-      }
-      const groupChatId = await options.cohorts.getGroupChatId(options.activeCohortId);
-      const check = await checkGroupMembership(bot.api, groupChatId, from.id);
-      if (check.kind === "present") {
-        // Row 2: offer the buttons — the zero-higher-ups recovery path.
-        await ctx.reply(
-          `Are you an intern or a higher-up for ${entry.cohortId}?`,
-          { reply_markup: roleKeyboard() },
-        );
-        return;
-      }
-      // Rows 3-4 (absent or unavailable): register, report existing role.
-      await registrations.register(from.id, normalizedUsername);
-      await ctx.reply(welcomeReply(entry.username, entry.role, entry.cohortId));
-      return;
-    }
-
-    // No roster row (decision table rows 5-7).
-    const groupChatId = await options.cohorts.getGroupChatId(options.activeCohortId);
-    const check = await checkGroupMembership(bot.api, groupChatId, from.id);
-    if (check.kind === "present") {
-      // Row 5: offer the buttons.
-      await ctx.reply(
-        `Are you an intern or a higher-up for ${options.activeCohortId}?`,
-        { reply_markup: roleKeyboard() },
-      );
-      return;
-    }
-    if (check.kind === "absent") {
-      // Row 6.
-      await ctx.reply("This bot's for the cohort's Telegram group members — join the group first, then try /start again.");
-      return;
-    }
-    // Row 7 — the fallback. Not "allow anyone": create nothing, same
-    // dead-end message today's /start gives everyone not on the roster.
-    // Reachable in production right now since the real cohort's
-    // group_chat_id is unset (see the ticket's "platform limit" note).
-    await ctx.reply(NOT_ON_ROSTER_TEXT);
-  });
-
-  // ---- /start's role buttons (R3/#88) -----------------------------------
-  // Acts on ctx.from.id — the person who tapped, never whoever ran /start
-  // (commands work in group chats too, so these buttons are visible to
-  // anyone in the chat; acting on the tapper means a tap can only ever
-  // register the tapper).
-
-  bot.callbackQuery(/^startrole:(intern|higherup)$/, async (ctx) => {
-    const tapper = ctx.from;
-    const username = tapper.username;
-    if (!username) {
-      await ctx.answerCallbackQuery({
-        text: "You'll need a Telegram username set first.",
-      });
-      return;
-    }
-    const normalizedUsername = normalizeUsername(username);
-
-    // Re-run the membership check for the tapper — never trust the
-    // earlier /start check, since this is where the write happens.
-    const groupChatId = await options.cohorts.getGroupChatId(options.activeCohortId);
-    const check = await checkGroupMembership(bot.api, groupChatId, tapper.id);
-    if (check.kind !== "present") {
-      await ctx.answerCallbackQuery({
-        text: "You're not currently in the cohort's group — join it first.",
-      });
-      return;
-    }
-
-    // Anti-self-promotion guard, re-checked here (not only at /start):
-    // once the cohort has a higher-up, an existing roster row can't be
-    // overwritten via these buttons.
-    const existingEntry = roster.find(normalizedUsername, options.activeCohortId);
-    if (existingEntry && hasHigherUp(options.activeCohortId)) {
-      await ctx.answerCallbackQuery({ text: "You're already registered — send /help to see what you can do." });
-      return;
-    }
-
-    const [, roleParam] = ctx.match as unknown as [string, string];
-    const role: Role = roleParam === "higherup" ? "HigherUp" : "Intern";
-
-    await options.rosterStore.upsert(
-      { username: normalizedUsername, role, cohortId: options.activeCohortId },
-      normalizedUsername,
-    );
-    await registrations.register(tapper.id, normalizedUsername);
-    // R1's per-update roster refresh (webhookHandler.ts) covers the NEXT
-    // update, not this one — refresh in place so the reply below (and any
-    // later handler in this same update) sees the new row.
-    roster.replaceAll(await options.rosterStore.listAll());
-
-    await ctx.answerCallbackQuery();
-    await ctx.reply(welcomeReply(normalizedUsername, role, options.activeCohortId));
-  });
+    }),
+  );
 
   // ---- /help ------------------------------------------------------------
 
-  bot.command("help", async (ctx) => {
-    const userId = ctx.from?.id;
-    if (userId === undefined) return;
-    const resolved = await requireCaller(userId);
-    await ctx.reply(
-      formatHelp(resolved.status === "ok" ? resolved.caller.role : undefined),
-    );
-  });
-
-  // ---- /cancel ------------------------------------------------------------
-
-  bot.command("cancel", async (ctx) => {
-    const userId = ctx.from?.id;
-    if (userId === undefined) return;
-    const had = await wizards.cancel(userId);
-    await ctx.reply(had ? "Cancelled." : "Nothing to cancel — you don't have a form in progress.");
-  });
-
-  // ---- Not-registered guard for everything else below --------------------
-
-  async function resolveCallerOrReply(
-    ctx: import("grammy").Context,
-  ): Promise<Caller | undefined> {
-    const userId = ctx.from?.id;
-    if (userId === undefined) return undefined;
-    const resolved = await requireCaller(userId);
-    if (resolved.status === "not_started") {
-      await ctx.reply("Send /start first so I know who you are.");
-      return undefined;
-    }
-    if (resolved.status === "not_on_roster") {
-      await ctx.reply(NOT_ON_ROSTER_TEXT);
-      return undefined;
-    }
-    return resolved.caller;
-  }
-
-  function withCaller(
-    handler: (ctx: import("grammy").Context, caller: Caller) => Promise<void>,
-  ) {
-    return async (ctx: import("grammy").Context) => {
-      const caller = await resolveCallerOrReply(ctx);
-      if (!caller) return;
-      await handler(ctx, caller);
-    };
-  }
-
-  // ---- /whoami ------------------------------------------------------------
-  // Grouped with /help and /cancel in the "Other" section (issue #66,
-  // finding H16). Reuses /start's exact role wording (createBot.ts:183 —
-  // "a higher-up" / "an intern") so the two messages agree.
-
   bot.command(
-    "whoami",
-    withCaller(async (ctx, caller) => {
-      const roleWord = caller.role === "HigherUp" ? "a higher-up" : "an intern";
-      await ctx.reply(`You're @${caller.username}, ${roleWord} in ${caller.cohortId}.`);
+    "help",
+    withCaller(async (ctx) => {
+      await ctx.reply(formatHelp());
     }),
   );
 
@@ -450,36 +217,9 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }
   }
 
-  // ---- /dashboard ---------------------------------------------------------
-  // Gated by withCaller like every other data-bearing command (issue #65,
-  // finding H15) — the dashboard link itself was previously handed to
-  // anyone, registered or not. The dashboard is independently auth-gated
-  // (Telegram login + roster check), so this only stops URL disclosure to
-  // strangers, but there's no reason for this one command to skip the same
-  // check every other one applies. Registration only, not a role check —
-  // an intern who can't log into the dashboard's HigherUp-only view still
-  // gets the link, same as before.
+  // ---- /tasks -------------------------------------------------------------
 
-  bot.command(
-    "dashboard",
-    withCaller(async (ctx) => {
-      await ctx.reply(`Dashboard: ${options.dashboardUrl}`);
-    }),
-  );
-
-  // ---- Read-only commands ---------------------------------------------
-
-  // /alltasks is renamed /tasks (issue #27/#33), gaining @username and role
-  // filters. No alias retained ("no installed base", #27) — same pattern
-  // as /backlog -> /overdue below.
-  bot.command(
-    "alltasks",
-    withCaller(async (ctx) => {
-      await ctx.reply("/alltasks is now /tasks.");
-    }),
-  );
-
-  const TASKS_USAGE = "Usage: /tasks [page], /tasks @username, or /tasks intern|higherup";
+  const TASKS_USAGE = "Usage: /tasks [page], or /tasks @username";
 
   bot.command(
     "tasks",
@@ -494,66 +234,13 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await replyChunked(ctx, result.ok ? formatAllTasksGrouped(result.value, parsed.page) : result.error);
         return;
       }
-      if (parsed.kind === "member") {
-        const result = await service.listTasksForMember(caller, parsed.username);
-        await replyChunked(
-          ctx,
-          result.ok
-            ? formatAllTasksGrouped(result.value, parsed.page, `@${normalizeUsername(parsed.username)}`)
-            : result.error,
-        );
-        return;
-      }
-      const result = await service.listTasksForRole(caller, parsed.role);
+      const result = await service.listTasksForMember(caller, parsed.username);
       await replyChunked(
         ctx,
         result.ok
-          ? formatAllTasksGrouped(
-              result.value,
-              parsed.page,
-              parsed.role === "Intern" ? "intern" : "higherup",
-            )
+          ? formatAllTasksGrouped(result.value, parsed.page, `@${normalizeUsername(parsed.username)}`)
           : result.error,
       );
-    }),
-  );
-
-  bot.command(
-    "mytasks",
-    withCaller(async (ctx, caller) => {
-      const page = parsePageArg(ctx.match);
-      if (page === undefined) {
-        await ctx.reply("Usage: /mytasks [page]");
-        return;
-      }
-      const result = await service.listMyTasks(caller);
-      await replyChunked(ctx, result.ok ? formatMyTasks(result.value, page) : result.error);
-    }),
-  );
-
-  bot.command(
-    "overdue",
-    withCaller(async (ctx, caller) => {
-      const result = await service.listBacklog(caller);
-      await replyChunked(ctx, result.ok ? formatBacklog(result.value) : result.error);
-    }),
-  );
-
-  // /backlog is renamed to /overdue (issue #27/#31) — "backlog" is now a
-  // real status, so a command meaning "overdue" under that name is a
-  // guaranteed misfire. No alias retained ("no installed base", #27).
-  bot.command(
-    "backlog",
-    withCaller(async (ctx) => {
-      await ctx.reply("/backlog is now /overdue.");
-    }),
-  );
-
-  bot.command(
-    "pending",
-    withCaller(async (ctx, caller) => {
-      const result = await service.listPending(caller);
-      await replyChunked(ctx, result.ok ? formatPending(result.value) : result.error);
     }),
   );
 
@@ -573,29 +260,12 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }),
   );
 
-  bot.command(
-    "task",
-    withCaller(async (ctx, caller) => {
-      const id = parseIdArg(ctx.match);
-      if (id === undefined) {
-        await ctx.reply("Usage: /task <task_id>");
-        return;
-      }
-      const result = await service.getTask(caller, id);
-      if (!result.ok) {
-        await ctx.reply(result.error);
-        return;
-      }
-      await replyChunked(ctx, `${formatTaskDetail(result.value)}\n\n${NEXT_STEP_HINT[result.value.status]}`);
-    }),
-  );
-
   // ---- Status-setting commands (issue #27/#31 — replaces the review gate)
 
   /** Sets `status` on `id` and applies the shared status-change notification
    * policy (issue #27/#29): DM the assignee and creator, skipping the actor.
-   * Shared by `/update`, `/done`, and `/complete` — all three are just this
-   * with a different fixed or parsed status and reply text. */
+   * Shared by `/update`, `/done`, and `/complete`/`/completed` — all three
+   * are just this with a different fixed or parsed status and reply text. */
   async function applyStatusChange(
     caller: Caller,
     id: number,
@@ -614,7 +284,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       registrations,
       result.value,
       caller.username,
-      `Task ${id} ("${result.value.title}") status changed to ${STATUS_EMOJI[status]} ${statusLabel(status)} by @${caller.username}. Send /task ${id} for details.`,
+      `Task ${id} ("${result.value.title}") status changed to ${STATUS_EMOJI[status]} ${statusLabel(status)} by @${caller.username}. Send /update ${id} <status> to change it again.`,
     );
   }
 
@@ -778,147 +448,34 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }),
   );
 
-  bot.command(
-    "complete",
-    withCaller(async (ctx, caller) => {
-      const raw = matchToString(ctx.match).trim();
-      const items = parseRefListItems(raw);
-      if (items.length === 0) {
+  /** Shared by `/complete` and `/completed` — Devie has both as real menu
+   * entries (verified fact in #106), not one command with a silent alias. */
+  const completeHandler = withCaller(async (ctx: import("grammy").Context, caller: Caller) => {
+    const raw = matchToString(ctx.match).trim();
+    const items = parseRefListItems(raw);
+    if (items.length === 0) {
+      await ctx.reply("Usage: /complete <ref>");
+      return;
+    }
+    if (items.length === 1) {
+      const item = items[0]!;
+      if (item.ref === undefined) {
         await ctx.reply("Usage: /complete <ref>");
         return;
       }
-      if (items.length === 1) {
-        const item = items[0]!;
-        if (item.ref === undefined) {
-          await ctx.reply("Usage: /complete <ref>");
-          return;
-        }
-        await applyStatusChange(caller, item.ref, "done", ctx, "marked ✅ Done. Nice work!");
-        return;
-      }
-      const outcomes = await runBatch(caller, items, () => ({ status: "done" }));
-      await finishBatch(ctx, caller, outcomes, "Usage: /complete <ref>");
-    }),
-  );
+      await applyStatusChange(caller, item.ref, "done", ctx, "marked ✅ Done. Nice work!");
+      return;
+    }
+    const outcomes = await runBatch(caller, items, () => ({ status: "done" }));
+    await finishBatch(ctx, caller, outcomes, "Usage: /complete <ref>");
+  });
 
-  bot.command(
-    "unblock",
-    withCaller(async (ctx, caller) => {
-      const id = parseIdArg(ctx.match);
-      if (id === undefined) {
-        await ctx.reply("Usage: /unblock <ref>");
-        return;
-      }
-      const result = await service.clearBlocked(caller, id);
-      await ctx.reply(result.ok ? `Task ${id} is no longer 🚧 blocked.` : result.error);
-    }),
-  );
+  bot.command("complete", completeHandler);
+  bot.command("completed", completeHandler);
 
-  // ---- Removed commands: helpful redirects, not the generic fallback ----
-  // No aliases retained ("no installed base", issue #27) — these just point
-  // whoever's muscle memory hits them at the replacement, since the dry-run
-  // exercise is exactly where that muscle memory lives (issue #31).
+  // ---- /addtask (one-liner; bare command gets a usage example, Devie-style,
+  // not the removed step-by-step form) ------------------------------------
 
-  bot.command(
-    "submit",
-    withCaller(async (ctx) => {
-      await ctx.reply("/submit is gone — use /done <ref> instead.");
-    }),
-  );
-
-  bot.command(
-    "approve",
-    withCaller(async (ctx) => {
-      await ctx.reply("/approve is gone — use /complete <ref> instead.");
-    }),
-  );
-
-  bot.command(
-    "revise",
-    withCaller(async (ctx) => {
-      await ctx.reply("/revise is gone — use /update <ref> todo instead.");
-    }),
-  );
-
-  bot.command(
-    "canceltask",
-    withCaller(async (ctx) => {
-      await ctx.reply("/canceltask is gone — use /update <ref> backlog instead.");
-    }),
-  );
-
-  bot.command(
-    "unblocked",
-    withCaller(async (ctx) => {
-      await ctx.reply("/unblocked is gone — use /unblock <ref> instead.");
-    }),
-  );
-
-  // `/blocked` is dual-purpose: with no arguments it's the read-only
-  // cohort/own blocked-task list (issue #6); with `<task_id> <reason>` it
-  // flags a task as blocked (PRD §5). Both share the same command name, so
-  // dispatch on whether any argument text was given.
-  bot.command(
-    "blocked",
-    withCaller(async (ctx, caller) => {
-      if (matchToString(ctx.match).trim().length === 0) {
-        const result = await service.listBlocked(caller);
-        await replyChunked(ctx, result.ok ? formatBlocked(result.value) : result.error);
-        return;
-      }
-      const { id, rest } = parseIdAndRest(ctx.match);
-      if (id === undefined || rest.trim().length === 0) {
-        await ctx.reply("Usage: /blocked <task_id> <reason>, or /blocked with no arguments to list blocked tasks");
-        return;
-      }
-      const result = await service.setBlocked(caller, id, rest);
-      if (!result.ok) {
-        await ctx.reply(result.error);
-        return;
-      }
-      await ctx.reply(`Task ${id} flagged as 🚧 blocked.`);
-      await notifyStatusChange(
-        bot,
-        registrations,
-        result.value,
-        caller.username,
-        `Task ${id} ("${result.value.title}", @${result.value.assigneeUsername}) was flagged as 🚧 blocked: ${result.value.blockedReason}`,
-      );
-    }),
-  );
-
-  // ---- Higher-up commands: simple ones ------------------------------------
-
-  bot.command(
-    "note",
-    withCaller(async (ctx, caller) => {
-      const { id, rest } = parseIdAndRest(ctx.match);
-      if (id === undefined || rest.trim().length === 0) {
-        await ctx.reply("Usage: /note <task_id> <text>");
-        return;
-      }
-      const result = await service.addNote(caller, id, rest);
-      if (!result.ok) {
-        await ctx.reply(result.error);
-        return;
-      }
-      await ctx.reply(`Note added to Task ${id}.`);
-      await notifyUser(
-        bot,
-        registrations,
-        result.value.assigneeUsername,
-        `New note on Task ${id} ("${result.value.title}") from @${caller.username}: ${rest}`,
-      );
-    }),
-  );
-
-  // `/approve`, `/revise`, and `/canceltask` (with its Yes/No confirmation
-  // and the `canceltask:` callback) are removed outright, not retargeted
-  // (issue #27/#31) — see the helpful-redirect commands above.
-
-  // ---- /addtask (one-liner, with wizard fallback) and /edit wizard ----
-
-  // Assignable to any roster member, not just interns (issue #27/#29).
   function memberUsernamesInCohort(cohortId: string): string[] {
     return roster
       .all()
@@ -974,10 +531,10 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         bot,
         registrations,
         result.value.assigneeUsername,
-        `You've been assigned Task ${result.value.id}: "${result.value.title}" (due ${result.value.dueDate}). Send /task ${result.value.id} for full details.`,
+        `You've been assigned Task ${result.value.id}: "${result.value.title}" (due ${result.value.dueDate}). Send /done ${result.value.id} when you're ready for review.`,
       );
       if (!notified) {
-        reply += `\nHeads-up: @${result.value.assigneeUsername} hasn't sent /start yet, so I couldn't notify them.`;
+        reply += `\nHeads-up: @${result.value.assigneeUsername} hasn't messaged me yet, so I couldn't notify them.`;
       }
     }
     await ctx.reply(reply);
@@ -988,394 +545,61 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     withCaller(async (ctx, caller) => {
       const raw = matchToString(ctx.match).trim();
       if (raw.length === 0) {
-        await wizards.start(ctx.from!.id, "assign", { chatId: ctx.chat!.id });
-        await ctx.reply(
-          "Who is this task for? Type @ to pick from Telegram's suggestions, or just send their username.",
-        );
+        // Devie's bare /addtask: a usage example, not a step-by-step form
+        // (#106 — the wizard system is gone entirely).
+        await ctx.reply(ADDTASK_USAGE);
         return;
       }
       await handleAddTaskArgs(ctx, caller, raw);
     }),
   );
 
-  bot.command(
-    "edit",
-    withCaller(async (ctx, caller) => {
-      if (caller.role !== "HigherUp") {
-        await ctx.reply("Only higher-ups can edit tasks.");
-        return;
-      }
-      const { id, rest } = parseIdAndRest(ctx.match);
-      if (id === undefined) {
-        await ctx.reply(
-          "Usage: /edit <task_id>, or /edit <task_id> <field> <value> — field is assignee, title, description, or duedate.",
-        );
-        return;
-      }
-      const found = await service.getTask(caller, id);
-      if (!found.ok) {
-        await ctx.reply(found.error);
-        return;
-      }
-
-      if (rest.length === 0) {
-        await wizards.start(ctx.from!.id, "edit", { taskId: id, chatId: ctx.chat!.id });
-        const keyboard = new InlineKeyboard()
-          .text("Assignee", "editfield:assignee")
-          .text("Title", "editfield:title")
-          .row()
-          .text("Description", "editfield:description")
-          .text("Due date", "editfield:duedate");
-        await ctx.reply(
-          `Editing Task ${id} ("${found.value.title}"). Which field do you want to change?`,
-          { reply_markup: keyboard },
-        );
-        return;
-      }
-
-      // Direct single-field edit: /edit <task_id> <field> <value>.
-      const spaceIdx = rest.indexOf(" ");
-      const fieldToken = spaceIdx === -1 ? rest : rest.slice(0, spaceIdx);
-      const value = (spaceIdx === -1 ? "" : rest.slice(spaceIdx + 1)).trim();
-      const field = parseEditField(fieldToken);
-      if (!field || value.length === 0) {
-        await ctx.reply(
-          "Usage: /edit <task_id> <field> <value> — field is assignee, title, description, or duedate.",
-        );
-        return;
-      }
-
-      const patch: Record<string, string> = {};
-      if (field === "assignee") {
-        const username = value.replace(/^@/, "");
-        if (!roster.isMember(username, caller.cohortId)) {
-          await ctx.reply(unknownRosterMemberReply(username, caller.cohortId));
-          return;
-        }
-        patch.assigneeUsername = username;
-      } else if (field === "title") {
-        patch.title = value;
-      } else if (field === "description") {
-        patch.description = value;
-      } else {
-        const parsedDate = parseDueDate(value, new Date());
-        if (!parsedDate) {
-          await ctx.reply(
-            'I couldn\'t understand that date. Try phrases like "next Friday", "in 3 days", or "Sept 5".',
-          );
-          return;
-        }
-        patch.dueDate = parsedDate.isoDate;
-      }
-
-      const result = await service.editTask(caller, id, patch);
-      if (!result.ok) {
-        await ctx.reply(`Couldn't save the edit: ${result.error}`);
-        return;
-      }
-      const fieldLabel: Record<EditField, string> = {
-        assignee: "assignee",
-        title: "title",
-        description: "description",
-        dueDate: "due date",
-      };
-      let editReply = `Task ${id} updated — ${fieldLabel[field]} changed.`;
-      if (field === "dueDate" && isPastDate(patch.dueDate!, new Date())) {
-        editReply += `\n${PAST_DUE_WARNING}`;
-      }
-      await ctx.reply(editReply);
-    }),
-  );
-
-  // ---- /roster (R4/#89) --------------------------------------------------
-  // List/add/re-role/remove the cohort's roster. Read (list) and the
-  // add-as-intern default are gated on the caller's roster-role HigherUp,
-  // same as /edit; every destructive operation (add as higherup, role,
-  // remove) is instead gated on a *live* group-admin check
-  // (`checkGroupAdmin`, R3/#88) — see rosterService.ts's doc comment for
-  // why a self-declared roster role can't be trusted for that.
-
-  /** Performs the live group-admin check for the caller and, on anything
-   * but `present`, replies with an actionable reason and returns `false` —
-   * fails closed (`unavailable` refuses, same as `absent`), the deliberate
-   * opposite of /start's fallback (refusing a roster edit is safe,
-   * permitting a wrong one is not). Callers only proceed to the
-   * `RosterService` call when this returns `true`. */
-  async function requireGroupAdmin(
-    ctx: import("grammy").Context,
-    caller: Caller,
-  ): Promise<boolean> {
-    const groupChatId = await options.cohorts.getGroupChatId(caller.cohortId);
-    const check = await checkGroupAdmin(bot.api, groupChatId, ctx.from!.id);
-    if (check.kind === "present") return true;
-    if (check.kind === "unavailable") {
-      await ctx.reply(
-        `Can't verify group-admin status right now (${check.reason}) — the cohort's group chat may not be configured yet. Ask a higher-up to sort that out first.`,
-      );
-    } else {
-      await ctx.reply("You need to be an admin of the cohort's Telegram group to do that.");
-    }
-    return false;
-  }
-
-  const ROSTER_USAGE =
-    "Usage: /roster, /roster add @user [intern|higherup], /roster role @user intern|higherup, or /roster remove @user.";
-
-  async function refreshRosterFromStore() {
-    roster.replaceAll(await options.rosterStore.listAll());
-  }
-
-  bot.command(
-    "roster",
-    withCaller(async (ctx, caller) => {
-      const parsed = parseRosterArgs(matchToString(ctx.match));
-
-      if (parsed.kind === "usage") {
-        await ctx.reply(ROSTER_USAGE);
-        return;
-      }
-
-      if (parsed.kind === "list") {
-        const result = await rosterService.listMembers(caller);
-        await replyChunked(ctx, result.ok ? formatRoster(result.value) : result.error);
-        return;
-      }
-
-      if (parsed.kind === "add") {
-        if (parsed.role === "HigherUp") {
-          if (!(await requireGroupAdmin(ctx, caller))) return;
-        }
-        const result = await rosterService.addMember(
-          caller,
-          parsed.username,
-          parsed.role,
-          parsed.role === "HigherUp",
-        );
-        if (!result.ok) {
-          await ctx.reply(result.error);
-          return;
-        }
-        await refreshRosterFromStore();
-        const roleWord = result.value.role === "HigherUp" ? "higher-up" : "intern";
-        await ctx.reply(`@${result.value.username} added to the roster as ${roleWord}.`);
-        return;
-      }
-
-      if (parsed.kind === "role") {
-        if (!roster.isMember(parsed.username, caller.cohortId)) {
-          await ctx.reply(unknownRosterMemberReply(parsed.username, caller.cohortId));
-          return;
-        }
-        if (!(await requireGroupAdmin(ctx, caller))) return;
-        const result = await rosterService.setRole(caller, parsed.username, parsed.role, true);
-        if (!result.ok) {
-          await ctx.reply(result.error);
-          return;
-        }
-        await refreshRosterFromStore();
-        const roleWord = result.value.role === "HigherUp" ? "higher-up" : "intern";
-        await ctx.reply(`@${result.value.username}'s role is now ${roleWord}.`);
-        return;
-      }
-
-      // remove
-      if (!roster.isMember(parsed.username, caller.cohortId)) {
-        await ctx.reply(unknownRosterMemberReply(parsed.username, caller.cohortId));
-        return;
-      }
-      if (!(await requireGroupAdmin(ctx, caller))) return;
-      const result = await rosterService.removeMember(caller, parsed.username, true);
-      if (!result.ok) {
-        await ctx.reply(result.error);
-        return;
-      }
-      await refreshRosterFromStore();
-      await ctx.reply(`@${parsed.username} removed from the roster.`);
-    }),
-  );
-
-  // ---- /edit field-choice menu -----------------------------------------
-
-  bot.callbackQuery(/^editfield:(assignee|title|description|duedate)$/, async (ctx) => {
-    const userId = ctx.from.id;
-    const state = await wizards.get(userId);
-    if (!state || state.step !== "awaiting_field_choice") {
-      await ctx.answerCallbackQuery({ text: "That form's expired — send the command again to start a new one." });
-      return;
-    }
-    if (state.data.chatId !== undefined && state.data.chatId !== ctx.chat?.id) {
-      await ctx.answerCallbackQuery({ text: "That form was started in another chat." });
-      return;
-    }
-    const resolved = await requireCaller(userId);
-    if (resolved.status !== "ok") {
-      await ctx.answerCallbackQuery({ text: "Send /start first." });
-      return;
-    }
-    const found = await service.getTask(resolved.caller, state.data.taskId!);
-    if (!found.ok) {
-      await wizards.cancel(userId);
-      await ctx.answerCallbackQuery();
-      await ctx.editMessageText(found.error);
-      return;
-    }
-    const task = found.value;
-    const [, fieldParam] = ctx.match as unknown as [string, string];
-    await ctx.answerCallbackQuery();
-
-    if (fieldParam === "assignee") {
-      await wizards.update(userId, {
-        step: "awaiting_assignee",
-        data: { editField: "assignee" },
-      });
-      await ctx.editMessageText(
-        `Task ${task.id} is currently assigned to @${task.assigneeUsername}. New assignee (type @ for suggestions), or send their username:`,
-      );
-      return;
-    }
-    if (fieldParam === "title") {
-      await wizards.update(userId, {
-        step: "awaiting_title",
-        data: { editField: "title" },
-      });
-      await ctx.editMessageText(
-        `Task ${task.id}'s current title is "${task.title}". New title:`,
-      );
-      return;
-    }
-    if (fieldParam === "description") {
-      await wizards.update(userId, {
-        step: "awaiting_description",
-        data: { editField: "description" },
-      });
-      await ctx.editMessageText(
-        `Task ${task.id}'s current description is "${task.description ?? "(none)"}". New description:`,
-      );
-      return;
-    }
-    // duedate
-    await wizards.update(userId, {
-      step: "awaiting_due_date",
-      data: { editField: "dueDate" },
-    });
-    await ctx.editMessageText(
-      `Task ${task.id} is currently due ${task.dueDate}. New due date (e.g. "next Friday", "in 3 days", "Sept 5"):`,
-    );
-  });
-
-  // ---- Free-text wizard step handling --------------------------------
+  // ---- Free-text handling (mention trigger + unrecognized-command fallback)
 
   bot.on("message:text", async (ctx) => {
     const text = ctx.message.text;
     if (text.startsWith("/")) {
       // Reaching here means no bot.command() handler above matched it —
-      // i.e. an unrecognized command (PRD §6).
+      // i.e. an unrecognized/removed command name. No stack trace, no
+      // special-cased redirect (#106 — removed means removed): this is
+      // the same generic fallback any other unaddressed text gets.
       if (ctx.chat.type === "private" && !isAddressedToOtherBot(text, bot.botInfo.username)) {
         await ctx.reply("Not sure what you're asking — try /help to see what I can do.");
       }
       return;
     }
-    const userId = ctx.from.id;
-    // Checked before wizards.get() below, which would otherwise silently
-    // consume the same expiry (it deletes an expired row internally): an
-    // expired wizard's next answer must not fall through to the generic
-    // "not sure what you mean" handling (issue #63, finding H7) — the user
-    // answered exactly what the bot asked, they just took more than 20
-    // minutes to do it. `takeExpired` reports `true` exactly once per
-    // expiry, and this reply is safe in a group chat (not gated on
-    // ctx.chat.type) since only someone who had a live form there gets it.
-    if (await wizards.takeExpired(userId)) {
-      await ctx.reply(
-        "That form expired after 20 minutes of inactivity, so I've dropped it. Send /addtask (or /edit <ref>) to start again.",
-      );
-      return;
-    }
-    const rawState = await wizards.get(userId);
-    // Chat-scoped wizards (issue #52/#53, finding F3): a wizard started in
-    // one chat must not consume unrelated messages the same user sends in
-    // another chat. Falling through to the no-wizard path below — rather
-    // than replying or cancelling — leaves the form untouched in its own
-    // chat. `chatId === undefined` matches any chat, for wizard rows
-    // already in the database when this deploys.
-    const state =
-      rawState && (rawState.data.chatId === undefined || rawState.data.chatId === ctx.chat.id)
-        ? rawState
-        : undefined;
-    if (!state) {
-      // Mention trigger (issue #34): checked ahead of the DM-only fallback
-      // below, since it's meant to fire in group chatter too — but only on
-      // an explicit @-mention, never on unmentioned text, which is why
-      // "none" falls through to the same silent-in-groups behavior as
-      // before.
-      const trigger = parseMentionTrigger(text, bot.botInfo.username);
-      if (trigger.kind === "unrecognized") {
-        await ctx.reply(`Did you mean to create a task? Try: @${bot.botInfo.username} add task <title>`);
-        return;
-      }
-      if (trigger.kind === "addtask") {
-        const caller = await resolveCallerOrReply(ctx);
-        if (!caller) return;
-        await handleAddTaskArgs(ctx, caller, trigger.args);
-        return;
-      }
-      // With privacy mode off, the bot sees every message in a group chat,
-      // not just ones meant for it — only DMs can assume every message is
-      // addressed to the bot, so only reply with the fallback there.
-      if (ctx.chat.type === "private") {
-        await ctx.reply("Not sure what you're asking — try /help to see what I can do.");
-      }
-      return;
-    }
-    const resolved = await requireCaller(userId);
-    if (resolved.status !== "ok") {
-      await wizards.cancel(userId);
-      await ctx.reply("Send /start first.");
-      return;
-    }
-    await handleWizardInput(ctx, resolved.caller, state, text.trim());
-  });
 
-  // ---- Non-text answers mid-form (issue #63, finding H8) ----------------
-  // Registered after bot.on("message:text") above so it never shadows it —
-  // grammy runs middleware in registration order, and a text message
-  // already matched by that handler must not reach this one too. A photo,
-  // sticker, etc. sent while a wizard step is waiting on a text answer was
-  // previously swallowed with zero replies; nudge the user instead, but
-  // only when they actually have a live wizard in this chat — with no
-  // wizard, privacy mode off means the bot sees every non-text message in
-  // a group too, and replying to those is exactly the chatter #52 stopped.
-  bot.on("message", async (ctx) => {
-    if (ctx.message.text !== undefined) return;
-    const userId = ctx.from?.id;
-    if (userId === undefined) return;
-    const state = await wizards.get(userId);
-    if (!state) return;
-    if (state.data.chatId !== undefined && state.data.chatId !== ctx.chat.id) return;
-    await ctx.reply("I can only read text for this step. Send your answer as a message, or /cancel.");
+    // Mention trigger (issue #34): checked ahead of the DM-only fallback
+    // below, since it's meant to fire in group chatter too — but only on
+    // an explicit @-mention, never on unmentioned text, which is why
+    // "none" falls through to the same silent-in-groups behavior as
+    // before.
+    const trigger = parseMentionTrigger(text, bot.botInfo.username);
+    if (trigger.kind === "unrecognized") {
+      await ctx.reply(`Did you mean to create a task? Try: @${bot.botInfo.username} add task <title>`);
+      return;
+    }
+    if (trigger.kind === "addtask") {
+      const caller = await requireCaller(ctx);
+      if (!caller) return;
+      await handleAddTaskArgs(ctx, caller, trigger.args);
+      return;
+    }
+    // With privacy mode off, the bot sees every message in a group chat,
+    // not just ones meant for it — only DMs can assume every message is
+    // addressed to the bot, so only reply with the fallback there.
+    if (ctx.chat.type === "private") {
+      await ctx.reply("Not sure what you're asking — try /help to see what I can do.");
+    }
   });
 
   // ---- Edited commands are acknowledged, never executed (issue #65,
   // finding H14; decision D11 in #59) ------------------------------------
-  // Registered after every other bot.on handler above so it can never
-  // shadow message:text or the non-text nudge above — an edited message is
-  // its own update type and grammy would never route it there anyway, but
-  // keeping the ordering consistent with the rest of the file makes that
-  // explicit rather than accidental.
-  //
   // An edit arrives as a new update with a fresh update_id, so the
   // processed_telegram_updates dedup (ADR-0004) does not suppress it.
-  // Running the command again on edit would double-execute it — e.g.
-  // editing "/complete 1" into "/complete 2" would run both the original
-  // send and the edit. That hazard is why this was escalated to the
-  // maintainer rather than assumed, and why the decision is: acknowledge
-  // the edit, never run it. A read-only allowlist was rejected too, since
-  // it would need hand-maintaining every time a command is added — reusing
-  // HANDLED_COMMANDS (gate 3 below) means this stays in sync automatically.
-  //
-  // Accepted consequence: editing the same message three times produces
-  // three nudges, one per update, exactly like every other handler in this
-  // file. De-duplicating it would need per-message state that doesn't
-  // exist, and isn't worth adding for this.
+  // Running the command again on edit would double-execute it. Accepted
+  // consequence: editing the same message three times produces three
+  // nudges, one per update.
   bot.on("edited_message:text", async (ctx) => {
     const text = ctx.editedMessage.text;
     if (!text.startsWith("/")) return;
@@ -1385,203 +609,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     await ctx.reply("I don't pick up edits — send that as a new message.");
   });
 
-  async function handleWizardInput(
-    ctx: import("grammy").Context,
-    caller: Caller,
-    state: WizardState,
-    text: string,
-  ) {
-    const userId = ctx.from!.id;
-
-    if (state.step === "awaiting_field_choice") {
-      await ctx.reply("Please tap a button above to choose a field, or send /cancel.");
-      return;
-    }
-
-    if (state.step === "awaiting_assignee") {
-      const username = text.replace(/^@/, "");
-      if (!roster.isMember(username, caller.cohortId)) {
-        // Assignable to any roster member, not just interns (issue #27/#29).
-        const memberUsernames = roster
-          .all()
-          .filter((entry) => entry.cohortId === caller.cohortId)
-          .map((entry) => entry.username);
-        const suggestion = suggestClosestUsername(username, memberUsernames);
-        const suggestionText = suggestion ? ` Did you mean @${suggestion}?` : "";
-        await ctx.reply(
-          `@${username} isn't a known roster member in this cohort.${suggestionText} Try again, or /cancel.`,
-        );
-        return;
-      }
-      const updated = (await wizards.update(userId, {
-        data: { assigneeUsername: username },
-      }))!;
-      if (state.kind === "edit") {
-        await finishWizard(ctx, caller, userId, updated);
-        return;
-      }
-      await wizards.update(userId, { step: "awaiting_title" });
-      await ctx.reply("Title?");
-      return;
-    }
-
-    if (state.step === "awaiting_title") {
-      if (text.length === 0) {
-        await ctx.reply("Title can't be empty. Try again, or /cancel.");
-        return;
-      }
-      const updated = (await wizards.update(userId, { data: { title: text } }))!;
-      if (state.kind === "edit") {
-        await finishWizard(ctx, caller, userId, updated);
-        return;
-      }
-      await wizards.update(userId, { step: "awaiting_description" });
-      await ctx.reply(
-        state.kind === "assign"
-          ? 'Description? (optional — send "skip" to leave it blank)'
-          : "Description?",
-      );
-      return;
-    }
-
-    if (state.step === "awaiting_description") {
-      // Description is optional (issue #27/#28) — the create wizard lets
-      // it be skipped; the edit wizard's description step is reached only
-      // by explicitly choosing to change it, so it stays required there.
-      const skipped = state.kind === "assign" && text.toLowerCase() === "skip";
-      if (!skipped && text.length === 0) {
-        await ctx.reply("Description can't be empty. Try again, or /cancel.");
-        return;
-      }
-      const updated = (
-        await wizards.update(userId, { data: { description: skipped ? undefined : text } })
-      )!;
-      if (state.kind === "edit") {
-        await finishWizard(ctx, caller, userId, updated);
-        return;
-      }
-      await wizards.update(userId, { step: "awaiting_due_date" });
-      await ctx.reply('Due date? (e.g. "next Friday", "in 3 days", "Sept 5")');
-      return;
-    }
-
-    if (state.step === "awaiting_due_date") {
-      const parsed = parseDueDate(text, new Date());
-      if (!parsed) {
-        await ctx.reply(
-          "I couldn't understand that date. Try phrases like \"next Friday\", \"in 3 days\", or \"Sept 5\", or /cancel.",
-        );
-        return;
-      }
-      await wizards.update(userId, {
-        step: "awaiting_due_date_confirm",
-        data: { pendingDueDate: parsed },
-      });
-      const keyboard = new InlineKeyboard().text("Yes", "duedate:yes").text("No", "duedate:no");
-      let confirmPrompt = `That's ${parsed.friendly}. Save this?`;
-      if (isPastDate(parsed.isoDate, new Date())) {
-        confirmPrompt += `\n${PAST_DUE_WARNING}`;
-      }
-      await ctx.reply(confirmPrompt, {
-        reply_markup: keyboard,
-      });
-      return;
-    }
-
-    // awaiting_due_date_confirm expects a button tap, not text.
-    await ctx.reply('Please tap "Yes" or "No" above, or send /cancel.');
-  }
-
-  bot.callbackQuery(/^duedate:(yes|no)$/, async (ctx) => {
-    const userId = ctx.from.id;
-    const state = await wizards.get(userId);
-    if (!state || state.step !== "awaiting_due_date_confirm") {
-      await ctx.answerCallbackQuery({ text: "That form's expired — send the command again to start a new one." });
-      return;
-    }
-    if (state.data.chatId !== undefined && state.data.chatId !== ctx.chat?.id) {
-      await ctx.answerCallbackQuery({ text: "That form was started in another chat." });
-      return;
-    }
-    const resolved = await requireCaller(userId);
-    if (resolved.status !== "ok") {
-      await ctx.answerCallbackQuery({ text: "Send /start first." });
-      return;
-    }
-    const [, decision] = ctx.match as unknown as [string, string];
-    await ctx.answerCallbackQuery();
-
-    if (decision === "no") {
-      await wizards.update(userId, { step: "awaiting_due_date" });
-      await ctx.editMessageText(
-        'Okay — send the due date again (e.g. "next Friday", "in 3 days", "Sept 5"):',
-      );
-      return;
-    }
-
-    const finalState = (await wizards.update(userId, {
-      data: { dueDate: state.data.pendingDueDate!.isoDate },
-    }))!;
-    await ctx.editMessageText(`Saved: ${state.data.pendingDueDate!.friendly}`);
-    await finishWizard(ctx, resolved.caller, userId, finalState);
-  });
-
-  async function finishWizard(
-    ctx: import("grammy").Context,
-    caller: Caller,
-    userId: number,
-    state: WizardState,
-  ) {
-    await wizards.cancel(userId);
-
-    if (state.kind === "assign") {
-      const result = await service.assignTask(caller, {
-        assigneeUsername: state.data.assigneeUsername!,
-        title: state.data.title!,
-        description: state.data.description,
-        dueDate: state.data.dueDate!,
-      });
-      if (!result.ok) {
-        await ctx.reply(`Couldn't create the task: ${result.error}`);
-        return;
-      }
-      let reply = `Task ${result.value.id} created and assigned to @${result.value.assigneeUsername}.`;
-      const notified = await notifyUser(
-        bot,
-        registrations,
-        result.value.assigneeUsername,
-        `You've been assigned Task ${result.value.id}: "${result.value.title}" (due ${result.value.dueDate}). Send /task ${result.value.id} for full details, /done ${result.value.id} when you're ready for review.`,
-      );
-      if (!notified && result.value.assigneeUsername !== normalizeUsername(caller.username)) {
-        reply += `\nHeads-up: @${result.value.assigneeUsername} hasn't sent /start yet, so I couldn't notify them.`;
-      }
-      await ctx.reply(reply);
-      return;
-    }
-
-    // edit
-    const patch: Record<string, string> = {};
-    if (state.data.assigneeUsername) patch.assigneeUsername = state.data.assigneeUsername;
-    if (state.data.title) patch.title = state.data.title;
-    if (state.data.description) patch.description = state.data.description;
-    if (state.data.dueDate) patch.dueDate = state.data.dueDate;
-
-    const result = await service.editTask(caller, state.data.taskId!, patch);
-    if (!result.ok) {
-      await ctx.reply(`Couldn't save the edit: ${result.error}`);
-      return;
-    }
-    const fieldLabel: Record<EditField, string> = {
-      assignee: "assignee",
-      title: "title",
-      description: "description",
-      dueDate: "due date",
-    };
-    const label = state.data.editField ? fieldLabel[state.data.editField] : "task";
-    await ctx.reply(`Task ${state.data.taskId} updated — ${label} changed.`);
-  }
-
-  return { bot, service, roster, registrations, wizards };
+  return { bot, service, roster, registrations };
 }
 
 /** Parses the leading `/word` of a message into a lowercase command name
@@ -1597,10 +625,7 @@ function parseCommandName(text: string): string {
 
 /** True when a leading `/command@othername` is explicitly addressed to a
  * different bot (issue #52) — checked so this bot doesn't reply to chatter
- * meant for someone else in a group chat. Extracted to module scope (issue
- * #65, finding H14) so the `message:text` handler and the `edited_message`
- * handler share exactly one implementation of this rule instead of each
- * having their own copy. */
+ * meant for someone else in a group chat. */
 function isAddressedToOtherBot(text: string, botUsername: string): boolean {
   const commandToken = text.slice(1).split(/\s/, 1)[0] ?? "";
   const atIndex = commandToken.indexOf("@");
@@ -1617,37 +642,15 @@ function matchToString(match: CommandMatch): string {
   return typeof match === "string" ? match : (match[0] ?? "");
 }
 
-/** Accepts both `23` and `t23` (issue #27/#31's shared task-ref grammar). */
-function parseIdArg(match: CommandMatch): number | undefined {
-  return parseTaskRef(matchToString(match));
-}
-
-/** Page-number argument for /alltasks and /mytasks (issue #7). No argument
- * defaults to page 1; a non-numeric or non-positive argument is rejected
- * with a usage message rather than silently falling back — an
- * out-of-range-but-valid page number (e.g. past the last page) is instead
- * clamped by `paginate` in format.ts, since that's a page that once
- * existed and just ran out, not a malformed request. */
-function parsePageArg(match: CommandMatch): number | undefined {
-  const trimmed = matchToString(match).trim();
-  if (trimmed.length === 0) return 1;
-  if (!/^\d+$/.test(trimmed)) return undefined;
-  const page = Number(trimmed);
-  return page >= 1 ? page : undefined;
-}
-
 type TasksArgs =
   | { kind: "all"; page: number }
   | { kind: "member"; username: string; page: number }
-  | { kind: "role"; role: Role; page: number }
   | { kind: "error" };
 
-/** Parses `/tasks`'s single-argument grammar (issue #27/#33): a bare page
- * number means "next page" of the unfiltered list, while `@username` or a
- * role word (`intern`/`higherup`) is a filter, optionally followed by its
- * own page number — `/tasks 2` must still mean page 2 of the unfiltered
- * list (CONTEXT.md's noted parsing ambiguity), so a bare numeric first
- * token is only ever treated as a page number, never a filter. */
+/** Parses `/tasks`'s single-argument grammar (issue #27/#33, trimmed of its
+ * role filter by #106 — there is no role any more): a bare page number
+ * means "next page" of the unfiltered list, while `@username` is a filter,
+ * optionally followed by its own page number. */
 function parseTasksArgs(match: CommandMatch): TasksArgs {
   const trimmed = matchToString(match).trim();
   if (trimmed.length === 0) return { kind: "all", page: 1 };
@@ -1671,92 +674,5 @@ function parseTasksArgs(match: CommandMatch): TasksArgs {
   if (first!.startsWith("@")) {
     return { kind: "member", username: first!.slice(1), page };
   }
-  const roleWord = first!.toLowerCase();
-  if (roleWord === "intern") return { kind: "role", role: "Intern", page };
-  if (roleWord === "higherup") return { kind: "role", role: "HigherUp", page };
   return { kind: "error" };
-}
-
-function parseIdAndRest(match: CommandMatch): { id: number | undefined; rest: string } {
-  const trimmed = matchToString(match).trim();
-  const spaceIdx = trimmed.indexOf(" ");
-  if (spaceIdx === -1) {
-    return { id: parseIdArg(trimmed), rest: "" };
-  }
-  const idPart = trimmed.slice(0, spaceIdx);
-  const rest = trimmed.slice(spaceIdx + 1).trim();
-  return { id: parseIdArg(idPart), rest };
-}
-
-/** Field-name token accepted by `/edit <task_id> <field> <value>` — matches
- * the same four fields as the `editfield:` callback data, so "duedate"
- * (one word, lowercase) is the accepted spelling rather than "dueDate". */
-function parseEditField(token: string): EditField | undefined {
-  const normalized = token.toLowerCase();
-  if (normalized === "assignee") return "assignee";
-  if (normalized === "title") return "title";
-  if (normalized === "description") return "description";
-  if (normalized === "duedate" || normalized === "due-date" || normalized === "due_date") {
-    return "dueDate";
-  }
-  return undefined;
-}
-
-/** Parsed `/roster` subcommand grammar (R4/#89):
- * `/roster`, `/roster add @user [intern|higherup]`,
- * `/roster role @user intern|higherup`, `/roster remove @user`. Anything
- * else (unrecognised subcommand, missing/extra arguments, an unrecognised
- * role word) is `usage` — the bot layer replies with the usage string
- * rather than guessing, following the /edit usage-reply pattern. */
-type RosterArgs =
-  | { kind: "list" }
-  | { kind: "add"; username: string; role: Role }
-  | { kind: "role"; username: string; role: Role }
-  | { kind: "remove"; username: string }
-  | { kind: "usage" };
-
-function parseRoleWord(token: string): Role | undefined {
-  const normalized = token.toLowerCase();
-  if (normalized === "intern") return "Intern";
-  if (normalized === "higherup") return "HigherUp";
-  return undefined;
-}
-
-function parseRosterArgs(raw: string): RosterArgs {
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) return { kind: "list" };
-
-  const tokens = trimmed.split(/\s+/);
-  const [subcommand, ...rest] = tokens;
-  const sub = subcommand!.toLowerCase();
-
-  if (sub === "add") {
-    if (rest.length < 1 || rest.length > 2) return { kind: "usage" };
-    const username = rest[0]!.replace(/^@/, "");
-    if (username.length === 0) return { kind: "usage" };
-    let role: Role = "Intern";
-    if (rest.length === 2) {
-      const parsedRole = parseRoleWord(rest[1]!);
-      if (!parsedRole) return { kind: "usage" };
-      role = parsedRole;
-    }
-    return { kind: "add", username, role };
-  }
-
-  if (sub === "role") {
-    if (rest.length !== 2) return { kind: "usage" };
-    const username = rest[0]!.replace(/^@/, "");
-    const role = parseRoleWord(rest[1]!);
-    if (username.length === 0 || !role) return { kind: "usage" };
-    return { kind: "role", username, role };
-  }
-
-  if (sub === "remove") {
-    if (rest.length !== 1) return { kind: "usage" };
-    const username = rest[0]!.replace(/^@/, "");
-    if (username.length === 0) return { kind: "usage" };
-    return { kind: "remove", username };
-  }
-
-  return { kind: "usage" };
 }

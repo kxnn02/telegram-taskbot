@@ -1,42 +1,44 @@
 import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
+import type { RosterStorePort } from "../storage/rosterStorePort.js";
 import { normalizeUsername, type Roster } from "../domain/roster.js";
 import type { Caller } from "../domain/types.js";
 
 export type ResolveResult =
   | { status: "ok"; caller: Caller }
-  | { status: "not_started" }
-  | { status: "not_on_roster" };
+  | { status: "no_username" };
 
-/** Resolves a Telegram user id to a service-layer Caller by looking up the
- * username they registered with (PRD §7) against the current roster. If
- * they've never run /start, or their roster entry has since been removed,
- * this returns a specific status rather than throwing.
+/**
+ * Resolves a Telegram sender into a service-layer `Caller`, auto-registering
+ * them the first time they're seen (ADR-0013 — matches Devie's `syncMember`,
+ * which inserts anyone who messages the bot with no gate of any kind).
  *
- * `cohortId` is the cohort this deployment is bound to (ADR-0004's dry-run
- * design: the real cohort and the dry-run cohort can share the same real
- * Telegram accounts, e.g. `kxnn02` exists as HigherUp under both). Every
- * live deployment only ever serves one cohort, so this is always passed
- * explicitly by production callers — `roster.find` is never allowed to
- * fall back to its ambiguous no-cohort-arg overload for a real request,
- * which would otherwise silently resolve to whichever cohort happens to
- * be first in roster order, not necessarily the one this deployment is
- * actually serving. See CONTEXT.md's cohort-binding note for the incident
- * this closes.
+ * Every call: links `telegramUserId` to `username` in the registration
+ * store (so DMs can reach them later), and upserts a roster row for them in
+ * the caller's active cohort (so they show up as a cohort member). Both are
+ * plain upserts, so a second message from the same sender updates their
+ * linked username in place rather than inserting a duplicate row — there is
+ * no separate "already registered" branch to fall into.
+ *
+ * The one failure case that survives: a Telegram account with no `username`
+ * set can't be tracked at all, since both the registration and roster rows
+ * are keyed by username.
  */
 export async function resolveCaller(
-  telegramUserId: number,
+  from: { id: number; username?: string },
   registrations: RegistrationStorePort,
+  rosterStore: RosterStorePort,
   roster: Roster,
   cohortId: string,
 ): Promise<ResolveResult> {
-  const username = await registrations.findUsername(telegramUserId);
-  if (!username) return { status: "not_started" };
+  if (!from.username) return { status: "no_username" };
+  const username = normalizeUsername(from.username);
 
-  const entry = roster.find(username, cohortId);
-  if (!entry) return { status: "not_on_roster" };
+  await registrations.register(from.id, username);
 
-  return {
-    status: "ok",
-    caller: { username: normalizeUsername(entry.username), role: entry.role, cohortId: entry.cohortId },
-  };
+  if (!roster.isMember(username, cohortId)) {
+    await rosterStore.upsert({ username, cohortId }, username);
+    roster.replaceAll(await rosterStore.listAll());
+  }
+
+  return { status: "ok", caller: { username, cohortId } };
 }
