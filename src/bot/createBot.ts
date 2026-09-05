@@ -576,8 +576,13 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     // "none" falls through to the same silent-in-groups behavior as
     // before.
     const trigger = parseMentionTrigger(text, bot.botInfo.username);
-    if (trigger.kind === "unrecognized") {
-      await ctx.reply(`Did you mean to create a task? Try: @${bot.botInfo.username} add task <title>`);
+    if (trigger.kind === "usage") {
+      // Devie rewrites the mention into a bare `/addtask` before dispatch,
+      // so a phrase with no title behind it lands on the same usage example
+      // `/addtask` alone gets (#103) — not the old "did you mean to create a
+      // task?" nudge, which is gone along with every other reply Devie
+      // doesn't send.
+      await ctx.reply(ADDTASK_USAGE);
       return;
     }
     if (trigger.kind === "addtask") {

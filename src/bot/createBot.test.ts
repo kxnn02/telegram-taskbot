@@ -155,6 +155,26 @@ function noUsernameMessageUpdate(userId: number, chatId: number, text: string): 
   } as Update;
 }
 
+/** A group-chat message, for the mention-trigger paths that are meant to
+ * fire in group chatter (issue #34/#103) rather than only in DMs. */
+function groupMessageUpdate(
+  userId: number,
+  username: string,
+  chatId: number,
+  text: string,
+): Update {
+  return {
+    update_id: updateIdSeq++,
+    message: {
+      message_id: messageIdSeq++,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: chatId, type: "group", title: "Cohort chat" },
+      from: { id: userId, is_bot: false, first_name: "Test", username },
+      text,
+    },
+  } as Update;
+}
+
 function lastReplyText(calls: RecordedCall[]): string {
   const call = [...calls].reverse().find(
     (c) => c.method === "sendMessage" || c.method === "editMessageText",
@@ -362,6 +382,111 @@ describe("cohort isolation survives the strip (the one guarantee that must)", ()
 
     const text = lastReplyText(testBot.calls);
     expect(text).not.toContain("Secret task");
+  });
+});
+
+describe("mention trigger (issue #34, widened by #103)", () => {
+  it("a newly accepted phrase creates a task from a group message", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(userId, "alice", -100, "@test_bot work on fix the login bug"),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("created");
+    expect(text).toContain("@alice");
+  });
+
+  it("'create task ...' and 'add task: ...' both route", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(userId, "alice", -100, "@test_bot create task write the docs"),
+    );
+    expect(lastReplyText(testBot.calls)).toContain("created");
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(userId, "alice", -100, "@test_bot add task: ship the release"),
+    );
+    expect(lastReplyText(testBot.calls)).toContain("created");
+  });
+
+  it("'todo ...' no longer routes and produces no reply — Devie never accepted it (#103)", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(userId, "alice", -100, "@test_bot todo fix the login bug"),
+    );
+
+    expect(allReplyTexts(testBot.calls)).toEqual([]);
+  });
+
+  it("a passing mention like 'thanks @bot' produces NO reply at all, not a 'did you mean' nudge", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(userId, "alice", -100, "thanks @test_bot !"),
+    );
+
+    expect(allReplyTexts(testBot.calls)).toEqual([]);
+  });
+
+  it("a leading mention with no phrase match is silent too (#103 makes this silent)", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(userId, "alice", -100, "@test_bot how's it going"),
+    );
+
+    expect(allReplyTexts(testBot.calls)).toEqual([]);
+    expect(allReplyTexts(testBot.calls).join("")).not.toContain("Did you mean");
+  });
+
+  it("a phrase with no title left behind gets /addtask's usage example", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(userId, "alice", -100, "@test_bot add task"),
+    );
+
+    expect(lastReplyText(testBot.calls)).toMatch(/^Usage: \/addtask/);
+  });
+
+  it("cohort isolation: a mention-created task lands in the caller's own cohort only", async () => {
+    const roster = new Roster([{ username: "other", cohortId: "cohort-9" }]);
+    const testBot = makeTestBot(roster, "cohort-5");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(userId, "alice", -100, "@test_bot add task mention-scoped task"),
+    );
+
+    const otherCohort = await testBot.service.listAllTasks({
+      username: "other",
+      cohortId: "cohort-9",
+    });
+    if (!otherCohort.ok) throw new Error("read failed");
+    expect(otherCohort.value).toEqual([]);
+
+    const ownCohort = await testBot.service.listAllTasks({
+      username: "alice",
+      cohortId: "cohort-5",
+    });
+    if (!ownCohort.ok) throw new Error("read failed");
+    expect(ownCohort.value.map((t) => t.title)).toEqual(["mention-scoped task"]);
   });
 });
 
