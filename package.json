@@ -20,6 +20,7 @@
     "check:migrations": "tsx scripts/checkMigrationsApplied.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.124.0",
     "@supabase/supabase-js": "^2.112.4",
     "chrono-node": "^2.7.7",
     "dotenv": "^16.4.5",
