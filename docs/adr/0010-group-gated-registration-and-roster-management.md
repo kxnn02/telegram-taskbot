@@ -1,7 +1,13 @@
 # ADR-0010: Group-gated registration and in-product roster management
 
-- **Status**: Accepted, implemented (spec #83, merged via PR #93, live in production since
-  2026-09-02)
+- **Status**: Superseded by [ADR-0013](./0013-remove-access-control-for-devie-parity.md) — the
+  maintainer decided the bot should be a carbon copy of DevieBot (#106), which registers anyone who
+  messages it with no gate of any kind. Every mechanism this ADR designed (the group-membership
+  check, the role-picking buttons, `/roster`, the group-admin-gated roster edits, the
+  zero-higher-ups recovery path) was deleted. Kept here for the history of why it existed, not as a
+  description of current behaviour.
+- **Status (as accepted, historical)**: Accepted, implemented (spec #83, merged via PR #93, live in
+  production since 2026-09-02)
 - **Date**: 2026-09-02
 - **Supersedes**: `PRD.md` §2's *"No self-registration surface: identity is resolved against a
   known roster (see §7)"* and §7's step 1, *"You collect each person's Telegram username upfront
