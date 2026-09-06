@@ -37,4 +37,34 @@ describe("InMemoryRegistrationStore", () => {
     await store.register(222, "bob");
     expect(await store.findTelegramId("bob")).toBe(222);
   });
+
+  it("finds no registered-at timestamp for a username that never registered", async () => {
+    const store = new InMemoryRegistrationStore();
+    expect(await store.findRegisteredAt("nobody")).toBeUndefined();
+  });
+
+  it("records a registered-at timestamp on register, readable by username", async () => {
+    const store = new InMemoryRegistrationStore();
+    const before = new Date().toISOString();
+    await store.register(333, "carol");
+    const registeredAt = await store.findRegisteredAt("carol");
+    expect(registeredAt).toBeDefined();
+    expect(registeredAt! >= before).toBe(true);
+  });
+
+  it("normalizes the username passed to findRegisteredAt (case, leading @)", async () => {
+    const store = new InMemoryRegistrationStore();
+    await store.register(333, "carol");
+    expect(await store.findRegisteredAt("@Carol")).toBeDefined();
+  });
+
+  it("updates registered-at when the same Telegram id re-registers", async () => {
+    const store = new InMemoryRegistrationStore();
+    await store.register(444, "dave");
+    const first = await store.findRegisteredAt("dave");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await store.register(444, "dave");
+    const second = await store.findRegisteredAt("dave");
+    expect(second! >= first!).toBe(true);
+  });
 });

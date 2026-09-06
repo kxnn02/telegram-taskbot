@@ -40,6 +40,7 @@ describe("notifyUser (issue #54/F5)", () => {
       findTelegramId: async () => {
         throw new Error("duplicate rows for username — .maybeSingle() failure");
       },
+      findRegisteredAt: async () => undefined,
     };
 
     await expect(notifyUser(bot, registrations, "bob", "hi")).resolves.toBe(false);
@@ -51,6 +52,7 @@ describe("notifyUser (issue #54/F5)", () => {
       register: async () => {},
       findUsername: async () => undefined,
       findTelegramId: async () => undefined,
+      findRegisteredAt: async () => undefined,
     };
 
     expect(await notifyUser(bot, registrations, "bob", "hi")).toBe(false);
@@ -62,6 +64,7 @@ describe("notifyUser (issue #54/F5)", () => {
       register: async () => {},
       findUsername: async () => undefined,
       findTelegramId: async () => 123,
+      findRegisteredAt: async () => undefined,
     };
 
     expect(await notifyUser(bot, registrations, "bob", "hi")).toBe(true);

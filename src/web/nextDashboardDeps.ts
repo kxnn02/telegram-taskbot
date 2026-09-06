@@ -1,12 +1,14 @@
 import { loadRosterFromStore } from "../config/roster.js";
 import { SystemClock } from "../domain/clock.js";
 import type { Roster } from "../domain/roster.js";
+import { RosterService } from "../service/rosterService.js";
 import { SettingsService } from "../service/settingsService.js";
 import { TagService } from "../service/tagService.js";
 import { TaskService } from "../service/taskService.js";
 import { SupabaseAuditLogStore } from "../storage/supabaseAuditLogStore.js";
 import { SupabaseCohortStore } from "../storage/supabaseCohortStore.js";
 import { createSupabaseClient } from "../storage/supabaseClient.js";
+import { SupabaseRegistrationStore } from "../storage/supabaseRegistrationStore.js";
 import { SupabaseRosterStore } from "../storage/supabaseRosterStore.js";
 import { SupabaseTagStore } from "../storage/supabaseTagStore.js";
 import { SupabaseTaskStore } from "../storage/supabaseTaskStore.js";
@@ -41,6 +43,12 @@ export interface DashboardDeps {
   /** Backs the settings page's group-chat-id save and its inline audit log
    * (issue #105 sub-stage 5c) — added the same way `tagService` was. */
   settingsService: SettingsService;
+  /** Backs the team page's member add/edit/remove (issue #105 sub-stage 5d)
+   * — added the same way `tagService`/`settingsService` were, reusing the
+   * same `rosterStore` instance the board's assignee list already reads
+   * from (see `BoardPage`), plus a new `SupabaseRegistrationStore` for the
+   * Telegram-id/registered-at enrichment `RosterService.listMembers` reads. */
+  rosterService: RosterService;
 }
 
 function requireEnv(name: string): string {
@@ -66,6 +74,7 @@ async function buildDashboardDeps(): Promise<DashboardDeps> {
     new SupabaseCohortStore(supabase),
     new SupabaseAuditLogStore(supabase),
   );
+  const rosterService = new RosterService(rosterStore, new SupabaseRegistrationStore(supabase));
 
   return {
     botToken,
@@ -77,6 +86,7 @@ async function buildDashboardDeps(): Promise<DashboardDeps> {
     rosterStore,
     tagService,
     settingsService,
+    rosterService,
   };
 }
 

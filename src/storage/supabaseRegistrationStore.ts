@@ -50,4 +50,16 @@ export class SupabaseRegistrationStore implements RegistrationStorePort {
     }
     return (data as RegistrationRow | null)?.telegram_user_id;
   }
+
+  async findRegisteredAt(username: string): Promise<string | undefined> {
+    const { data, error } = await this.client
+      .from("registrations")
+      .select()
+      .eq("username", normalizeUsername(username))
+      .maybeSingle();
+    if (error) {
+      throw new Error(`findRegisteredAt(${username}) failed: ${error.message}`);
+    }
+    return (data as RegistrationRow | null)?.registered_at;
+  }
 }
