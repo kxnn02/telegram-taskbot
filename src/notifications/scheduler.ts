@@ -18,7 +18,17 @@ export const MANILA_TIMEZONE = "Asia/Manila";
  * with a plain fake instead of a real bot instance. */
 export interface NotifierBot {
   api: {
-    sendMessage(chatId: number | string, text: string): Promise<unknown>;
+    /** `other` is optional and unused by anything in this file — widened
+     * (issue #107) so a real grammy `Bot` also satisfies
+     * `jobs/standupPush.ts`'s `StandupPushBot`, which needs
+     * `{ parse_mode: "HTML" }` for the standup push card, without this
+     * module's own DM/group-summary sends (which pass no third argument)
+     * changing at all. */
+    sendMessage(
+      chatId: number | string,
+      text: string,
+      other?: { parse_mode?: "HTML" },
+    ): Promise<unknown>;
   };
 }
 

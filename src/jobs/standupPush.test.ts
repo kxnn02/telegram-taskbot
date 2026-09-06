@@ -1,0 +1,143 @@
+import { describe, expect, it, vi } from "vitest";
+import { InMemoryTaskStore } from "../storage/inMemoryTaskStore.js";
+import { FixedClock } from "../domain/clock.js";
+import { Roster } from "../domain/roster.js";
+import { TaskService } from "../service/taskService.js";
+import { FakeTextModel, ThrowingTextModel } from "../nlp/textModel.js";
+import type { CohortStorePort } from "../storage/cohortStorePort.js";
+import {
+  buildStandupPushText,
+  handleStandupPushEndpoint,
+  sendStandupPush,
+} from "./standupPush.js";
+
+// Issue #107, deviation #2: the push endpoint is authenticated via this
+// repo's existing `src/jobs/jobAuth.ts` scheme — never a new one — because
+// Devie's own `POST /api/standup` has no auth at all and is an open abuse
+// vector (any stranger who finds the URL could broadcast into the live
+// cohort group).
+
+const COHORT = "cohort-5-dryrun";
+const NOW = new Date("2026-09-01T04:00:00.000Z"); // ~noon Manila
+
+function makeService() {
+  const store = new InMemoryTaskStore();
+  const roster = new Roster([
+    { username: "carla", cohortId: COHORT },
+    { username: "alice", cohortId: COHORT },
+  ]);
+  return new TaskService(store, roster, new FixedClock(NOW));
+}
+
+function fakeCohorts(groupChatId: string | undefined): CohortStorePort {
+  return {
+    getGroupChatId: vi.fn(async () => groupChatId),
+    setGroupChatId: vi.fn(async () => {}),
+  };
+}
+
+describe("buildStandupPushText", () => {
+  it("calls the model exactly once and renders the overview card", async () => {
+    const model = new FakeTextModel(['"Ship it." — Someone, A Book']);
+    const service = makeService();
+    const text = await buildStandupPushText({ service, model }, COHORT, NOW);
+    expect(model.requests).toHaveLength(1);
+    expect(text).toContain('<i>"Ship it."</i>');
+    expect(text).toContain("📊 <b>Overview</b>");
+  });
+
+  it("renders correctly with no model available (ThrowingTextModel) — no quote, nothing else broken", async () => {
+    const model = new ThrowingTextModel();
+    const service = makeService();
+    const text = await buildStandupPushText({ service, model }, COHORT, NOW);
+    expect(text).not.toMatch(/<i>"/);
+    expect(text).toContain("📊 <b>Overview</b>");
+    expect(text).toContain("Consistency compounds.</i>");
+  });
+});
+
+describe("sendStandupPush", () => {
+  it("sends once to the cohort's configured group chat, as HTML", async () => {
+    const model = new FakeTextModel(['"Ship it." — Someone, A Book']);
+    const service = makeService();
+    const sendMessage = vi.fn(
+      async (_chatId: number | string, _text: string, _other?: { parse_mode?: "HTML" }) => ({}),
+    );
+    const bot = { api: { sendMessage } };
+    const cohorts = fakeCohorts("-100123");
+
+    const result = await sendStandupPush({ service, model, bot, cohorts }, COHORT, NOW);
+
+    expect(result.sent).toBe(true);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage.mock.calls[0]![0]).toBe("-100123");
+    expect(sendMessage.mock.calls[0]![2]).toEqual({ parse_mode: "HTML" });
+  });
+
+  it("does not send, and reports sent:false, when the cohort has no group chat configured", async () => {
+    const model = new FakeTextModel(['"Ship it." — Someone, A Book']);
+    const service = makeService();
+    const sendMessage = vi.fn(async () => ({}));
+    const bot = { api: { sendMessage } };
+    const cohorts = fakeCohorts(undefined);
+
+    const result = await sendStandupPush({ service, model, bot, cohorts }, COHORT, NOW);
+
+    expect(result.sent).toBe(false);
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleStandupPushEndpoint", () => {
+  function deps(overrides: { verify?: boolean } = {}) {
+    const sendMessage = vi.fn(async () => ({}));
+    const buildPreview = vi.fn(async () => "the preview text");
+    const send = vi.fn(async () => ({ sent: true }));
+    return {
+      deps: {
+        verify: () => overrides.verify ?? true,
+        buildPreview,
+        send,
+      },
+      sendMessage,
+      buildPreview,
+      send,
+    };
+  }
+
+  it("rejects an unauthenticated GET (preview) request", async () => {
+    const { deps: d, buildPreview } = deps({ verify: false });
+    const result = await handleStandupPushEndpoint(d, { method: "GET", headers: {} });
+    expect(result.status).toBe(401);
+    expect(buildPreview).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unauthenticated POST (send) request", async () => {
+    const { deps: d, send } = deps({ verify: false });
+    const result = await handleStandupPushEndpoint(d, { method: "POST", headers: {} });
+    expect(result.status).toBe(401);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("an authenticated POST sends once", async () => {
+    const { deps: d, send } = deps({ verify: true });
+    const result = await handleStandupPushEndpoint(d, { method: "POST", headers: {} });
+    expect(result.status).toBe(200);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("an authenticated GET renders a preview without sending", async () => {
+    const { deps: d, buildPreview, send } = deps({ verify: true });
+    const result = await handleStandupPushEndpoint(d, { method: "GET", headers: {} });
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({ preview: "the preview text" });
+    expect(buildPreview).toHaveBeenCalledTimes(1);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("405s any other method", async () => {
+    const { deps: d } = deps({ verify: true });
+    const result = await handleStandupPushEndpoint(d, { method: "DELETE", headers: {} });
+    expect(result.status).toBe(405);
+  });
+});
