@@ -160,7 +160,7 @@ export async function buildStandup(
  * words/numbers (see ADR-0010 for the roster row shape, since
  * roster.config.json was deleted) — this just title-cases the words and
  * leaves numbers alone, with no cohort-name lookup table to maintain. */
-function formatCohortName(cohortId: string): string {
+export function formatCohortName(cohortId: string): string {
   return cohortId
     .split(/[-_]+/)
     .filter(Boolean)
@@ -168,7 +168,7 @@ function formatCohortName(cohortId: string): string {
     .join(" ");
 }
 
-function formatReportDate(date: Date): string {
+export function formatReportDate(date: Date): string {
   return new Intl.DateTimeFormat("en-US", {
     weekday: "long",
     year: "numeric",
