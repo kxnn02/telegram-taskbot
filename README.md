@@ -6,7 +6,8 @@ a web dashboard for oversight, task creation/editing, and stats. There's no role
 registered member has the same access to everything, matching **Devie**, the DevCon bot this one
 is a carbon copy of.
 
-See [`PRD.md`](./PRD.md) for the full product spec and design decisions, and
+See [`PRD.md`](./PRD.md) for the current product spec (the original v1 spec this replaced is
+archived at [`docs/PRD-v1-original.md`](./docs/PRD-v1-original.md), for comparison), and
 [`CONTEXT.md`](./CONTEXT.md) for the "why" behind the technical choices. For how to actually use
 the bot day-to-day, see [`USER_GUIDE.md`](./USER_GUIDE.md).
 

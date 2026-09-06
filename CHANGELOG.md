@@ -181,4 +181,4 @@ The project's design went through an extensive back-and-forth before any code wa
 including one notable reversal: the bot was originally meant to be DM-only, with the group chat
 only ever receiving a read-only daily summary. After early testing, that was changed so commands
 also work directly in the group chat — see `CONTEXT.md` for the full reasoning and the tradeoff
-that came with it. Full narrative is in `PRD.md`.
+that came with it. Full narrative is in `docs/PRD-v1-original.md`, the archived v1 spec.

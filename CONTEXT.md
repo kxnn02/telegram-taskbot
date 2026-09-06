@@ -1,8 +1,9 @@
 # Context
 
-Why this project is built the way it is. See `PRD.md` for the full product spec; this file
-covers technical decisions and the reasoning behind them, for anyone (human or agent) picking
-up the codebase later.
+Why this project is built the way it is. See `PRD.md` for the current product spec (the original
+v1 spec is archived at `docs/PRD-v1-original.md`, for comparison); this file covers technical
+decisions and the reasoning behind them, for anyone (human or agent) picking up the codebase
+later.
 
 > **Re-platform complete, live in production — read `docs/adr/` for the decisions behind it.**
 > v1 shipped feature-complete but was never deployed; the project has since been re-platformed
@@ -564,5 +565,5 @@ argument grammar, not a confirmed carbon copy of it.
 ## Out of scope (deferred to v2)
 
 Mini App UI, file attachments, CSV export, recurring tasks, and standup response-collection were
-deliberately deferred — see `PRD.md` for the reasoning (timeline pressure ahead of the cohort's
-"before Thursday" target).
+deliberately deferred — still true today (`PRD.md` §11). The original reasoning (timeline pressure
+ahead of the cohort's "before Thursday" launch target) is in `docs/PRD-v1-original.md` §11.
