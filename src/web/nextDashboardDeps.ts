@@ -1,6 +1,7 @@
 import { loadRosterFromStore } from "../config/roster.js";
 import { SystemClock } from "../domain/clock.js";
 import type { Roster } from "../domain/roster.js";
+import { ActivityLogService } from "../service/activityLogService.js";
 import { RosterService } from "../service/rosterService.js";
 import { SettingsService } from "../service/settingsService.js";
 import { TagService } from "../service/tagService.js";
@@ -49,6 +50,12 @@ export interface DashboardDeps {
    * from (see `BoardPage`), plus a new `SupabaseRegistrationStore` for the
    * Telegram-id/registered-at enrichment `RosterService.listMembers` reads. */
   rosterService: RosterService;
+  /** Backs the dedicated activity-log page (issue #105 sub-stage 5e) —
+   * added the same way `settingsService` was, over the same
+   * `SupabaseAuditLogStore` instance settings' inline preview already
+   * reads from (both are read-only views over `audit_logs`; only
+   * `SettingsService.saveGroupChatId` ever writes to it). */
+  activityLogService: ActivityLogService;
 }
 
 function requireEnv(name: string): string {
@@ -70,11 +77,10 @@ async function buildDashboardDeps(): Promise<DashboardDeps> {
   const roster = await loadRosterFromStore(rosterStore);
   const service = new TaskService(new SupabaseTaskStore(supabase), roster, new SystemClock());
   const tagService = new TagService(new SupabaseTagStore(supabase), service);
-  const settingsService = new SettingsService(
-    new SupabaseCohortStore(supabase),
-    new SupabaseAuditLogStore(supabase),
-  );
+  const auditLogStore = new SupabaseAuditLogStore(supabase);
+  const settingsService = new SettingsService(new SupabaseCohortStore(supabase), auditLogStore);
   const rosterService = new RosterService(rosterStore, new SupabaseRegistrationStore(supabase));
+  const activityLogService = new ActivityLogService(auditLogStore);
 
   return {
     botToken,
@@ -87,6 +93,7 @@ async function buildDashboardDeps(): Promise<DashboardDeps> {
     tagService,
     settingsService,
     rosterService,
+    activityLogService,
   };
 }
 

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { STYLESHEET } from "../src/web/styles";
+import { ThemeProvider } from "./_components/ThemeProvider";
 import "./globals.css";
 
 /**
@@ -16,6 +17,12 @@ import "./globals.css";
  * fonts. It's imported here so `next build` actually processes the
  * Tailwind pipeline (the highest-risk part of this sub-stage), but nothing
  * on this page uses a Tailwind class yet, so there's no visible change.
+ *
+ * `ThemeProvider` (issue #105 sub-stage 5e) wires up `next-themes` for
+ * light/dark switching — `suppressHydrationWarning` on `<html>` is
+ * `next-themes`' own documented requirement, since it sets the `.dark`
+ * class attribute before React hydrates, which would otherwise be flagged
+ * as a mismatch.
  */
 
 export const metadata: Metadata = {
@@ -24,7 +31,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <link
           rel="stylesheet"
@@ -32,7 +39,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         />
         <style>{STYLESHEET}</style>
       </head>
-      <body>{children}</body>
+      <body>
+        <ThemeProvider>{children}</ThemeProvider>
+      </body>
     </html>
   );
 }

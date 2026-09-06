@@ -96,10 +96,10 @@
 }
 
 :root {
-    /* Core shadcn tokens, mapped to styles.ts's TOKENS (light theme is the
-       only theme DEVCON defines today; dark-mode values below are still
-       the shadcn generator's defaults and are inert until sub-stage 5e
-       wires up next-themes and gives dark mode a real DEVCON treatment). */
+    /* Core shadcn tokens, mapped to styles.ts's TOKENS (light theme). See
+       the ".dark" block below for the dark-mode variants — issue #105
+       sub-stage 5e wired up next-themes and replaced the shadcn
+       generator's placeholder dark defaults with real DEVCON dark values. */
     --background: #F8FAFC; /* --bg / --slate-50 */
     --foreground: #0F172A; /* --fg1 / --slate-900 */
     --card: #FFFFFF; /* --surface */
@@ -166,38 +166,46 @@
 }
 
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --destructive-foreground: oklch(0.985 0 0);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
+    /* Real DEVCON dark treatment (issue #105 sub-stage 5e) — replaces the
+       shadcn generator's inert neutral-gray defaults (5a's doc comment
+       flagged these as placeholders) with dark variants of the *same*
+       DEVCON tokens `src/web/styles.ts`'s new ".dark" block defines, so
+       the Tailwind/shadcn layer and the legacy hand-rolled stylesheet
+       agree on one dark palette instead of shipping two different ones.
+       Not Devie's own dark theme — this repo's brand, carried into dark
+       mode. */
+    --background: #0B1120; /* --bg */
+    --foreground: #F1F5F9; /* --fg1 */
+    --card: #131C3D; /* --surface */
+    --card-foreground: #F1F5F9; /* --fg1 */
+    --popover: #131C3D; /* --surface */
+    --popover-foreground: #F1F5F9; /* --fg1 */
+    --primary: #4263EB; /* --primary, unchanged — already reads on dark */
+    --primary-foreground: #FFFFFF;
+    --secondary: #0F172A; /* --surface-2 */
+    --secondary-foreground: #F1F5F9; /* --fg1 */
+    --muted: #0F172A; /* --surface-2 */
+    --muted-foreground: #94A3B8; /* --fg2 */
+    --accent: #0F172A; /* --surface-2 */
+    --accent-foreground: #F1F5F9; /* --fg1 */
+    --destructive: #EF4444; /* --red, unchanged */
+    --destructive-foreground: #FFFFFF;
+    --border: rgba(255, 255, 255, 0.10);
+    --input: rgba(255, 255, 255, 0.18);
+    --ring: #4263EB; /* --primary */
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    --sidebar: #0C1330; /* --navy-deep — the sidebar is already dark by design */
+    --sidebar-foreground: #F1F5F9;
+    --sidebar-primary: #4263EB;
+    --sidebar-primary-foreground: #FFFFFF;
+    --sidebar-accent: #131C3D;
+    --sidebar-accent-foreground: #F1F5F9;
+    --sidebar-border: rgba(255, 255, 255, 0.10);
+    --sidebar-ring: #4263EB;
 }
 
 @layer base {

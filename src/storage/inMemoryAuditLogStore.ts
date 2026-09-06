@@ -31,4 +31,16 @@ export class InMemoryAuditLogStore implements AuditLogStorePort {
       .slice(0, limit)
       .map((r) => ({ ...r }));
   }
+
+  async listPage(
+    cohortId: string,
+    opts: { limit: number; beforeId?: number },
+  ): Promise<{ items: AuditLog[]; hasMore: boolean }> {
+    const sorted = this.rows
+      .filter((r) => r.cohortId === cohortId)
+      .filter((r) => opts.beforeId === undefined || r.id < opts.beforeId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id);
+    const items = sorted.slice(0, opts.limit).map((r) => ({ ...r }));
+    return { items, hasMore: sorted.length > opts.limit };
+  }
 }

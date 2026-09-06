@@ -22,13 +22,21 @@ the bot day-to-day, see [`USER_GUIDE.md`](./USER_GUIDE.md).
 > The setup and running instructions below still cover local development (`npm run dev` against
 > the same Supabase-backed stack), not a separate legacy mode.
 
-> **Dashboard toolchain: Tailwind v4 + shadcn/ui.** As of issue #105 sub-stage 5a, the dashboard
-> (`app/`) has Tailwind v4 and shadcn/ui wired up (`app/globals.css`, `components.json`,
-> `components/ui/`, `lib/utils.ts`) for the Devie-parity dashboard work in #105's later
-> sub-stages. The Tailwind theme maps the *same* DEVCON design tokens already used everywhere
-> else (`src/web/styles.ts`) — no new colors, no new fonts, no visible change to any existing
-> page. See that file's doc comment and `app/globals.css`'s for the mapping and the cascade-layer
-> reasoning behind why the two coexist safely.
+> **Dashboard toolchain: Tailwind v4 + shadcn/ui, a real kanban board, settings, team, and
+> activity-log pages, and light/dark theming.** Issue #105 (Devie-parity dashboard port, now
+> closed) landed in five sub-stages: 5a wired up Tailwind v4 + shadcn/ui
+> (`app/globals.css`, `components.json`, `components/ui/`, `lib/utils.ts`), mapping the *same*
+> DEVCON design tokens already used everywhere else (`src/web/styles.ts`) — no new colors, no new
+> fonts. 5b added the kanban board (`app/dashboard/board`, drag-and-drop via dnd-kit, tags). 5c
+> added the settings page (`app/dashboard/settings`) and its `audit_logs` writer
+> (`SettingsService.saveGroupChatId`, the only place this codebase writes to `audit_logs`). 5d
+> added the fully-editable team page (`app/dashboard/team` — no roles, no permissions; #106
+> removed access control entirely). 5e added `next-themes` light/dark switching (toggle in the
+> dashboard topbar) with dark variants of the same DEVCON tokens (not Devie's own dark palette),
+> plus a dedicated, paginated activity-log page (`app/dashboard/activity`, `/api/activity`) over
+> `audit_logs` — separate from the settings page's own inline, capped preview. See each stage's
+> doc comments (`app/globals.css`, `src/web/styles.ts`, `src/service/activityLogService.ts`) for
+> the mapping/reasoning behind each.
 
 ## Requirements
 
@@ -140,11 +148,17 @@ api/
                       (keep-alive, weekly-backup)
 
 app/                Next.js (App Router) dashboard: login, task list/detail,
-                     stats, and their API routes. app/globals.css is the
-                     Tailwind v4 theme (DEVCON tokens, issue #105 5a).
+                     stats, board, settings, team, and activity-log pages,
+                     and their API routes. app/globals.css is the Tailwind
+                     v4 theme (DEVCON tokens, issue #105 5a; light/dark
+                     variants added in 5e).
 
 components/ui/      shadcn/ui primitives (generated via `npx shadcn add`,
                      not hand-written — regenerate rather than hand-edit)
+components/kanban/  Kanban board, task cards/dialog (issue #105 5b)
+components/settings/ Settings page panel (issue #105 5c)
+components/team/    Team page panel (issue #105 5d)
+components/activity/ Dedicated activity-log page panel (issue #105 5e)
 lib/                 shadcn's cn() utility
 components.json      shadcn/ui CLI configuration
 ```

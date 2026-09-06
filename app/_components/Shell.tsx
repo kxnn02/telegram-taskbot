@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { Caller } from "../../src/domain/types";
 import { initialsFor } from "../../src/web/layout";
 import { Icon, Logo } from "./icons";
+import { ThemeToggle } from "./ThemeToggle";
 
 /**
  * Ported page chrome (Phase 6.1, issue #17) — a faithful JSX port of
@@ -13,7 +14,7 @@ import { Icon, Logo } from "./icons";
  * of the Express app's `/logout` page route — see HANDOFF for why.
  */
 
-type NavKey = "tasks" | "stats" | "board" | "settings" | "team";
+type NavKey = "tasks" | "stats" | "board" | "settings" | "team" | "activity";
 
 function Sidebar({ active, username }: { active: NavKey; username: string }) {
   return (
@@ -43,6 +44,10 @@ function Sidebar({ active, username }: { active: NavKey; username: string }) {
           <Icon name="users" />
           <span>Team</span>
         </a>
+        <a className={`nav-item${active === "activity" ? " active" : ""}`} href="/dashboard/activity">
+          <Icon name="clock" />
+          <span>Activity Log</span>
+        </a>
         <a className={`nav-item${active === "settings" ? " active" : ""}`} href="/dashboard/settings">
           <Icon name="gear" />
           <span>Settings</span>
@@ -64,8 +69,11 @@ function Sidebar({ active, username }: { active: NavKey; username: string }) {
 function Topbar({ title, actions }: { title: string; actions?: ReactNode }) {
   return (
     <header className="topbar">
-      <h1 style={{ color: "#0F172A" }}>{title}</h1>
-      <div className="actions">{actions}</div>
+      <h1 style={{ color: "var(--fg1)" }}>{title}</h1>
+      <div className="actions">
+        {actions}
+        <ThemeToggle />
+      </div>
     </header>
   );
 }
