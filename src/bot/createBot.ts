@@ -5,7 +5,7 @@ import { TaskService } from "../service/taskService.js";
 import type { TaskStorePort } from "../storage/taskStorePort.js";
 import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
 import type { RosterStorePort } from "../storage/rosterStorePort.js";
-import { comingFriday, parseDueDate } from "../date/parseDueDate.js";
+import { comingFriday, getNextOnsiteDay, parseDueDate } from "../date/parseDueDate.js";
 import { parseAddTaskArgs, parseTrailingAddTask, ADDTASK_USAGE } from "./addTaskParse.js";
 import { parseMentionTrigger } from "./mentionParse.js";
 import { resolveCaller } from "./callerResolution.js";
@@ -13,6 +13,21 @@ import { notifyUser, notifyStatusChange } from "./notify.js";
 import { suggestClosestUsername } from "./usernameSuggest.js";
 import { parseStatusWord, VALID_STATUS_WORDS_TEXT } from "./statusParse.js";
 import { parseRefListItems, parseUpdateItems, type BatchItem } from "./updateBatch.js";
+import {
+  shouldTriggerBulkCreate,
+  resolveBulkAssignee,
+  formatBulkCreateReply,
+  type BulkCreatedTask,
+} from "./bulkTaskCreate.js";
+import {
+  resolveAllMembers,
+  resolveRoleMembers,
+  formatAllAssignedReply,
+  formatRoleAssignedReply,
+  NO_MEMBERS_TO_ASSIGN_REPLY,
+} from "./fanOut.js";
+import { parseBulkTasks } from "../nlp/parse.js";
+import type { TextModel } from "../nlp/textModel.js";
 import {
   chunkMessage,
   formatDeadlines,
@@ -33,7 +48,7 @@ import {
   parseTasksFilter,
   type InlineKeyboardMarkup,
 } from "./tasksPage.js";
-import type { Caller, TaskStatus } from "../domain/types.js";
+import type { Caller, Task, TaskPriority, TaskStatus } from "../domain/types.js";
 import { isPastDate } from "../domain/overdue.js";
 import type { Roster } from "../domain/roster.js";
 
@@ -60,6 +75,12 @@ export interface CreateBotOptions {
    * contact. Production code passes a `SupabaseRosterStore`; tests pass an
    * `InMemoryRosterStore`. */
   rosterStore: RosterStorePort;
+  /** Language-model port (issue #102) `parseBulkTasks` (issue #104's
+   * paste-in bulk task capture) is grounded against — production wires the
+   * account's currently-funded `GroqTextModel`; tests pass a
+   * `FakeTextModel`/`ThrowingTextModel` so the suite makes no network
+   * calls. */
+  model: TextModel;
   /** Injected Bot instance — used by tests to avoid a real network `getMe`
    * call and to intercept outgoing API calls via `bot.api.config.use(...)`.
    * Production code always omits this and gets a freshly constructed Bot. */
@@ -624,6 +645,86 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     return `I don't see @${username} on this cohort's roster.${suggestionText}`;
   }
 
+  /**
+   * Devie's `/addtask` bulk branch (issue #104,
+   * `app/api/telegram/webhook/route.ts:1133-1165` @ `632a22c`): hands the
+   * raw body to `parseBulkTasks` and inserts every extracted task through
+   * `TaskService.assignBulkTask` — no roster validation on the assignee
+   * (carbon-copy rule 2: a name matching nobody creates an orphan task, on
+   * purpose), no confirmation step, no batch atomicity (carbon-copy rule
+   * 3): every task that can be created is, independently of the others.
+   * `resolveBulkAssignee` maps `parseBulkTasks`'s `"unassigned"` sentinel
+   * onto the message's own sender, same as Devie's `authorAssignee`
+   * fallback; the sender is otherwise never consulted for an assignee.
+   */
+  async function handleBulkAddTask(
+    ctx: import("grammy").Context,
+    caller: Caller,
+    raw: string,
+  ) {
+    const parsed = await parseBulkTasks(raw, options.model, new Date());
+    if (parsed.length === 0) {
+      await ctx.reply("❌ Could not extract any tasks from that message.");
+      return;
+    }
+
+    const created: BulkCreatedTask[] = [];
+    for (const task of parsed) {
+      const assigneeUsername = resolveBulkAssignee(task.assignee, caller.username);
+      const dueDate = task.dueDate ?? getNextOnsiteDay(new Date()).isoDate;
+      const result = await service.assignBulkTask(caller, {
+        assigneeUsername,
+        title: task.title,
+        description: task.description ?? undefined,
+        dueDate,
+        priority: task.priority,
+      });
+      if (result.ok) {
+        created.push({
+          id: result.value.id,
+          title: result.value.title,
+          assigneeUsername: result.value.assigneeUsername,
+          dueDate: result.value.dueDate,
+          description: result.value.description,
+        });
+      }
+    }
+
+    if (created.length === 0) {
+      await ctx.reply("❌ Something went wrong while creating the tasks. Please try again.");
+      return;
+    }
+
+    await ctx.reply(formatBulkCreateReply(created), { parse_mode: "HTML" as const });
+  }
+
+  /**
+   * Devie's `@all`/role fan-out for the single-mention `/addtask` grammar
+   * (issue #104, `route.ts:1201-1269`): creates one task per resolved
+   * member via the ordinary, roster-validated `assignTask` (every member in
+   * `members` is already a real roster entry, so the check always passes),
+   * then replies with Devie's grouped confirmation.
+   */
+  async function createFanOutTasks(
+    caller: Caller,
+    members: string[],
+    title: string,
+    dueDate: string,
+    priority: TaskPriority | undefined,
+  ): Promise<Task[]> {
+    const created: Task[] = [];
+    for (const username of members) {
+      const result = await service.assignTask(caller, {
+        assigneeUsername: username,
+        title,
+        dueDate,
+        priority,
+      });
+      if (result.ok) created.push(result.value);
+    }
+    return created;
+  }
+
   // Shared by `/addtask <args>` and the mention trigger (issue #34, which
   // reuses #30's create grammar verbatim rather than re-implementing it).
   async function handleAddTaskArgs(
@@ -631,6 +732,13 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     caller: Caller,
     raw: string,
   ) {
+    // Bulk-paste detection (issue #104) — checked ahead of every other
+    // `/addtask` parsing, same as Devie's own ordering.
+    if (shouldTriggerBulkCreate(raw)) {
+      await handleBulkAddTask(ctx, caller, raw);
+      return;
+    }
+
     const parsed = parseAddTaskArgs(raw, new Date());
     if ("error" in parsed) {
       await ctx.reply(parsed.error);
@@ -639,7 +747,46 @@ export function createBot(options: CreateBotOptions): CreatedBot {
 
     let assigneeUsername = caller.username;
     if (parsed.assigneeUsername) {
-      const requested = parsed.assigneeUsername.replace(/^@/, "");
+      const requested = normalizeUsername(parsed.assigneeUsername.replace(/^@/, ""));
+
+      // `@all` fan-out (issue #104, `route.ts:1202-1210`) — checked before
+      // the ordinary roster-membership rejection below.
+      if (requested === "all") {
+        const members = resolveAllMembers(roster, caller.cohortId);
+        if (members.length === 0) {
+          await ctx.reply(NO_MEMBERS_TO_ASSIGN_REPLY);
+          return;
+        }
+        const dueDate = parsed.dueDate?.isoDate ?? getNextOnsiteDay(new Date()).isoDate;
+        const created = await createFanOutTasks(caller, members, parsed.title, dueDate, parsed.priority);
+        if (created.length === 0) {
+          await ctx.reply("❌ Something went wrong while creating the tasks. Please try again.");
+          return;
+        }
+        await ctx.reply(formatAllAssignedReply(members, parsed.title), {
+          parse_mode: "HTML" as const,
+        });
+        return;
+      }
+
+      // Role/cohort fan-out (issue #104, `route.ts:1237-1269`; issue #103
+      // item 2 maps Devie's `role` onto `cohort_id`) — same ordering: only
+      // falls through to the single-member lookup when no cohort matches
+      // the token.
+      const roleMembers = resolveRoleMembers(roster, requested);
+      if (roleMembers.length > 0) {
+        const dueDate = parsed.dueDate?.isoDate ?? getNextOnsiteDay(new Date()).isoDate;
+        const created = await createFanOutTasks(caller, roleMembers, parsed.title, dueDate, parsed.priority);
+        if (created.length === 0 || created[0] === undefined) {
+          await ctx.reply("❌ Something went wrong while creating the tasks. Please try again.");
+          return;
+        }
+        await ctx.reply(formatRoleAssignedReply(roleMembers, parsed.title, requested, created[0].id), {
+          parse_mode: "HTML" as const,
+        });
+        return;
+      }
+
       if (!roster.isMember(requested, caller.cohortId)) {
         await ctx.reply(unknownRosterMemberReply(requested, caller.cohortId));
         return;

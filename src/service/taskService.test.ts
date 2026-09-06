@@ -168,6 +168,68 @@ describe("assignTask priority (issue #101)", () => {
   });
 });
 
+// DevieBot's bulk-paste insert (`app/api/telegram/webhook/route.ts:1140-1147`
+// @ `632a22c`) does no roster lookup at all on `assigned_to` — carbon-copied
+// per issue #104: "a name that does not match a member can produce a task
+// nobody owns." `assignBulkTask` is `assignTask` with that one check
+// removed; every other validation (title, due date) still applies.
+describe("assignBulkTask (issue #104) — Devie's loose, unvalidated assignee", () => {
+  it("creates a task for a real roster member same as assignTask", async () => {
+    const { service } = makeService();
+    const result = await service.assignBulkTask(carla, {
+      assigneeUsername: "alice",
+      title: "Summarize recommendations into slides",
+      dueDate: "2026-09-05",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.assigneeUsername).toBe("alice");
+  });
+
+  it("creates an orphan task when the assignee matches no roster member", async () => {
+    const { service } = makeService();
+    const result = await service.assignBulkTask(carla, {
+      assigneeUsername: "notarealperson",
+      title: "Follow up on game plan",
+      dueDate: "2026-09-05",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.assigneeUsername).toBe("notarealperson");
+  });
+
+  it("still rejects an empty title", async () => {
+    const { service } = makeService();
+    const result = await service.assignBulkTask(carla, {
+      assigneeUsername: "alice",
+      title: "   ",
+      dueDate: "2026-09-05",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/title/i);
+  });
+
+  it("still rejects an invalid due date", async () => {
+    const { service } = makeService();
+    const result = await service.assignBulkTask(carla, {
+      assigneeUsername: "alice",
+      title: "Fix the login bug",
+      dueDate: "not-a-date",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/due date/i);
+  });
+
+  it("scopes the created task to the caller's cohort, same as assignTask", async () => {
+    const { service } = makeService();
+    const result = await service.assignBulkTask(carla, {
+      assigneeUsername: "ghost",
+      title: "Cohort-scoped orphan task",
+      dueDate: "2026-09-05",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.cohortId).toBe(COHORT);
+  });
+});
+
 describe("setPriority (issue #101) — no authorization check, mirrors setStatus", () => {
   it("lets any roster member set priority on a task that isn't theirs", async () => {
     const { service } = makeService();

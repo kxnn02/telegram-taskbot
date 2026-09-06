@@ -155,7 +155,30 @@ export class TaskService {
         `${displayName(assignee)} isn't a known roster member in this cohort.`,
       );
     }
+    return this.createTask(caller, assignee, input);
+  }
 
+  /**
+   * `assignTask` with the roster-membership check removed — DevieBot's
+   * bulk-paste insert (`app/api/telegram/webhook/route.ts:1140-1147` @
+   * `632a22c`) never looks `assigned_to` up against `members` at all, so an
+   * assignee the language parser (`parseBulkTasks`) extracted that matches
+   * no roster member is stored as-is: a task nobody owns. Issue #104 carbon-
+   * copies that on purpose (its ticket body: "a name that does not match a
+   * member can produce a task nobody owns. That is Devie's behaviour and it
+   * is being copied"). Used only by the bulk-paste creation path — every
+   * other creation path (`assignTask`) keeps the roster check. Title/due-date
+   * validation still applies; only the assignee lookup is skipped.
+   */
+  async assignBulkTask(caller: Caller, input: AssignTaskInput): Promise<ServiceResult<Task>> {
+    return this.createTask(caller, normalizeUsername(input.assigneeUsername), input);
+  }
+
+  private async createTask(
+    caller: Caller,
+    assignee: string,
+    input: AssignTaskInput,
+  ): Promise<ServiceResult<Task>> {
     const titleError = requireNonEmpty(input.title, "Title");
     if (titleError) return fail(titleError);
     const dueDateError = requireValidDate(input.dueDate);
