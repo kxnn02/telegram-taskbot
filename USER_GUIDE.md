@@ -1,92 +1,92 @@
 # Using the DevCon Cohort 5 Task Bot
 
-A guide for interns and higher-ups. No technical background needed.
+A guide for everyone in the cohort. No technical background needed.
+
+This bot is a carbon copy of **Devie**, another DevCon bot the cohort already uses daily — same
+commands, same statuses, same "trust everyone" philosophy. If something here feels unusually
+open (no roles, no approval step), that's not a bug — it's what Devie does too.
 
 ## Getting started
 
-1. Make sure you're a member of the cohort's Telegram group — that's the only requirement.
-2. Message the bot (`@devcon_cohort5_taskbot`) and send `/start`.
-3. Pick **Intern** or **Higher-up** from the two buttons that come back — that registers you and
-   sets your role. (First person in a fresh cohort: see the note below.)
-4. Send `/help` any time to see the command list again from inside Telegram, or start typing `/`
-   to see Telegram's own autocomplete menu for every command.
+1. Message the bot (`@devcon_cohort5_taskbot`) and send `/start`. That's it — you're registered.
+   There's no role to pick and nothing to wait on; every later message you send keeps your
+   registration up to date automatically.
+2. Send `/help` any time to see the command list again, or start typing `/` to see Telegram's own
+   autocomplete menu.
 
-If `/start` says it couldn't confirm you're in the group, make sure you've actually joined the
-cohort's Telegram group first, then try again.
-
-**Changing your role later**: once someone in the cohort is registered as Higher-up, tapping the
-role buttons again won't change an existing registration — ask a Higher-up to run `/roster role
-@you <role>` instead. Before that first Higher-up exists, anyone can still re-run `/start` and
-tap the other button to correct themselves.
+If `/start` (or any command) says you need a Telegram username first, set one in Telegram's
+settings and try again — the bot identifies you by username, so it needs one to exist.
 
 ## Where you can use commands
 
 Commands work both in a private message to the bot **and** directly in the cohort's group chat —
 including `@`-mentioning the bot to create a task (see below).
 
-**Important**: if you run a command in the group chat (like checking a task's details, or adding
-a note), the task's title, description, and any notes will be visible to everyone in the group —
-it's not private. If you want to keep something private, do it in a DM with the bot instead.
+**Important**: if you run a command in the group chat (like checking a task list, or updating a
+status with a note), that task's title and any note text is visible to everyone in the group —
+it's not private. Use a DM with the bot if you want to keep something private.
 
 ## Everyone can do everything
 
-There's no separate intern/higher-up command set any more. Anyone on the roster can create a
-task, assign it to anyone else, and move any task to any status — the only exception is `/edit`
-(see below), which stays higher-up-only. That's a deliberate choice, matching how **Devie**
-(another DevCon bot the higher-ups already use daily) works: it trusts people to do the right
-thing instead of gating every action behind a review step.
+There's no intern/higher-up split, no permission gate, and no review step anywhere. Any person
+who messages the bot can create a task, assign it to anyone, and move any task to any status —
+including their own. Nothing double-checks this: it's a deliberate choice, matching Devie exactly.
 
 ## Creating a task
 
-**`/addtask <title> [by <date>] [@username]`** creates a task in one line. Examples:
+**`/addtask <title> [!priority] [by <date>] [@username]`** creates a task in one line, in any
+order. Examples:
 
-- `/addtask fix the login bug` — assigned to you, due the coming Friday.
+- `/addtask fix the login bug` — assigned to you, due the coming Friday, medium priority.
 - `/addtask fix the login bug by next Friday` — a specific due date, in natural language
   ("next Friday", "in 3 days", "Sept 5" all work).
+- `/addtask fix the login bug !urgent` — flagged urgent (`!low`, `!medium`, `!high`, `!urgent`
+  are the four levels; no flag means medium).
 - `/addtask fix the login bug @jean` — assigned to `@jean` instead of you.
-- `/addtask fix the login bug @jean by next Friday` — both together, in either order.
+- `/addtask fix the login bug @jean !high by next Friday` — all three together, in any order.
 
 The word **`by`** is required to set a due date — the bot only looks for a date after `by`, so a
 title that happens to mention a month, weekday, or time (`fix bug in march module`, `call sat
 about the API`) is never misread as a date. No `by` clause means the coming-Friday default
 applies, and the title is kept exactly as typed.
 
-Send bare **`/addtask`** with no text to get the old step-by-step form instead (who, title,
-description, due date) — useful if you want to add a description, since the one-line form
-doesn't have room for one. The form expires after 20 minutes of inactivity; if you answer after
-it's expired, the bot tells you and asks you to send `/addtask` (or `/edit <ref>`) again.
+Send bare **`/addtask`** with no text to get a short usage example back, reminding you of the
+grammar above.
 
 A due date in the past is accepted, not rejected — backdating a task is legitimate — but the
-reply (from `/addtask`, `/edit <id> duedate <value>`, and the step-by-step form's confirmation
-prompt) warns you with "⚠️ That due date is already in the past." so a typo doesn't go unnoticed.
+reply warns you with "⚠️ That due date is already in the past." so a typo doesn't go unnoticed.
 
-**Mention trigger**: in a group chat (or DM), `@`-mention the bot followed by one of `pls work
-on`, `please work on`, `add task`, `new task`, or `todo`, then the same one-line grammar as
-`/addtask`. For example:
+**Assigning to everyone, or to a group**: `/addtask <title> @all` assigns one copy of the task to
+every registered member of the cohort. `/addtask <title> <cohort-id>` (e.g. the cohort's own id)
+does the same for everyone in that cohort — useful if this deployment ever serves more than one
+cohort.
+
+**Mention trigger**: in a group chat (or DM), `@`-mention the bot followed by one of `pls work on`,
+`please work on`, `add task`, `new task`, or `todo`, then the same one-line grammar as `/addtask`.
+For example:
 
 > @devcon_cohort5_taskbot pls work on fix the login bug by next Friday
 
-does exactly what `/addtask fix the login bug by next Friday` does. This is meant for the
-moment someone says "can you also fix X" in chat — you can turn it straight into a task without
-switching to a slash command.
+does exactly what `/addtask fix the login bug by next Friday` does. This is meant for the moment
+someone says "can you also fix X" in chat — you can turn it straight into a task without switching
+to a slash command.
+
+**Pasting several tasks at once**: paste a multi-line message, a message with more than one
+`@mention`, or something that reads like a list ("Action Plan:", "Note:", blank-line-separated
+items) and the bot tries to extract every task in it and create them all in one go, instead of
+treating the whole thing as one task's title. There's no confirmation step and no roster check on
+the assignee — every task it can pull out gets created, even if a name in it matches nobody. If a
+paste isn't behaving the way you expect, it's simpler to send one `/addtask` per task.
 
 ## Reading tasks
 
 | Command | What it does |
 |---|---|
-| `/task <ref>` | Full detail on one task — description, assignee, due date, status, notes. `<ref>` is a task id, written as `23` or `t23`. |
-| `/tasks [page]` | Every task in the cohort, grouped by assignee. Long lists come back 10 at a time — `/tasks 2` for the next page. |
+| `/tasks` | Every task in the cohort, grouped by member, with paging and filter buttons attached. |
+| `/tasks <cohort-id>` | Filter to one cohort's tasks (only matters if this deployment serves more than one). |
 | `/tasks @username` | Filter to one member's tasks. |
-| `/tasks intern` or `/tasks higherup` | Filter to tasks assigned to that role. |
-| `/mytasks` | Your own open tasks. |
-| `/overdue` | Tasks past their due date. |
-| `/pending` | Tasks currently In review. |
 | `/deadlines` | Open tasks due in the next 7 days, soonest first. |
-| `/blocked` | Blocked tasks, cohort-wide. |
-| `/standup` | An on-demand version of the daily standup report, cohort-wide, whenever you want it. |
-| `/dashboard` | Sends the link to the web dashboard. |
-| `/cancel` | Cancels whatever multi-step form (wizard) you're in the middle of. |
-| `/whoami` | Shows which roster username, role, and cohort the bot has you registered as. |
+| `/standup` | An on-demand standup report for the whole cohort, with buttons to switch between Overview, Active, Backlog, Done, and In review. |
 
 ## Changing a task's status
 
@@ -94,24 +94,26 @@ Six statuses exist: **backlog, todo, in progress, in review, blocked, done**. An
 status on any task in the cohort with:
 
 **`/update <ref> <status>`** — e.g. `/update t23 todo`, `/update 23 done`. Recognised status
-words: `backlog`, `todo`/`to-do`, `in progress`/`inprogress`/`wip`, `in review`/`review`,
-`blocked`, `done`/`complete`/`completed`.
+words: `backlog`, `todo`/`in progress`/`in review`/`review`, `blocked`, `done`/`complete`/
+`finished`. You can also lead with the status instead of the ref (`done t23`), and attach
+`link:<url>` and/or `note:<text>` after the status to leave a link or a note on the task at the
+same time, e.g. `/update t23 blocked note: waiting on API access`.
 
 Two shortcuts exist for the two moves people make constantly:
 
 - **`/done <ref>`** — marks a task **In review**. (Not Done — see the warning below.)
-- **`/complete <ref>`** — marks a task **Done**.
+- **`/complete <ref>`** (or **`/completed <ref>`**) — marks a task **Done**.
 
 **⚠️ `/done` does not mean done.** This is the one thing people get wrong: `/done <ref>` puts a
 task *In review*, the same as saying "I'm done working on this, please look at it." To actually
-mark it finished, use `/complete <ref>`. This mirrors Devie exactly, wart and all — `/update
-<ref> done` (the generic command, not the shortcut) *does* set the status to Done, so the word
-"done" means two different things depending on whether it's the command name or the argument.
-It's confusing on purpose-by-inheritance, not a bug — just remember: **`/done` = send for
-review, `/complete` = actually finished.**
+mark it finished, use `/complete <ref>`. This mirrors Devie exactly, wart and all — `/update <ref>
+done` (the generic command, not the shortcut) *does* set the status to Done, so the word "done"
+means two different things depending on whether it's the command name or the argument. It's
+confusing on purpose-by-inheritance, not a bug — just remember: **`/done` = send for review,
+`/complete`/`/completed` = actually finished.**
 
-**Bulk updates**: `/update`, `/done`, and `/complete` all accept more than one task ref at once,
-comma-separated:
+**Bulk updates**: `/update`, `/done`, and `/complete`/`/completed` all accept more than one task
+ref at once, comma-separated:
 
 - `/update t21,t22,t23 done` — sets all three to Done.
 - `/update t21 todo, t22 review` — a different status per task, comma-separated.
@@ -132,41 +134,27 @@ Worked example — you're clearing out a backlog and moving three tasks into rev
 > → `t15 ✓ In review`
 > → `t16 ✓ In review`
 
-## Blocking and unblocking
+## Blocking a task
 
-- **`/blocked <ref> <reason>`** — flags a task as blocked and why, e.g. `/blocked 3 waiting on
-  API access`. This immediately notifies the person who assigned the task.
-- **`/blocked`** with no arguments — lists every blocked task in the cohort (this is the same
-  command name doing two different things depending on whether you give it arguments).
-- **`/unblock <ref>`** — restores the task to whatever status it was in before it got blocked.
+There's no separate `/blocked`/`/unblock` command any more — blocked is just one of the six
+statuses. Flag a task as blocked, with a reason, the same way you'd change any other status:
+
+> `/update 3 blocked note: waiting on API access`
+
+and restore it later with whatever status makes sense, e.g. `/update 3 in progress`. Whoever
+assigned the task and its assignee both get a DM whenever a status changes, blocked included.
 
 ## Notes and editing
 
-- **`/note <ref> <text>`** — attaches a feedback note to a task, e.g. `/note 3 looks good, ship
-  it`. The assignee gets notified immediately.
-- **`/edit <ref> <field> <value>`** — **higher-ups only**. Directly changes one field: `field`
-  is `assignee`, `title`, `description`, or `duedate`. Example: `/edit 12 duedate next Monday`.
-- **`/edit <ref>`** with no field/value — **higher-ups only**. Opens a menu asking which field
-  to change, then walks you through it one step at a time. Send `/cancel` at any point to back
-  out without saving.
+There's no dedicated `/note` or `/edit` command any more. Attach a note to a task by riding it
+along on a status update — `/update <ref> <status> note:<text>` (see above) — and if you need to
+correct a task's title, description, due date, or assignee, the fastest way today is through the
+web dashboard (see below); nothing in the bot itself edits those fields directly.
 
-Nothing locks once a task is Done — you can edit or reopen a finished task at any time. There's
-no separate "cancel a task" command any more either; if a task is no longer needed, just
-`/update` it to `backlog` (the nearest "parked" status) or `blocked` with a note explaining why.
-
-## Managing the roster
-
-- **`/roster`** — lists everyone currently registered in the cohort, grouped by role. Requires
-  you to be a Higher-up in the roster.
-- **`/roster add @user`** — adds someone to the roster as an intern, for anyone who can't or
-  hasn't self-registered via `/start`. Requires you to be a Higher-up in the roster.
-- **`/roster add @user higherup`**, **`/roster role @user intern|higherup`**, and **`/roster
-  remove @user`** — adding someone directly as a Higher-up, changing an existing member's role, or
-  removing them, all require you to be a **verified admin of the cohort's Telegram group**
-  (checked live against Telegram, not against your roster role) — being a Higher-up in the roster
-  alone isn't enough for these three. This is deliberate: a roster role is self-declared via
-  `/start`, so letting it also control who can grant roster roles would let anyone hand themselves
-  admin power.
+Nothing locks once a task is Done — you can move it to any other status at any time, including
+back to a status that reopens it. There's no separate "cancel a task" command; if a task is no
+longer needed, `/update` it to `backlog` (the nearest "parked" status) or `blocked` with a note
+explaining why.
 
 ## Automatic notifications
 
@@ -176,22 +164,20 @@ You don't need to ask for these — they happen on their own:
   person who originally assigned it both get a DM — except whoever made the change themselves.
 - A reminder the day before a task is due.
 - A notice when a task crosses its due date without reaching Done.
-- When someone flags a task as blocked, the assigning person gets a DM.
 - A daily standup and a weekly summary posted to the group chat. Both are deliberately
   counts-only (e.g. "3 tasks due today, 1 overdue") and never name specific task titles, to avoid
   publicly calling anyone out.
 
 ## The web dashboard
 
-Higher-ups can log in using their Telegram account (no separate password) to see every task at a
-glance — filterable by status or by intern — and can also create new tasks, edit an existing
-task's fields, and view cohort-wide stats (tasks completed per intern, completion rate) directly
-from the dashboard, using the same rules the bot enforces. Ask whoever's running the project for
-the current dashboard URL, or send `/dashboard` to the bot.
+Anyone registered with the bot can log in using their Telegram account (no separate password) to
+see every task at a glance — filterable by status or by member — with a kanban board, tags,
+settings, team, and activity-log views, plus cohort-wide stats. There's no separate admin tier on
+the dashboard any more than there is in the bot: logging in just requires being a known cohort
+member. Ask whoever's running the project for the current dashboard URL.
 
 ## Something not working?
 
 If the bot doesn't respond, or a command gives an error you don't understand, contact whoever is
-maintaining the bot for this cohort rather than guessing. Almost nothing is permission-gated any
-more, so an unexpected rejection is more likely a genuine bug than an intentional restriction —
-the one exception is `/edit`, which is intentionally higher-ups only.
+maintaining the bot for this cohort rather than guessing. Nothing is permission-gated any more, so
+an unexpected rejection is almost certainly a genuine bug, not an intentional restriction.

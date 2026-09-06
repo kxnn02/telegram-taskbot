@@ -1,8 +1,10 @@
 # DevCon Cohort 5 Task Bot
 
-A Telegram-native task management system for DevCon PH's internship program: interns and
-higher-ups assign, track, and review tasks directly inside Telegram (DM or the cohort's group
-chat), plus a web dashboard for higher-up oversight, task creation/editing, and stats.
+A Telegram-native task management system for DevCon PH's internship program: anyone in the cohort
+assigns, tracks, and updates tasks directly inside Telegram (DM or the cohort's group chat), plus
+a web dashboard for oversight, task creation/editing, and stats. There's no role split — every
+registered member has the same access to everything, matching **Devie**, the DevCon bot this one
+is a carbon copy of.
 
 See [`PRD.md`](./PRD.md) for the full product spec and design decisions, and
 [`CONTEXT.md`](./CONTEXT.md) for the "why" behind the technical choices. For how to actually use
@@ -22,21 +24,25 @@ the bot day-to-day, see [`USER_GUIDE.md`](./USER_GUIDE.md).
 > The setup and running instructions below still cover local development (`npm run dev` against
 > the same Supabase-backed stack), not a separate legacy mode.
 
+> **No more roles, no more access control.** ADR-0013 (issue #106) deletes Intern/Higher-up
+> entirely: anyone who messages the bot is auto-registered on first contact, matching Devie's own
+> `syncMember` — no group-membership check, no role button, no `/roster`/`/whoami`/`/edit`/
+> `/dashboard`/`/cancel` commands, no wizards. Any registered member can act on any task in their
+> own cohort, and dashboard login only requires being a known member. See
+> [ADR-0013](./docs/adr/0013-remove-access-control-for-devie-parity.md) for the full reasoning —
+> this was the last of a six-part Cohort 4 carbon-copy port (`CONTEXT.md` has all six).
+>
 > **Dashboard toolchain: Tailwind v4 + shadcn/ui, a real kanban board, settings, team, and
-> activity-log pages, and light/dark theming.** Issue #105 (Devie-parity dashboard port, now
-> closed) landed in five sub-stages: 5a wired up Tailwind v4 + shadcn/ui
-> (`app/globals.css`, `components.json`, `components/ui/`, `lib/utils.ts`), mapping the *same*
-> DEVCON design tokens already used everywhere else (`src/web/styles.ts`) — no new colors, no new
-> fonts. 5b added the kanban board (`app/dashboard/board`, drag-and-drop via dnd-kit, tags). 5c
-> added the settings page (`app/dashboard/settings`) and its `audit_logs` writer
-> (`SettingsService.saveGroupChatId`, the only place this codebase writes to `audit_logs`). 5d
-> added the fully-editable team page (`app/dashboard/team` — no roles, no permissions; #106
-> removed access control entirely). 5e added `next-themes` light/dark switching (toggle in the
-> dashboard topbar) with dark variants of the same DEVCON tokens (not Devie's own dark palette),
-> plus a dedicated, paginated activity-log page (`app/dashboard/activity`, `/api/activity`) over
-> `audit_logs` — separate from the settings page's own inline, capped preview. See each stage's
-> doc comments (`app/globals.css`, `src/web/styles.ts`, `src/service/activityLogService.ts`) for
-> the mapping/reasoning behind each.
+> activity-log pages, and light/dark theming.** Issue #105 mapped the *same* DEVCON design tokens
+> already used everywhere else (`src/web/styles.ts`) onto Tailwind's `@theme` — no new colors, no
+> new fonts — then added the kanban board (drag-and-drop via dnd-kit, tags), the settings page and
+> its `audit_logs` writer, the fully-editable team page (no roles, no permissions — see above), a
+> light/dark toggle, and a dedicated, paginated activity-log page. See `CONTEXT.md`'s "sixth
+> change" entry for the five sub-stages.
+>
+> **`/standup` gained Devie's character**: a daily quote, a greeting, and emoji priority/status
+> badges (issue #107), plus a separate secret-gated push endpoint that can post the same card into
+> the group on demand — not on a schedule yet.
 
 ## Requirements
 
@@ -59,18 +65,17 @@ Fill in `.env`:
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | Supabase service-role key (bypasses RLS; see ADR-0006) |
 | `ACTIVE_COHORT_ID` | yes | The single cohort this deployment serves — every live request (bot commands, dashboard login) binds to this id; see CONTEXT.md's cohort-binding note |
 | `GROUP_CHAT_ID` | no, unused | Superseded by the `cohorts` table (ADR-0006) as of Phase 3 — kept only as a historical placeholder |
-| `DASHBOARD_URL` | no | URL shown by the bot's `/dashboard` command |
-| `ROSTER_PATH` | no (defaults to `roster.config.json`) | Path to a local roster JSON file — used only by `loadRoster`'s `createBot` fallback and by tests; production reads the roster from Supabase (ADR-0003) |
+| `DASHBOARD_URL` | no, unused | Was shown by the bot's `/dashboard` command; that command is gone (#106) and nothing reads this any more — kept only because removing the option isn't this doc's job |
 | `BOT_USERNAME` | yes, for the dashboard | Must match the bot behind `BOT_TOKEN` |
 | `DASHBOARD_PORT` | no (defaults to `3000`) | Port the dashboard listens on |
 | `GROQ_API_KEY` | only to exercise the real model | Used by `src/nlp/groqTextModel.ts` (issue #102) — the active `TextModel` implementation — for bulk-task extraction, status parsing, and intent routing via `qwen/qwen3.6-27b` on Groq's free tier. Get one at https://console.groq.com. The module's test suite runs against a fake `TextModel` and needs no key |
 | `ANTHROPIC_API_KEY` | no, unused | `src/nlp/anthropicTextModel.ts` (issue #102's original `claude-haiku-4-5` choice) is kept but not wired up — the account behind it has no billing credit |
 
-**Roster**: per [ADR-0010](./docs/adr/0010-group-gated-registration-and-roster-management.md),
-`roster.config.json` has been deleted and the roster is no longer collected upfront or seeded from
-a file. A roster row is created when someone runs `/start` inside the cohort's Telegram group;
-roster management (adding, removing, changing a role) is done in-product via `/roster`, gated on
-live Telegram group-admin status. See the ADR for the full design and the row shape it replaces.
+**Roster**: no config file, no upfront collection, and no in-product management command any more.
+Per [ADR-0013](./docs/adr/0013-remove-access-control-for-devie-parity.md), a roster row is created
+(and refreshed) automatically the moment someone messages the bot — the same auto-registration
+Devie's own `syncMember` does. There's nothing left to seed by hand and no `/roster` command to
+administer it with.
 
 ## Running locally
 
@@ -125,7 +130,7 @@ npm run seed:roster                                    # seed the dry-run cohort
 
 ```
 src/
-├── domain/        # Framework-free core types (Task, Role, Caller, ...)
+├── domain/        # Framework-free core types (Task, Caller, ...)
 ├── service/        taskService.ts — THE seam: all business rules live here.
 │                    Both the bot and the dashboard call into this, never the
 │                    repositories directly.
@@ -137,7 +142,7 @@ src/
 │                    daily/weekly digests, roster reconciliation — triggered by
 │                    Supabase pg_cron/pg_net, not run in-process
 ├── jobs/           Shared dependency wiring for the /api/jobs/* endpoints
-├── bot/            Telegram bot: commands, wizards, formatting, notifications
+├── bot/            Telegram bot: commands, formatting, notifications
 └── web/            Dashboard building blocks: Telegram Login Widget auth,
                      session cookies, oversight/stats data, consumed by app/
 
