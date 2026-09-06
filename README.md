@@ -22,6 +22,14 @@ the bot day-to-day, see [`USER_GUIDE.md`](./USER_GUIDE.md).
 > The setup and running instructions below still cover local development (`npm run dev` against
 > the same Supabase-backed stack), not a separate legacy mode.
 
+> **Dashboard toolchain: Tailwind v4 + shadcn/ui.** As of issue #105 sub-stage 5a, the dashboard
+> (`app/`) has Tailwind v4 and shadcn/ui wired up (`app/globals.css`, `components.json`,
+> `components/ui/`, `lib/utils.ts`) for the Devie-parity dashboard work in #105's later
+> sub-stages. The Tailwind theme maps the *same* DEVCON design tokens already used everywhere
+> else (`src/web/styles.ts`) — no new colors, no new fonts, no visible change to any existing
+> page. See that file's doc comment and `app/globals.css`'s for the mapping and the cascade-layer
+> reasoning behind why the two coexist safely.
+
 ## Requirements
 
 - Node.js >= 22.5.0
@@ -132,7 +140,13 @@ api/
                       (keep-alive, weekly-backup)
 
 app/                Next.js (App Router) dashboard: login, task list/detail,
-                     stats, and their API routes
+                     stats, and their API routes. app/globals.css is the
+                     Tailwind v4 theme (DEVCON tokens, issue #105 5a).
+
+components/ui/      shadcn/ui primitives (generated via `npx shadcn add`,
+                     not hand-written — regenerate rather than hand-edit)
+lib/                 shadcn's cn() utility
+components.json      shadcn/ui CLI configuration
 ```
 
 ## Issue tracker
