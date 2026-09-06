@@ -30,10 +30,9 @@ In [@BotFather](https://t.me/BotFather):
 1. `/newbot` — name it something unmistakable, e.g. **DevCon Cohort 5 Taskbot (dry run)**, with a
    username ending in `_dryrun_bot`. Copy the token it gives you.
 2. `/setprivacy` → pick the new bot → **Disable**. This is not optional: with privacy mode on, the
-   bot cannot see plain (non-`/command`) messages in a group, and every wizard step — the
-   step-by-step `/addtask` form, `/edit`, the due-date confirmation — reads exactly those. The
-   production bot has privacy disabled, so leaving it on would make dry runs pass on flows that
-   are broken in production.
+   bot cannot see plain (non-`/command`) messages in a group, and the `@`-mention trigger and
+   bulk-paste task extraction both read exactly those. The production bot has privacy disabled, so
+   leaving it on would make dry runs pass on flows that are broken in production.
 3. Optional but recommended: give it a `(dry run)` display name or a different picture, so the two
    bots are never mistaken for each other in a chat list.
 
@@ -44,8 +43,10 @@ In [@BotFather](https://t.me/BotFather):
    live group's administrator list and mirror it. Making it an admin when production's bot is not
    would mask privacy-mode and permission bugs; making it a plain member when production's is an
    admin would produce failures production would not have.
-3. Make sure both dry-run test accounts (`DRYRUN_HIGHERUP_USERNAME`, `DRYRUN_INTERN_USERNAME`) are
-   in the group — `/start` checks group membership before it will register anyone (ADR-0010).
+3. Both dry-run test accounts (`DRYRUN_HIGHERUP_USERNAME`, `DRYRUN_INTERN_USERNAME`) should still
+   be in the group so group-chat command tests have someone to run them — `/start` itself no
+   longer checks group membership (ADR-0013 removed that gate along with every other access
+   check), but the group needs real members to be a realistic test of group-chat behaviour.
 
 Then get the group's chat id. Send any message in the dump group, then:
 
@@ -142,13 +143,15 @@ The webhook does not need re-registering — the branch domain is stable.
 Cover what unit tests structurally cannot: real Telegram rendering, real group behaviour, and
 multi-step state. At minimum, as **both** test accounts:
 
-- `/start` from an account not yet registered in the dry-run cohort — the group-membership gate.
-- `/help` — the reply differs by role, and it is where a missing command shows up first.
-- `/addtask` in its one-line form **and** bare, walking the whole step-by-step wizard including the
-  due-date confirmation. Wizards are the flows most likely to break invisibly.
-- `/tasks`, `/mytasks`, `/task <ref>` — long replies are chunked; check nothing is cut mid-message.
-- `/update`, `/done`, `/complete`, `/blocked`, `/unblock` — the status transitions.
-- `/roster` as a group admin and as a non-admin — the admin gate.
+- `/start` from an account that has never messaged the bot before — auto-registration.
+- `/help` — it is where a missing or renamed command shows up first.
+- `/addtask` in its one-line form (with `!priority`, `by <date>`, `@username`, `@all`) **and**
+  bare, which should return a usage example, not a form. Also try the `@`-mention trigger and a
+  multi-line/multi-mention paste, to exercise bulk-paste extraction.
+- `/tasks`, `/deadlines`, `/standup` — long replies are chunked; check nothing is cut mid-message,
+  and that `/tasks`/`/standup`'s inline filter and paging buttons still edit the message in place.
+- `/update`, `/done`, `/complete`/`/completed` — the status transitions, including
+  `/update <ref> blocked note:...` for blocking a task.
 - Whatever the change itself touched, plus the command menu (type `/` and confirm the list matches
   what you expect).
 

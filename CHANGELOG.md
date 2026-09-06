@@ -4,6 +4,32 @@ A running log of what's shipped, for interns, higher-ups, and anyone else follow
 technical changelog — see `git log` or the GitHub issues for that level of detail. See
 `PRD.md` for the full design and `CONTEXT.md` for why things were built the way they were.
 
+## 2026-09-06 — Cohort 4 carbon-copy port complete: no more roles, a real dashboard, and a standup character
+
+A full port of Cohort 4's DevieBot, so this bot now matches Devie command-for-command. All seven
+stages are closed — see [ADR-0013](./docs/adr/0013-remove-access-control-for-devie-parity.md) for
+the headline decision and `CONTEXT.md` for the rest.
+
+- **No more roles, no more access control** ([#106](https://github.com/kxnn02/telegram-taskbot/issues/106)).
+  Intern/Higher-up is gone. Anyone who messages the bot is auto-registered on first contact, the
+  same way Devie's `syncMember` works — no group-membership check, no role button, no
+  `/roster`/`/whoami`/`/edit`/`/dashboard`/`/cancel` commands, no step-by-step wizards. Any
+  registered member can act on any task in their own cohort. `USER_GUIDE.md` is rewritten around
+  this.
+- **`/addtask` gained priority, `@all`/cohort fan-out, and bulk-paste** ([#101](https://github.com/kxnn02/telegram-taskbot/issues/101),
+  [#104](https://github.com/kxnn02/telegram-taskbot/issues/104)). A `!priority` flag
+  (`!low`/`!medium`/`!high`/`!urgent`), `@all` to assign one copy to everyone in the cohort, a
+  cohort id to fan out to that whole cohort, and pasting a multi-task message (multiple mentions,
+  newlines, or an "Action Plan:"-style list) now creates every task it can extract in one go.
+- **A real dashboard**: kanban board, settings, team, and activity-log pages, Tailwind v4 +
+  shadcn/ui, light/dark theming ([#105](https://github.com/kxnn02/telegram-taskbot/issues/105)).
+  Login now only requires being a known cohort member — the higher-up-only audience gate is gone,
+  matching the access-control removal above.
+- **`/standup` gained Devie's character**: a daily quote, a greeting, emoji priority/status
+  badges, and filter buttons (Overview/Active/Backlog/Done/In review); a separate, secret-gated
+  push endpoint can post the same card into the group on demand
+  ([#107](https://github.com/kxnn02/telegram-taskbot/issues/107)). Not on a schedule yet.
+
 ## 2026-09-02 — Production cutover: the real Cohort 5 group is live
 
 The bot is no longer running against the dry-run deployment — the Telegram webhook now points at

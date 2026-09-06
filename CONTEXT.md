@@ -88,6 +88,28 @@ up the codebase later.
 >   `ActivityLogService`, `src/web/activityLogView.ts`) over `audit_logs` — separate from the
 >   settings page's own inline, capped-at-50 preview (`SettingsService.listRecentActivity`,
 >   unchanged).
+>
+> **A seventh change removes access control entirely**
+> ([ADR-0013](./docs/adr/0013-remove-access-control-for-devie-parity.md), issue
+> [#106](https://github.com/kxnn02/telegram-taskbot/issues/106), the last stage of the Cohort 4
+> carbon-copy port). Intern/Higher-up is gone — anyone who messages the bot is auto-registered on
+> first contact, matching Devie's own `syncMember` exactly, and nothing checks a permission
+> afterward. This supersedes ADR-0010 in full (see its own line above) and the role-gated parts of
+> ADR-0002; `/roster`, `/edit`, `/whoami`, `/dashboard`, `/cancel`, and the wizard system are all
+> deleted outright, with no redirect. Cohort scoping is the one thing that survives, since it's
+> tenancy, not access control. See the "Architectural decisions" entries below for what this did
+> to the roster-registration and `/edit`/`/blocked` sections.
+>
+> **An eighth change rounds out the Cohort 4 port**: `/addtask` gained a `!priority` flag, `@all`
+> and cohort-id fan-out, and bulk-paste task extraction (issues
+> [#101](https://github.com/kxnn02/telegram-taskbot/issues/101),
+> [#104](https://github.com/kxnn02/telegram-taskbot/issues/104)); and `/standup` gained Devie's
+> character — a daily quote, a greeting, and emoji priority/status badges, plus a separate,
+> secret-gated push endpoint (`api/jobs/standup-push.ts`) that can post the same card into the
+> group on demand, not on a schedule (issue
+> [#107](https://github.com/kxnn02/telegram-taskbot/issues/107)). See the "Priority, order_index,
+> tags and audit_logs" entry below for the schema side of the first, and `src/bot/standupQuote.ts`
+> / `src/jobs/standupPush.ts` for the second.
 
 ## Glossary
 
@@ -227,6 +249,12 @@ README's deploy notes once the project moves off local `npm run dev`.
 
 ### /edit is single-field, /assign stays a fixed 4-step chain
 
+> **Further superseded by [ADR-0013](./docs/adr/0013-remove-access-control-for-devie-parity.md).**
+> `/edit` and the wizard system described below (both the `/assign` and `/edit` chains, and the
+> `awaiting_field_choice` menu) are deleted outright, not merely made a fallback — there is no
+> "field-choice menu" or "bare command opens a form" path left at all. Kept below only as the
+> record of what the wizard system looked like before it was removed.
+
 > **Superseded by [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md).** `/assign` is
 > replaced by a one-line `/addtask`, and `/edit` gains a direct
 > `/edit <ref> <field> <value>` form. Both wizards described below survive, but as the
@@ -258,6 +286,12 @@ reads entities, not just leading `/` in the text) or every command silently miss
 through to the "not sure what you mean" fallback.
 
 ### `/blocked` overloads the existing command name (issue #6)
+
+> **Further superseded by [ADR-0013](./docs/adr/0013-remove-access-control-for-devie-parity.md).**
+> There is no `/blocked` command at all any more, in either its list-view or set-flag form.
+> Blocking a task is just `/update <ref> blocked`, same as setting any other status, optionally
+> with a `note:<text>` rider; listing blocked tasks means reading `/tasks` or `/standup`'s
+> "Backlog"/detail sections. Kept below as the record of the overload this replaced.
 
 > **Partly superseded by [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md).** The
 > dual-purpose overload survives exactly as described below. What changes underneath it is that
@@ -480,6 +514,12 @@ Bare `/addtask` run directly in a group is unaffected: the wizard still runs pub
 still expects its next answer from that same group, per the existing group-chat-support decision.
 
 ### Roster registration moves from a config file to group-gated `/start` (ADR-0010)
+
+> **Superseded in full by [ADR-0013](./docs/adr/0013-remove-access-control-for-devie-parity.md).**
+> Every mechanism described below — the group-membership check, the role-picking buttons,
+> `/roster`, group-admin-gated roster edits, and the zero-higher-ups recovery path — is deleted.
+> `/start` now just auto-registers the sender and says hello; there is no role to pick and no
+> roster command left to administer one. Kept below as the record of the design ADR-0013 replaced.
 
 Role assignment used to mean editing a gitignored roster file and re-seeding Supabase by hand —
 nobody in the cohort could do it. As of ADR-0010 (implemented, spec #83, tickets #85-#91, merged

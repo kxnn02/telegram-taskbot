@@ -37,6 +37,17 @@ compromising correctness.
 
 ## 2. Users & Roles
 
+> **Fully superseded by [ADR-0013](./docs/adr/0013-remove-access-control-for-devie-parity.md),
+> implemented (issue #106).** There is no role at all any more, anywhere — not on a roster entry,
+> not on a `Caller`, not in `TaskService`, not on dashboard login. Every one of the "three checks
+> still restricted to `HigherUp`" an earlier version of this note listed (`/edit`,
+> `TaskService.getStats`, dashboard login) has since been removed along with the command or gate
+> it belonged to. Registration is now automatic: anyone who messages the bot is added to the
+> roster on first contact (matching Devie's `syncMember`), with no config file, no group-admin
+> check, and no `/roster` command to manage it. See ADR-0013 for the full reasoning. The rest of
+> this section (§2 below, plus the intermediate ADR-0009/ADR-0010 note that used to sit here) is
+> kept as the historical record of v1's design and of the roles this bot no longer has.
+
 > **Superseded by [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md), implemented.**
 > The role split below described v1's gated permission model. It no longer applies: any
 > registered roster member — Intern or Higher-up — may create a task, assign it to anyone else
@@ -182,6 +193,16 @@ immediate notification to the assigning higher-up (§8) rather than waiting for 
 visibility to be noticed. Shown alongside the overdue flag wherever tasks are listed.
 
 ## 5. Telegram Bot — Commands
+
+> **Further superseded by [ADR-0013](./docs/adr/0013-remove-access-control-for-devie-parity.md),
+> implemented (issue #106).** `/roster`, `/whoami`, `/dashboard`, `/cancel`, and `/edit` (both its
+> direct form and its wizard) are all gone too, along with the wizard system entirely — a bare
+> `/addtask` now gets a one-line usage example, not a form. Devie's actual surface is ten commands
+> (`/start`, `/help`, `/tasks`, `/deadlines`, `/addtask`, `/done`, `/complete`, `/completed`,
+> `/update`, `/standup`); `/addtask` also gained a `!priority` flag, `@all`/cohort-id fan-out, and
+> bulk-paste extraction (issues #101/#104), and `/standup` gained a quote, greeting, and emoji
+> badges (issue #107). `USER_GUIDE.md` is the source of truth for the current grammar — this
+> section (and the note below it) is kept as the historical record of what came before.
 
 > **Superseded by [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md), implemented.**
 > Full current command grammar is documented in `USER_GUIDE.md` and reconciled with `/help`'s
@@ -423,6 +444,10 @@ All scheduled notifications (due-date reminders, daily standup, weekly digest) r
 in this timezone too.
 
 ## 9. Website Dashboard
+
+> **Superseded by [ADR-0013](./docs/adr/0013-remove-access-control-for-devie-parity.md),
+> implemented.** The audience line below is no longer accurate: there's no higher-up tier left, so
+> any registered cohort member can log in and use every dashboard feature, same as the bot.
 
 - **Audience**: higher-ups only. Interns interact exclusively through Telegram.
 - **Auth**: Telegram Login Widget (official, free) — no separate password system.
