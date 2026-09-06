@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseAddTaskArgs, type AddTaskParsed } from "./addTaskParse.js";
+import {
+  parseAddTaskArgs,
+  parseTrailingAddTask,
+  type AddTaskParsed,
+} from "./addTaskParse.js";
 
 // Monday, 2026-08-31, 10:00 Asia/Manila (02:00 UTC).
 const REFERENCE = new Date("2026-08-31T02:00:00.000Z");
@@ -209,5 +213,107 @@ describe("parseAddTaskArgs anchors the date on an explicit 'by' (issue #49/#51, 
     );
     expect(result.title).toBe("write the doc by end of week");
     expect(result.dueDate).toBeUndefined();
+  });
+});
+
+// Issue #103 item 4: DevieBot's trailing-/addtask entry point
+// (`route.ts:713-720`). A message whose *final line* is exactly `/addtask`
+// is treated as `/addtask` with everything before it as the body. The
+// newline is load-bearing — `/addtask` merely being the last *token* on a
+// line is not enough, which is the correction the issue makes to an earlier
+// "last token" reading of Devie's source.
+const TEN_COMMANDS: ReadonlySet<string> = new Set([
+  "start",
+  "help",
+  "tasks",
+  "deadlines",
+  "addtask",
+  "done",
+  "complete",
+  "completed",
+  "update",
+  "standup",
+]);
+
+describe("parseTrailingAddTask (issue #103 item 4)", () => {
+  it("routes when the final line is exactly /addtask, handing back everything before it", () => {
+    expect(parseTrailingAddTask("Fix the login bug\n/addtask", TEN_COMMANDS)).toBe(
+      "Fix the login bug",
+    );
+  });
+
+  it("keeps a multi-line body intact", () => {
+    expect(
+      parseTrailingAddTask("Fix the login bug\nit 500s on submit\n/addtask", TEN_COMMANDS),
+    ).toBe("Fix the login bug\nit 500s on submit");
+  });
+
+  it("tolerates a CRLF line ending before the final /addtask", () => {
+    expect(parseTrailingAddTask("Fix the login bug\r\n/addtask", TEN_COMMANDS)).toBe(
+      "Fix the login bug",
+    );
+  });
+
+  it("tolerates leading whitespace and a trailing newline around the final /addtask", () => {
+    expect(parseTrailingAddTask("Fix the login bug\n   /addtask  \n", TEN_COMMANDS)).toBe(
+      "Fix the login bug",
+    );
+  });
+
+  it("accepts a @bot-suffixed final line, as Devie's (?:@\w+)? does", () => {
+    expect(parseTrailingAddTask("Fix the login bug\n/addtask@test_bot", TEN_COMMANDS)).toBe(
+      "Fix the login bug",
+    );
+  });
+
+  it("is case-insensitive on the trailing command", () => {
+    expect(parseTrailingAddTask("Fix the login bug\n/AddTask", TEN_COMMANDS)).toBe(
+      "Fix the login bug",
+    );
+  });
+
+  it("does NOT route when /addtask is the last token on a line that has text before it", () => {
+    expect(parseTrailingAddTask("Fix the login bug /addtask", TEN_COMMANDS)).toBeUndefined();
+  });
+
+  it("does NOT route when /addtask is the last token of the final line of a multi-line message", () => {
+    expect(
+      parseTrailingAddTask("Fix the login bug\nplease /addtask", TEN_COMMANDS),
+    ).toBeUndefined();
+  });
+
+  it("does NOT route when /addtask sits mid-text", () => {
+    expect(
+      parseTrailingAddTask("Fix the login bug\n/addtask\nand also the signup one", TEN_COMMANDS),
+    ).toBeUndefined();
+  });
+
+  it("does NOT route when the message already starts with one of the ten commands", () => {
+    for (const command of TEN_COMMANDS) {
+      expect(
+        parseTrailingAddTask(`/${command} something\n/addtask`, TEN_COMMANDS),
+      ).toBeUndefined();
+    }
+  });
+
+  it("does NOT route a bare /addtask, leaving it to the ordinary command handler", () => {
+    expect(parseTrailingAddTask("/addtask", TEN_COMMANDS)).toBeUndefined();
+  });
+
+  it("strips a @bot suffix off the leading command before checking the ten-command guard", () => {
+    expect(parseTrailingAddTask("/tasks@test_bot\n/addtask", TEN_COMMANDS)).toBeUndefined();
+  });
+
+  it("DOES route when the leading token is a slash-word that is not one of the ten", () => {
+    // Devie's guard only skips its own ten commands, so an unrecognised
+    // /command line becomes part of the task body rather than blocking the
+    // trailing entry point. Carbon-copied (#103 rule 2).
+    expect(parseTrailingAddTask("/nonsense here\n/addtask", TEN_COMMANDS)).toBe(
+      "/nonsense here",
+    );
+  });
+
+  it("does not route a message with no trailing /addtask at all", () => {
+    expect(parseTrailingAddTask("Fix the login bug", TEN_COMMANDS)).toBeUndefined();
   });
 });

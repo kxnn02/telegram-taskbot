@@ -101,39 +101,6 @@ export function formatMyTasks(tasks: TaskWithFlags[], page = 1): string {
   return lines.join("\n");
 }
 
-/** Renders `/tasks` (issue #33; replaces `/alltasks`), grouped by assignee
- * and paginated. `hintPrefix` carries the filter argument (`@alice`,
- * `intern`) into the next-page hint so a filtered result's footer points
- * back at the same filter rather than plain `/tasks <page>`. */
-export function formatAllTasksGrouped(
-  tasks: TaskWithFlags[],
-  page = 1,
-  hintPrefix = "",
-): string {
-  if (tasks.length === 0) {
-    // A filter that matched nothing is not the same as an empty cohort
-    // (issue #65, finding H9) — `hintPrefix` already carries the filter
-    // argument (`@alice`, `intern`) into this branch, so say what actually
-    // happened instead of implying the bot lost the cohort's data.
-    return hintPrefix ? `No tasks match ${hintPrefix}.` : "No tasks in this cohort yet.";
-  }
-  const paged = paginate(tasks, page);
-  const byAssignee = new Map<string, TaskWithFlags[]>();
-  for (const t of paged.items) {
-    const list = byAssignee.get(t.assigneeUsername) ?? [];
-    list.push(t);
-    byAssignee.set(t.assigneeUsername, list);
-  }
-  const sections = [...byAssignee.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([assignee, list]) => {
-      const lines = list.map((t) => "  - " + formatTaskLine(t));
-      return `@${assignee}:\n${lines.join("\n")}`;
-    });
-  const footer = paginationFooter("tasks", paged.page, paged.totalPages, hintPrefix);
-  return footer ? `${sections.join("\n\n")}\n\n${footer}` : sections.join("\n\n");
-}
-
 export function formatPending(tasks: TaskWithFlags[]): string {
   if (tasks.length === 0) {
     return "Nothing pending review right now.";
@@ -239,6 +206,10 @@ const HELP_SECTIONS: { heading: string; lines: string[] }[] = [
     heading: "📋 View",
     lines: [
       "/tasks — browse tasks by member (paginated)",
+      // Devie's own View section lists the role filter between the bare
+      // command and the member one (`route.ts:741`). Issue #103 item 2 maps
+      // <role> onto cohort_id, so the example names a cohort id.
+      "/tasks <role> — filter by role (e.g. cohort-5)",
       "/tasks @username — filter by member",
       "/deadlines — show upcoming deadlines",
       "/standup — send the standup report",

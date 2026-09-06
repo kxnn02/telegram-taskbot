@@ -155,6 +155,67 @@ function noUsernameMessageUpdate(userId: number, chatId: number, text: string): 
   } as Update;
 }
 
+/** A group-chat message, for the mention-trigger paths that are meant to
+ * fire in group chatter (issue #34/#103) rather than only in DMs. */
+function groupMessageUpdate(
+  userId: number,
+  username: string,
+  chatId: number,
+  text: string,
+): Update {
+  return {
+    update_id: updateIdSeq++,
+    message: {
+      message_id: messageIdSeq++,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: chatId, type: "group", title: "Cohort chat" },
+      from: { id: userId, is_bot: false, first_name: "Test", username },
+      text,
+    },
+  } as Update;
+}
+
+let callbackIdSeq = 1;
+
+/** An inline-button press. `chatId` and the carried `message_id` are what
+ * `editMessageText` edits in place (issue #103 items 1 and 3). */
+function callbackUpdate(
+  userId: number,
+  username: string,
+  chatId: number,
+  data: string,
+  messageId = 500,
+): Update {
+  return {
+    update_id: updateIdSeq++,
+    callback_query: {
+      id: String(callbackIdSeq++),
+      from: { id: userId, is_bot: false, first_name: "Test", username },
+      chat_instance: "1",
+      data,
+      message: {
+        message_id: messageId,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: chatId, type: "private", first_name: "Test" },
+        from: FAKE_BOT_INFO,
+        text: "previous page",
+      },
+    },
+  } as Update;
+}
+
+function lastCall(calls: RecordedCall[], method: string): RecordedCall | undefined {
+  return [...calls].reverse().find((c) => c.method === method);
+}
+
+interface RecordedKeyboard {
+  inline_keyboard: { text: string; callback_data: string }[][];
+}
+
+function keyboardOf(call: RecordedCall | undefined): RecordedKeyboard {
+  return (call?.payload.reply_markup ?? { inline_keyboard: [] }) as RecordedKeyboard;
+}
+
 function lastReplyText(calls: RecordedCall[]): string {
   const call = [...calls].reverse().find(
     (c) => c.method === "sendMessage" || c.method === "editMessageText",
@@ -362,6 +423,614 @@ describe("cohort isolation survives the strip (the one guarantee that must)", ()
 
     const text = lastReplyText(testBot.calls);
     expect(text).not.toContain("Secret task");
+  });
+});
+
+describe("paged /tasks (issue #103 items 1 and 2)", () => {
+  async function seedFor(
+    testBot: ReturnType<typeof makeTestBot>,
+    assignee: string,
+    title: string,
+  ) {
+    const created = await testBot.service.assignTask(
+      { username: "alice", cohortId: COHORT },
+      { assigneeUsername: assignee, title, dueDate: "2026-09-10" },
+    );
+    if (!created.ok) throw new Error("setup failed: " + created.error);
+    return created.value.id;
+  }
+
+  function threeMemberBot() {
+    const roster = new Roster([
+      { username: "alice", cohortId: COHORT },
+      { username: "bob", cohortId: COHORT },
+      { username: "carla", cohortId: COHORT },
+    ]);
+    return makeTestBot(roster);
+  }
+
+  it("sends the first page as HTML with a filter row and a nav row", async () => {
+    const testBot = threeMemberBot();
+    await seedFor(testBot, "alice", "Alice's task");
+    await seedFor(testBot, "bob", "Bob's task");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/tasks"));
+
+    const call = lastCall(testBot.calls, "sendMessage")!;
+    expect(call.payload.parse_mode).toBe("HTML");
+    expect(call.payload.text).toContain("📋 <b>Tasks</b>");
+    expect(call.payload.text).toContain("👤 <b>@alice</b>");
+    expect(call.payload.text).toContain("<i>(1 / 2)</i>");
+
+    const keyboard = keyboardOf(call);
+    expect(keyboard.inline_keyboard[0]).toEqual([
+      { text: "· All", callback_data: "tasks|all|0" },
+      { text: COHORT, callback_data: `tasks|${COHORT}|0` },
+    ]);
+    expect(keyboard.inline_keyboard[1]).toEqual([
+      { text: "◀ Prev", callback_data: "tasks|all|1" },
+      { text: "1 / 2", callback_data: "tasks|all|0" },
+      { text: "Next ▶", callback_data: "tasks|all|1" },
+    ]);
+  });
+
+  it("a Next press edits the same message in place instead of sending a new one", async () => {
+    const testBot = threeMemberBot();
+    await seedFor(testBot, "alice", "Alice's task");
+    await seedFor(testBot, "bob", "Bob's task");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      callbackUpdate(userId, "alice", userId, "tasks|all|1", 777),
+    );
+
+    const edit = lastCall(testBot.calls, "editMessageText")!;
+    expect(edit.payload.message_id).toBe(777);
+    expect(edit.payload.parse_mode).toBe("HTML");
+    expect(edit.payload.text).toContain("👤 <b>@bob</b>");
+    expect(edit.payload.text).toContain("<i>(2 / 2)</i>");
+    expect(lastCall(testBot.calls, "sendMessage")).toBeUndefined();
+  });
+
+  it("always answers the callback query so the button stops spinning", async () => {
+    const testBot = threeMemberBot();
+    await seedFor(testBot, "alice", "Alice's task");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(callbackUpdate(userId, "alice", userId, "tasks|all|0"));
+
+    expect(lastCall(testBot.calls, "answerCallbackQuery")).toBeDefined();
+  });
+
+  it("a filter press switches to that role filter and back to page 0", async () => {
+    const testBot = threeMemberBot();
+    await seedFor(testBot, "alice", "Alice's task");
+    await seedFor(testBot, "bob", "Bob's task");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      callbackUpdate(userId, "alice", userId, `tasks|${COHORT}|0`),
+    );
+
+    const edit = lastCall(testBot.calls, "editMessageText")!;
+    expect(edit.payload.text).toContain(`📋 <b>Tasks — ${COHORT}</b>`);
+    expect(keyboardOf(edit).inline_keyboard[0]).toEqual([
+      { text: "All", callback_data: "tasks|all|0" },
+      { text: `· ${COHORT}`, callback_data: `tasks|${COHORT}|0` },
+    ]);
+  });
+
+  it("anyone may press a button on someone else's list — no permission check (#103 rule 3)", async () => {
+    const testBot = threeMemberBot();
+    await seedFor(testBot, "alice", "Alice's task");
+    await seedFor(testBot, "bob", "Bob's task");
+    const strangerId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      callbackUpdate(strangerId, "stranger", -100, "tasks|all|1"),
+    );
+
+    const edit = lastCall(testBot.calls, "editMessageText")!;
+    expect(edit.payload.text).toContain("👤 <b>@bob</b>");
+    expect(allReplyTexts(testBot.calls).join("")).not.toMatch(/permission|not allowed/i);
+  });
+
+  it("/tasks @username filters to that member", async () => {
+    const testBot = threeMemberBot();
+    await seedFor(testBot, "alice", "Alice's task");
+    await seedFor(testBot, "bob", "Bob's task");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/tasks @bob"));
+
+    const text = lastCall(testBot.calls, "sendMessage")!.payload.text as string;
+    expect(text).toContain("👤 <b>@bob</b>");
+    expect(text).toContain("<i>(1 / 1)</i>");
+    expect(text).not.toContain("Alice&#39;s task");
+    expect(text).not.toContain("Alice's task");
+  });
+
+  it("/tasks <role> maps onto cohort_id, and an unknown role matches nothing", async () => {
+    const testBot = threeMemberBot();
+    await seedFor(testBot, "alice", "Alice's task");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, `/tasks ${COHORT}`));
+    expect(lastCall(testBot.calls, "sendMessage")!.payload.text).toContain("👤 <b>@alice</b>");
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/tasks cohort-9"));
+    expect(lastCall(testBot.calls, "sendMessage")!.payload.text).toBe(
+      "📋 <b>Tasks — cohort-9</b>\n\n<i>No active tasks for this filter.</i>",
+    );
+  });
+
+  it("cohort isolation: a callback cannot page into another cohort's tasks", async () => {
+    const roster = new Roster([
+      { username: "alice", cohortId: COHORT },
+      { username: "other", cohortId: "cohort-9" },
+    ]);
+    const testBot = makeTestBot(roster, COHORT);
+    await testBot.service.assignTask(
+      { username: "other", cohortId: "cohort-9" },
+      { assigneeUsername: "other", title: "Secret task", dueDate: "2026-09-10" },
+    );
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(callbackUpdate(userId, "alice", userId, "tasks|all|0"));
+    await testBot.bot.handleUpdate(callbackUpdate(userId, "alice", userId, "tasks|cohort-9|0"));
+
+    expect(allReplyTexts(testBot.calls).join("")).not.toContain("Secret task");
+  });
+
+  it("ignores a malformed tasks callback but still answers it", async () => {
+    const testBot = threeMemberBot();
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(callbackUpdate(userId, "alice", userId, "tasks|all|nope"));
+
+    expect(lastCall(testBot.calls, "editMessageText")).toBeUndefined();
+    expect(lastCall(testBot.calls, "answerCallbackQuery")).toBeDefined();
+  });
+});
+
+describe("standup filters (issue #103 item 3)", () => {
+  it("/standup sends the overview with Devie's five filter buttons", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/standup"));
+
+    const call = lastCall(testBot.calls, "sendMessage")!;
+    expect(call.payload.text).toContain("📊 Overview");
+    expect(keyboardOf(call).inline_keyboard[0]!.map((b) => b.callback_data)).toEqual([
+      "standup|overview|0",
+      "standup|active|0",
+      "standup|backlog|0",
+      "standup|review|0",
+      "standup|done|0",
+    ]);
+  });
+
+  it("a filter press edits the standup in place", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const created = await testBot.service.assignTask(
+      { username: "alice", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Parked idea", dueDate: "2026-09-10" },
+    );
+    if (!created.ok) throw new Error("setup failed");
+    await testBot.service.setStatus(
+      { username: "alice", cohortId: COHORT },
+      created.value.id,
+      "backlog",
+    );
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      callbackUpdate(userId, "alice", userId, "standup|backlog|0", 888),
+    );
+
+    const edit = lastCall(testBot.calls, "editMessageText")!;
+    expect(edit.payload.message_id).toBe(888);
+    expect(edit.payload.text).toContain("📦 Backlog (1)");
+    expect(edit.payload.text).toContain("Parked idea");
+    expect(keyboardOf(edit).inline_keyboard[0]!.map((b) => b.text)).toContain("· Backlog (1)");
+  });
+
+  it("ignores an unknown standup filter but still answers the callback", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(callbackUpdate(userId, "alice", userId, "standup|nope|0"));
+
+    expect(lastCall(testBot.calls, "editMessageText")).toBeUndefined();
+    expect(lastCall(testBot.calls, "answerCallbackQuery")).toBeDefined();
+  });
+
+  it("cohort isolation: a standup filter shows nothing from another cohort", async () => {
+    const roster = new Roster([
+      { username: "alice", cohortId: COHORT },
+      { username: "other", cohortId: "cohort-9" },
+    ]);
+    const testBot = makeTestBot(roster, COHORT);
+    await testBot.service.assignTask(
+      { username: "other", cohortId: "cohort-9" },
+      { assigneeUsername: "other", title: "Secret task", dueDate: "2026-09-10" },
+    );
+    const userId = nextUserId();
+
+    for (const filter of ["overview", "active", "backlog", "review", "done"]) {
+      await testBot.bot.handleUpdate(
+        callbackUpdate(userId, "alice", userId, `standup|${filter}|0`),
+      );
+    }
+
+    expect(allReplyTexts(testBot.calls).join("")).not.toContain("Secret task");
+  });
+});
+
+describe("/update's link: and note: riders (issue #103 item 6)", () => {
+  async function seedTask(testBot: ReturnType<typeof makeTestBot>, title: string) {
+    const created = await testBot.service.assignTask(
+      { username: "alice", cohortId: COHORT },
+      { assigneeUsername: "alice", title, dueDate: "2026-09-10" },
+    );
+    if (!created.ok) throw new Error("setup failed");
+    return created.value.id;
+  }
+
+  it("attaches both a link and a note, and echoes them back on the reply", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const id = await seedTask(testBot, "Fix the login bug");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(
+        userId,
+        "alice",
+        userId,
+        `/update ${id} done link:https://example.com/pr/1 note: ready for QA`,
+      ),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("🔗 https://example.com/pr/1");
+    expect(text).toContain("📝 ready for QA");
+
+    const task = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, id);
+    if (!task.ok) throw new Error("read failed");
+    expect(task.value.status).toBe("done");
+    expect(task.value.notes.map((n) => n.text)).toEqual([
+      "https://example.com/pr/1",
+      "ready for QA",
+    ]);
+  });
+
+  it("attaches a note on its own", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const id = await seedTask(testBot, "Fix the login bug");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, `/update ${id} review note: needs a second pair of eyes`),
+    );
+
+    expect(lastReplyText(testBot.calls)).toContain("📝 needs a second pair of eyes");
+    const task = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, id);
+    if (!task.ok) throw new Error("read failed");
+    expect(task.value.notes.map((n) => n.text)).toEqual(["needs a second pair of eyes"]);
+  });
+
+  it("attaches a link on its own", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const id = await seedTask(testBot, "Fix the login bug");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, `/update ${id} done link:https://example.com/pr/9`),
+    );
+
+    expect(lastReplyText(testBot.calls)).toContain("🔗 https://example.com/pr/9");
+    const task = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, id);
+    if (!task.ok) throw new Error("read failed");
+    expect(task.value.notes.map((n) => n.text)).toEqual(["https://example.com/pr/9"]);
+  });
+
+  it("carries a per-item note through a mixed-status batch", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const first = await seedTask(testBot, "Fix the login bug");
+    const second = await seedTask(testBot, "Write the docs");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(
+        userId,
+        "alice",
+        userId,
+        `/update t${first} done note: shipped, t${second} review`,
+      ),
+    );
+
+    const text = allReplyTexts(testBot.calls).join("\n");
+    expect(text).toContain("📝 shipped");
+
+    const firstTask = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, first);
+    const secondTask = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, second);
+    if (!firstTask.ok || !secondTask.ok) throw new Error("read failed");
+    expect(firstTask.value.notes.map((n) => n.text)).toEqual(["shipped"]);
+    expect(secondTask.value.notes).toEqual([]);
+  });
+
+  it("a plain /update with no riders attaches nothing", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const id = await seedTask(testBot, "Fix the login bug");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, `/update ${id} done`));
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).not.toContain("🔗");
+    expect(text).not.toContain("📝");
+    const task = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, id);
+    if (!task.ok) throw new Error("read failed");
+    expect(task.value.notes).toEqual([]);
+  });
+
+  it("cohort isolation: a rider cannot be attached to another cohort's task", async () => {
+    const roster = new Roster([
+      { username: "alice", cohortId: COHORT },
+      { username: "other", cohortId: "cohort-9" },
+    ]);
+    const testBot = makeTestBot(roster, COHORT);
+    const foreign = await testBot.service.assignTask(
+      { username: "other", cohortId: "cohort-9" },
+      { assigneeUsername: "other", title: "Secret task", dueDate: "2026-09-10" },
+    );
+    if (!foreign.ok) throw new Error("setup failed");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(
+        userId,
+        "alice",
+        userId,
+        `/update ${foreign.value.id} done link:https://example.com/leak note: leak`,
+      ),
+    );
+
+    const task = await testBot.service.getTask(
+      { username: "other", cohortId: "cohort-9" },
+      foreign.value.id,
+    );
+    if (!task.ok) throw new Error("read failed");
+    expect(task.value.notes).toEqual([]);
+    expect(task.value.status).not.toBe("done");
+  });
+});
+
+describe("trailing /addtask entry point (issue #103 item 4)", () => {
+  it("a message whose final line is exactly /addtask creates a task from the text above it", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, "Fix the login bug\n/addtask"),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("created");
+    const tasks = await testBot.service.listAllTasks({ username: "alice", cohortId: COHORT });
+    if (!tasks.ok) throw new Error("read failed");
+    expect(tasks.value.map((t) => t.title)).toEqual(["Fix the login bug"]);
+  });
+
+  it("works in a group chat too, not just a DM", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(userId, "alice", -100, "Ship the release notes\n/addtask"),
+    );
+
+    expect(lastReplyText(testBot.calls)).toContain("created");
+  });
+
+  it("does NOT route when /addtask is the last token on a line with text before it", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, "Fix the login bug /addtask"),
+    );
+
+    const tasks = await testBot.service.listAllTasks({ username: "alice", cohortId: COHORT });
+    if (!tasks.ok) throw new Error("read failed");
+    expect(tasks.value).toEqual([]);
+    expect(lastReplyText(testBot.calls)).not.toContain("created");
+  });
+
+  it("does NOT route when /addtask sits mid-text", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, "Fix the login bug\n/addtask\nand the signup one"),
+    );
+
+    const tasks = await testBot.service.listAllTasks({ username: "alice", cohortId: COHORT });
+    if (!tasks.ok) throw new Error("read failed");
+    expect(tasks.value).toEqual([]);
+  });
+
+  it("does NOT route when the message starts with one of the ten commands", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/tasks\n/addtask"));
+
+    const tasks = await testBot.service.listAllTasks({ username: "alice", cohortId: COHORT });
+    if (!tasks.ok) throw new Error("read failed");
+    expect(tasks.value).toEqual([]);
+  });
+
+  it("a bare /addtask still gets the existing usage reply", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/addtask"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/^Usage: \/addtask/);
+  });
+
+  it("carries the assignee and date grammar through, same as /addtask", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const bobId = nextUserId();
+    await testBot.bot.handleUpdate(messageUpdate(bobId, "bob", bobId, "/help"));
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, "Fix the login bug @bob\n/addtask"),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("@bob");
+  });
+
+  it("cohort isolation: the created task lands only in the caller's cohort", async () => {
+    const roster = new Roster([{ username: "other", cohortId: "cohort-9" }]);
+    const testBot = makeTestBot(roster, "cohort-5");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, "Trailing-scoped task\n/addtask"),
+    );
+
+    const otherCohort = await testBot.service.listAllTasks({
+      username: "other",
+      cohortId: "cohort-9",
+    });
+    if (!otherCohort.ok) throw new Error("read failed");
+    expect(otherCohort.value).toEqual([]);
+  });
+});
+
+describe("mention trigger (issue #34, widened by #103)", () => {
+  it("a newly accepted phrase creates a task from a group message", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(userId, "alice", -100, "@test_bot work on fix the login bug"),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("created");
+    expect(text).toContain("@alice");
+  });
+
+  it("'create task ...' and 'add task: ...' both route", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(userId, "alice", -100, "@test_bot create task write the docs"),
+    );
+    expect(lastReplyText(testBot.calls)).toContain("created");
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(userId, "alice", -100, "@test_bot add task: ship the release"),
+    );
+    expect(lastReplyText(testBot.calls)).toContain("created");
+  });
+
+  it("'todo ...' no longer routes and produces no reply — Devie never accepted it (#103)", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(userId, "alice", -100, "@test_bot todo fix the login bug"),
+    );
+
+    expect(allReplyTexts(testBot.calls)).toEqual([]);
+  });
+
+  it("a passing mention like 'thanks @bot' produces NO reply at all, not a 'did you mean' nudge", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(userId, "alice", -100, "thanks @test_bot !"),
+    );
+
+    expect(allReplyTexts(testBot.calls)).toEqual([]);
+  });
+
+  it("a leading mention with no phrase match is silent too (#103 makes this silent)", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(userId, "alice", -100, "@test_bot how's it going"),
+    );
+
+    expect(allReplyTexts(testBot.calls)).toEqual([]);
+    expect(allReplyTexts(testBot.calls).join("")).not.toContain("Did you mean");
+  });
+
+  it("a phrase with no title left behind gets /addtask's usage example", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(userId, "alice", -100, "@test_bot add task"),
+    );
+
+    expect(lastReplyText(testBot.calls)).toMatch(/^Usage: \/addtask/);
+  });
+
+  it("cohort isolation: a mention-created task lands in the caller's own cohort only", async () => {
+    const roster = new Roster([{ username: "other", cohortId: "cohort-9" }]);
+    const testBot = makeTestBot(roster, "cohort-5");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      groupMessageUpdate(userId, "alice", -100, "@test_bot add task mention-scoped task"),
+    );
+
+    const otherCohort = await testBot.service.listAllTasks({
+      username: "other",
+      cohortId: "cohort-9",
+    });
+    if (!otherCohort.ok) throw new Error("read failed");
+    expect(otherCohort.value).toEqual([]);
+
+    const ownCohort = await testBot.service.listAllTasks({
+      username: "alice",
+      cohortId: "cohort-5",
+    });
+    if (!ownCohort.ok) throw new Error("read failed");
+    expect(ownCohort.value.map((t) => t.title)).toEqual(["mention-scoped task"]);
   });
 });
 

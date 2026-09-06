@@ -1,4 +1,4 @@
-import { Bot } from "grammy";
+import { Bot, GrammyError } from "grammy";
 import { normalizeUsername } from "../domain/roster.js";
 import { SystemClock } from "../domain/clock.js";
 import { TaskService } from "../service/taskService.js";
@@ -6,7 +6,7 @@ import type { TaskStorePort } from "../storage/taskStorePort.js";
 import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
 import type { RosterStorePort } from "../storage/rosterStorePort.js";
 import { comingFriday, parseDueDate } from "../date/parseDueDate.js";
-import { parseAddTaskArgs, ADDTASK_USAGE } from "./addTaskParse.js";
+import { parseAddTaskArgs, parseTrailingAddTask, ADDTASK_USAGE } from "./addTaskParse.js";
 import { parseMentionTrigger } from "./mentionParse.js";
 import { resolveCaller } from "./callerResolution.js";
 import { notifyUser, notifyStatusChange } from "./notify.js";
@@ -15,13 +15,24 @@ import { parseStatusWord, VALID_STATUS_WORDS_TEXT } from "./statusParse.js";
 import { parseRefListItems, parseUpdateItems, type BatchItem } from "./updateBatch.js";
 import {
   chunkMessage,
-  formatAllTasksGrouped,
   formatDeadlines,
   formatHelp,
   statusLabel,
   STATUS_EMOJI,
 } from "./format.js";
-import { buildStandup, formatStandup } from "./standup.js";
+import {
+  buildStandup,
+  buildStandupKeyboard,
+  formatStandupFiltered,
+  parseStandupCallback,
+} from "./standup.js";
+import {
+  buildTasksPage,
+  fetchTaskPages,
+  parseTasksCallback,
+  parseTasksFilter,
+  type InlineKeyboardMarkup,
+} from "./tasksPage.js";
 import type { Caller, TaskStatus } from "../domain/types.js";
 import { isPastDate } from "../domain/overdue.js";
 import type { Roster } from "../domain/roster.js";
@@ -217,30 +228,59 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }
   }
 
-  // ---- /tasks -------------------------------------------------------------
+  // ---- /tasks — Devie's paged, button-driven browser (#103 items 1/2) ----
+  // Replaces the wall-of-text `formatAllTasksGrouped` reply and its
+  // `/tasks <page>` argument: paging is the inline keyboard's job now, one
+  // page per member, edited in place. See `tasksPage.ts`.
 
-  const TASKS_USAGE = "Usage: /tasks [page], or /tasks @username";
+  /** Sends a page-plus-keyboard card. `parse_mode: "HTML"` is scoped to
+   * exactly these two views (`/tasks` and `/standup`'s keyboard card),
+   * because Devie's `/tasks` text is copied verbatim and is HTML — every
+   * other reply in this bot is still plain text with no parse_mode. */
+  async function sendCard(
+    ctx: import("grammy").Context,
+    text: string,
+    keyboard: InlineKeyboardMarkup,
+    html: boolean,
+  ): Promise<void> {
+    await ctx.reply(text, {
+      ...(html ? { parse_mode: "HTML" as const } : {}),
+      reply_markup: keyboard,
+    });
+  }
+
+  /** Edits a card in place, falling back to a fresh message if the edit is
+   * refused — Devie's `editWithKeyboard` (`route.ts:85-105`), including its
+   * treatment of Telegram's "message is not modified" 400 as success, which
+   * is what clicking the page you are already on produces. */
+  async function editCard(
+    ctx: import("grammy").Context,
+    text: string,
+    keyboard: InlineKeyboardMarkup,
+    html: boolean,
+  ): Promise<void> {
+    const options = {
+      ...(html ? { parse_mode: "HTML" as const } : {}),
+      reply_markup: keyboard,
+    };
+    try {
+      await ctx.editMessageText(text, options);
+    } catch (err) {
+      if (err instanceof GrammyError && err.description.includes("message is not modified")) {
+        return;
+      }
+      console.error(err);
+      await ctx.reply(text, options);
+    }
+  }
 
   bot.command(
     "tasks",
     withCaller(async (ctx, caller) => {
-      const parsed = parseTasksArgs(ctx.match);
-      if (parsed.kind === "error") {
-        await ctx.reply(TASKS_USAGE);
-        return;
-      }
-      if (parsed.kind === "all") {
-        const result = await service.listAllTasks(caller);
-        await replyChunked(ctx, result.ok ? formatAllTasksGrouped(result.value, parsed.page) : result.error);
-        return;
-      }
-      const result = await service.listTasksForMember(caller, parsed.username);
-      await replyChunked(
-        ctx,
-        result.ok
-          ? formatAllTasksGrouped(result.value, parsed.page, `@${normalizeUsername(parsed.username)}`)
-          : result.error,
-      );
+      const filter = parseTasksFilter(matchToString(ctx.match));
+      const { pages, allRoles } = await fetchTaskPages(service, caller, roster, filter);
+      const { text, keyboard } = buildTasksPage(pages, 0, filter.roleFilter, allRoles);
+      await sendCard(ctx, text, keyboard, true);
     }),
   );
 
@@ -252,13 +292,66 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }),
   );
 
+  // `/standup` gains Devie's five filter buttons (#103 item 3). It stays
+  // plain text — only `/tasks` copies Devie's HTML — so the keyboard is the
+  // whole change here; the overview body is the existing `formatStandup`.
   bot.command(
     "standup",
     withCaller(async (ctx, caller) => {
       const report = await buildStandup(service, caller, clock.now());
-      await replyChunked(ctx, formatStandup(report));
+      await sendCard(
+        ctx,
+        formatStandupFiltered(report, "overview"),
+        buildStandupKeyboard(report, "overview"),
+        false,
+      );
     }),
   );
+
+  // ---- Inline-button presses (#103 items 1 and 3) ------------------------
+  // Both cards are re-rendered from a fresh fetch and edited in place, then
+  // the callback is answered so the client stops showing a spinner —
+  // Devie's `route.ts:629-677`. No permission check of any kind: anyone in
+  // the chat may page or filter anyone's list (#103 rule 3), and the only
+  // boundary is `TaskService`'s cohort scoping, which both fetches go
+  // through.
+  bot.on("callback_query:data", async (ctx) => {
+    const data = ctx.callbackQuery.data;
+
+    const tasksCb = parseTasksCallback(data);
+    if (tasksCb) {
+      const caller = await requireCaller(ctx);
+      if (caller) {
+        const { pages, allRoles } = await fetchTaskPages(service, caller, roster, {
+          roleFilter: tasksCb.roleFilter,
+          assigneeFilter: null,
+        });
+        const { text, keyboard } = buildTasksPage(
+          pages,
+          tasksCb.page,
+          tasksCb.roleFilter,
+          allRoles,
+        );
+        await editCard(ctx, text, keyboard, true);
+      }
+    }
+
+    const standupCb = parseStandupCallback(data);
+    if (standupCb) {
+      const caller = await requireCaller(ctx);
+      if (caller) {
+        const report = await buildStandup(service, caller, clock.now());
+        await editCard(
+          ctx,
+          formatStandupFiltered(report, standupCb.filter),
+          buildStandupKeyboard(report, standupCb.filter),
+          false,
+        );
+      }
+    }
+
+    await ctx.answerCallbackQuery();
+  });
 
   // ---- Status-setting commands (issue #27/#31 — replaces the review gate)
 
@@ -272,13 +365,15 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     status: TaskStatus,
     ctx: import("grammy").Context,
     replySuffix: string,
+    meta?: BatchItem,
   ) {
     const result = await service.setStatus(caller, id, status);
     if (!result.ok) {
       await ctx.reply(result.error);
       return;
     }
-    await ctx.reply(`Task ${id} ${replySuffix}`);
+    const metaSuffix = meta ? await attachUpdateMeta(caller, id, meta) : "";
+    await ctx.reply(`Task ${id} ${replySuffix}${metaSuffix}`);
     await notifyStatusChange(
       bot,
       registrations,
@@ -286,6 +381,32 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       caller.username,
       `Task ${id} ("${result.value.title}") status changed to ${STATUS_EMOJI[status]} ${statusLabel(status)} by @${caller.username}. Send /update ${id} <status> to change it again.`,
     );
+  }
+
+  /**
+   * Attaches `/update`'s `link:<url>` / `note:<text>` riders to a task and
+   * returns the suffix Devie appends to the reply line for them (issue #103
+   * item 6, `route.ts:1092-1100`). Devie stores both as ordinary
+   * `task_comments` rows — the link first, then the note — which is exactly
+   * this repo's `addNote`, so there is no new storage shape here. No
+   * permission check: `addNote` is already cohort-scoped in `TaskService`,
+   * and this runs only after `setStatus` on the same task has succeeded.
+   */
+  async function attachUpdateMeta(
+    caller: Caller,
+    id: number,
+    item: BatchItem,
+  ): Promise<string> {
+    let suffix = "";
+    if (item.link) {
+      await service.addNote(caller, id, item.link);
+      suffix += `\n  🔗 ${item.link}`;
+    }
+    if (item.note) {
+      await service.addNote(caller, id, item.note);
+      suffix += `\n  📝 ${item.note}`;
+    }
+    return suffix;
   }
 
   const UPDATE_USAGE = `Usage: /update <ref> <status> — status is one of: ${VALID_STATUS_WORDS_TEXT}`;
@@ -296,6 +417,10 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     message: string;
     task?: { assigneeUsername: string; assignedByUsername: string; title: string };
     status?: TaskStatus;
+    /** The `🔗`/`📝` lines for this item's `/update` riders (#103 item 6),
+     * appended to its ✓ line by `finishBatch`. Always `""` for
+     * `/done`/`/complete`, whose grammar has no riders. */
+    metaSuffix?: string;
   }
 
   /** Runs one `setStatus` call per batch item (issue #32) — no batch
@@ -332,6 +457,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         message: statusLabel(resolved.status),
         task: result.value,
         status: resolved.status,
+        metaSuffix: await attachUpdateMeta(caller, item.ref, item),
       });
     }
     return outcomes;
@@ -375,7 +501,9 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       await ctx.reply(usageText);
     } else {
       const successCount = outcomes.filter((o) => o.ok).length;
-      const lines = outcomes.map((o) => (o.ok ? `${o.label} ✓ ${o.message}` : `${o.label} ✗ ${o.message}`));
+      const lines = outcomes.map((o) =>
+        o.ok ? `${o.label} ✓ ${o.message}${o.metaSuffix ?? ""}` : `${o.label} ✗ ${o.message}`,
+      );
       const header = `${successCount}/${outcomes.length} updated.`;
       for (const chunk of chunkMessage([header, ...lines].join("\n"))) {
         await ctx.reply(chunk);
@@ -411,7 +539,14 @@ export function createBot(options: CreateBotOptions): CreatedBot {
           );
           return;
         }
-        await applyStatusChange(caller, item.ref, status, ctx, `set to ${STATUS_EMOJI[status]} ${statusLabel(status)}.`);
+        await applyStatusChange(
+          caller,
+          item.ref,
+          status,
+          ctx,
+          `set to ${STATUS_EMOJI[status]} ${statusLabel(status)}.`,
+          item,
+        );
         return;
       }
       const outcomes = await runBatch(caller, items, (item) => {
@@ -559,6 +694,25 @@ export function createBot(options: CreateBotOptions): CreatedBot {
 
   bot.on("message:text", async (ctx) => {
     const text = ctx.message.text;
+
+    // Trailing `/addtask` (issue #103 item 4). Checked ahead of the
+    // leading-slash branch below because Devie's guard only skips its own
+    // ten commands: a message that opens with an *unrecognised* /word and
+    // ends with a `/addtask` line still routes here, with the slash-word
+    // swept into the task body. See parseTrailingAddTask for the regex and
+    // why the newline is load-bearing.
+    const trailingBody = parseTrailingAddTask(text, HANDLED_COMMANDS);
+    if (trailingBody !== undefined) {
+      const caller = await requireCaller(ctx);
+      if (!caller) return;
+      if (trailingBody.length === 0) {
+        await ctx.reply(ADDTASK_USAGE);
+        return;
+      }
+      await handleAddTaskArgs(ctx, caller, trailingBody);
+      return;
+    }
+
     if (text.startsWith("/")) {
       // Reaching here means no bot.command() handler above matched it —
       // i.e. an unrecognized/removed command name. No stack trace, no
@@ -576,8 +730,13 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     // "none" falls through to the same silent-in-groups behavior as
     // before.
     const trigger = parseMentionTrigger(text, bot.botInfo.username);
-    if (trigger.kind === "unrecognized") {
-      await ctx.reply(`Did you mean to create a task? Try: @${bot.botInfo.username} add task <title>`);
+    if (trigger.kind === "usage") {
+      // Devie rewrites the mention into a bare `/addtask` before dispatch,
+      // so a phrase with no title behind it lands on the same usage example
+      // `/addtask` alone gets (#103) — not the old "did you mean to create a
+      // task?" nudge, which is gone along with every other reply Devie
+      // doesn't send.
+      await ctx.reply(ADDTASK_USAGE);
       return;
     }
     if (trigger.kind === "addtask") {
@@ -643,37 +802,4 @@ function matchToString(match: CommandMatch): string {
   return typeof match === "string" ? match : (match[0] ?? "");
 }
 
-type TasksArgs =
-  | { kind: "all"; page: number }
-  | { kind: "member"; username: string; page: number }
-  | { kind: "error" };
 
-/** Parses `/tasks`'s single-argument grammar (issue #27/#33, trimmed of its
- * role filter by #106 — there is no role any more): a bare page number
- * means "next page" of the unfiltered list, while `@username` is a filter,
- * optionally followed by its own page number. */
-function parseTasksArgs(match: CommandMatch): TasksArgs {
-  const trimmed = matchToString(match).trim();
-  if (trimmed.length === 0) return { kind: "all", page: 1 };
-  const tokens = trimmed.split(/\s+/);
-  const [first, second] = tokens;
-
-  if (/^\d+$/.test(first!)) {
-    if (tokens.length > 1) return { kind: "error" };
-    const page = Number(first);
-    return page >= 1 ? { kind: "all", page } : { kind: "error" };
-  }
-
-  let page = 1;
-  if (second !== undefined) {
-    if (!/^\d+$/.test(second) || tokens.length > 2) return { kind: "error" };
-    const parsedPage = Number(second);
-    if (parsedPage < 1) return { kind: "error" };
-    page = parsedPage;
-  }
-
-  if (first!.startsWith("@")) {
-    return { kind: "member", username: first!.slice(1), page };
-  }
-  return { kind: "error" };
-}
