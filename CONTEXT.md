@@ -58,6 +58,17 @@ up the codebase later.
 > now be pushed to production before the code that needs them merges — safe only because every
 > migration in this project is additive. See
 > [`docs/runbooks/migrations.md`](./docs/runbooks/migrations.md).
+>
+> **A sixth change adds a Tailwind v4 + shadcn/ui toolchain to the dashboard**
+> (issue [#105](https://github.com/kxnn02/telegram-taskbot/issues/105) sub-stage 5a, part of the
+> larger Cohort 4 carbon-copy port — see `RESUME-cohort4-port.md`): `app/globals.css`,
+> `components.json`, `components/ui/`, and `lib/utils.ts` bring in Tailwind v4 and shadcn/ui,
+> used starting with #105's later sub-stages (the kanban board, settings, and team pages). The
+> Tailwind theme's `@theme` block maps the *same* DEVCON design tokens `src/web/styles.ts` already
+> defines (colors, radii, Proxima Nova) rather than introducing a second palette — this stage
+> ships no visible change to any existing page. See `app/globals.css`'s doc comment for the exact
+> mapping and for why Tailwind's reset/defaults (loaded in a CSS cascade layer) can't override the
+> existing hand-rolled stylesheet (rendered as plain, un-layered CSS).
 
 ## Glossary
 
