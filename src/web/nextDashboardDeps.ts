@@ -1,9 +1,11 @@
 import { loadRosterFromStore } from "../config/roster.js";
 import { SystemClock } from "../domain/clock.js";
 import type { Roster } from "../domain/roster.js";
+import { TagService } from "../service/tagService.js";
 import { TaskService } from "../service/taskService.js";
 import { createSupabaseClient } from "../storage/supabaseClient.js";
 import { SupabaseRosterStore } from "../storage/supabaseRosterStore.js";
+import { SupabaseTagStore } from "../storage/supabaseTagStore.js";
 import { SupabaseTaskStore } from "../storage/supabaseTaskStore.js";
 
 /**
@@ -29,6 +31,10 @@ export interface DashboardDeps {
   roster: Roster;
   service: TaskService;
   rosterStore: SupabaseRosterStore;
+  /** Backs the dashboard board's tag reads/writes (issue #105 sub-stage 5b)
+   * — added the same way `service`/`rosterStore` are, over the same
+   * Supabase client. */
+  tagService: TagService;
 }
 
 function requireEnv(name: string): string {
@@ -49,8 +55,18 @@ async function buildDashboardDeps(): Promise<DashboardDeps> {
   const rosterStore = new SupabaseRosterStore(supabase);
   const roster = await loadRosterFromStore(rosterStore);
   const service = new TaskService(new SupabaseTaskStore(supabase), roster, new SystemClock());
+  const tagService = new TagService(new SupabaseTagStore(supabase), service);
 
-  return { botToken, botUsername, activeCohortId, sessionSecret, roster, service, rosterStore };
+  return {
+    botToken,
+    botUsername,
+    activeCohortId,
+    sessionSecret,
+    roster,
+    service,
+    rosterStore,
+    tagService,
+  };
 }
 
 let depsPromise: Promise<DashboardDeps> | undefined;
