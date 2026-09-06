@@ -1,5 +1,5 @@
 import type { AssignTaskInput, EditTaskInput } from "../service/taskService.js";
-import type { TaskStatus } from "../domain/types.js";
+import type { TaskPriority, TaskStatus } from "../domain/types.js";
 
 /**
  * Request-parsing/validation for the Next.js task-mutation API routes
@@ -108,4 +108,96 @@ export function parseEditTaskRequest(body: unknown): ParsedRequest<EditTaskReque
     patch.status = value as TaskStatus;
   }
   return { ok: true, value: patch };
+}
+
+const VALID_PRIORITIES: TaskPriority[] = ["low", "medium", "high", "urgent"];
+
+/** The dashboard's task-dialog priority write path (issue #105 sub-stage
+ * 5b) — not in the ticket's original explicit route list, but clearly
+ * anticipated by `TaskService.setPriority`'s own doc comment ("this is the
+ * parser's (#102) and the dashboard's (#105) write path"), and needed for
+ * the ported `task-dialog.tsx`'s priority `<Select>` to actually persist a
+ * change on an existing task (priority is deliberately excluded from
+ * `editTask`'s patch per #106/ADR-0013, so `PATCH /api/tasks/[id]` can't
+ * carry it). A conservative, minimal addition: same thin-route pattern as
+ * `parseReorderRequest`. */
+export function parseSetPriorityRequest(body: unknown): ParsedRequest<{ priority: TaskPriority }> {
+  const record = asRecord(body);
+  if (!record) return fail("Request body must be a JSON object.");
+
+  const priority = record.priority;
+  if (typeof priority !== "string" || !VALID_PRIORITIES.includes(priority as TaskPriority)) {
+    return fail(`"priority" must be one of ${VALID_PRIORITIES.join(", ")}.`);
+  }
+  return { ok: true, value: { priority: priority as TaskPriority } };
+}
+
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
+/**
+ * Board additions (issue #105 sub-stage 5b): reorder, tag creation, and
+ * per-task tag assignment. Same split as every parser above — structural
+ * validation only, business rules stay in `TaskService`/`TagService`.
+ */
+
+/** `orderIndex` must be a finite, non-negative integer. Negative is
+ * rejected as malformed input, not a legal value: `reorderColumn` (see
+ * `boardView.ts`) always produces sequential indices starting at 0, so
+ * nothing in this codebase ever legitimately sends a negative one. */
+export function parseReorderRequest(body: unknown): ParsedRequest<{ orderIndex: number }> {
+  const record = asRecord(body);
+  if (!record) return fail("Request body must be a JSON object.");
+
+  const orderIndex = record.orderIndex;
+  if (
+    typeof orderIndex !== "number" ||
+    !Number.isFinite(orderIndex) ||
+    !Number.isInteger(orderIndex) ||
+    orderIndex < 0
+  ) {
+    return fail(`"orderIndex" is required and must be a non-negative integer.`);
+  }
+  return { ok: true, value: { orderIndex } };
+}
+
+/** `name` required non-empty; `color`, if present, must be a `#rrggbb` hex
+ * string — there's no CHECK constraint on `tags.color` in the migration, so
+ * this app-level validation is where a malformed color gets caught. */
+export function parseCreateTagRequest(
+  body: unknown,
+): ParsedRequest<{ name: string; color?: string }> {
+  const record = asRecord(body);
+  if (!record) return fail("Request body must be a JSON object.");
+
+  const name = record.name;
+  if (typeof name !== "string" || name.trim().length === 0) {
+    return fail(`"name" is required and must be a non-empty string.`);
+  }
+
+  if ("color" in record && record.color !== undefined) {
+    const color = record.color;
+    if (typeof color !== "string" || !HEX_COLOR_RE.test(color)) {
+      return fail(`"color" must be a "#rrggbb" hex string if provided.`);
+    }
+    return { ok: true, value: { name, color } };
+  }
+  return { ok: true, value: { name } };
+}
+
+/** `tagIds` required, an array of non-negative integers — an empty array is
+ * valid and means "no tags" (replace-all semantics, see `TagService.setTaskTags`). */
+export function parseSetTaskTagsRequest(body: unknown): ParsedRequest<{ tagIds: number[] }> {
+  const record = asRecord(body);
+  if (!record) return fail("Request body must be a JSON object.");
+
+  const tagIds = record.tagIds;
+  if (!Array.isArray(tagIds)) {
+    return fail(`"tagIds" is required and must be an array of non-negative integers.`);
+  }
+  for (const id of tagIds) {
+    if (typeof id !== "number" || !Number.isInteger(id) || id < 0) {
+      return fail(`"tagIds" must contain only non-negative integers.`);
+    }
+  }
+  return { ok: true, value: { tagIds: tagIds as number[] } };
 }

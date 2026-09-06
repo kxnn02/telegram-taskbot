@@ -13,7 +13,7 @@ import { Icon, Logo } from "./icons";
  * of the Express app's `/logout` page route — see HANDOFF for why.
  */
 
-type NavKey = "tasks" | "stats";
+type NavKey = "tasks" | "stats" | "board";
 
 function Sidebar({ active, username }: { active: NavKey; username: string }) {
   return (
@@ -34,6 +34,10 @@ function Sidebar({ active, username }: { active: NavKey; username: string }) {
         <a className={`nav-item${active === "stats" ? " active" : ""}`} href="/stats">
           <Icon name="chart" />
           <span>Stats</span>
+        </a>
+        <a className={`nav-item${active === "board" ? " active" : ""}`} href="/dashboard/board">
+          <Icon name="clipboard" />
+          <span>Board</span>
         </a>
       </div>
       <div className="side-user">

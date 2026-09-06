@@ -282,6 +282,26 @@ export class TaskService {
     return this.persist(task);
   }
 
+  /** Sets a task's `orderIndex` directly — the dashboard board's drag-
+   * reorder write path (issue #105 sub-stage 5b). No business rule beyond
+   * cohort scoping, matching every other mutation in this file post-
+   * ADR-0013; the caller (the board's drag-end handler, via
+   * `boardView.ts`'s `reorderColumn`) is responsible for computing the
+   * sequential index values, not this method. */
+  async setOrderIndex(
+    caller: Caller,
+    taskId: number,
+    orderIndex: number,
+  ): Promise<ServiceResult<Task>> {
+    const found = await this.mustFindInCallerCohort(caller, taskId);
+    if (!found.ok) return fail(found.error);
+    const task = found.value;
+
+    task.orderIndex = orderIndex;
+    task.updatedAt = this.clock.now().toISOString();
+    return this.persist(task);
+  }
+
   async addNote(caller: Caller, taskId: number, text: string): Promise<ServiceResult<Task>> {
     const found = await this.mustFindInCallerCohort(caller, taskId);
     if (!found.ok) return fail(found.error);

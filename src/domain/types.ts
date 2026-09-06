@@ -82,3 +82,13 @@ export function ok<T>(value: T): ServiceResult<T> {
 export function fail<T = never>(error: string): ServiceResult<T> {
   return { ok: false, error };
 }
+
+/** A cohort-scoped label a task can be tagged with (issue #101/#105's board
+ * — DevieBot's tags are un-scoped; this port scopes every tag to a cohort,
+ * see ADR notes in `docs/adr` and the sub-stage 5b PR). */
+export interface Tag {
+  id: number;
+  cohortId: string;
+  name: string;
+  color: string;
+}

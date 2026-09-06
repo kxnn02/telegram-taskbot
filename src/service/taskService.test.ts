@@ -270,6 +270,46 @@ describe("setPriority (issue #101) — no authorization check, mirrors setStatus
   });
 });
 
+describe("setOrderIndex (issue #105 sub-stage 5b) — the board's drag-reorder write path", () => {
+  it("lets any roster member set orderIndex on a task that isn't theirs", async () => {
+    const { service } = makeService();
+    const created = await assign(service); // alice's task
+    if (!created.ok) throw new Error("setup failed");
+    const result = await service.setOrderIndex(bob, created.value.id, 3);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.orderIndex).toBe(3);
+  });
+
+  it("a caller cannot touch a task in another cohort", async () => {
+    const { service } = makeService();
+    const created = await assign(service); // cohort-5
+    if (!created.ok) throw new Error("setup failed");
+    const otherCaller = caller("frank", OTHER_COHORT);
+    const result = await service.setOrderIndex(otherCaller, created.value.id, 1);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/doesn't exist/i);
+  });
+
+  it("rejects a nonexistent task id", async () => {
+    const { service } = makeService();
+    const result = await service.setOrderIndex(alice, 999, 0);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/doesn't exist/i);
+  });
+
+  it("reports a stale row_version as a conflict, not a silent overwrite", async () => {
+    const { service, store } = makeService();
+    const created = await assign(service);
+    if (!created.ok) throw new Error("setup failed");
+    vi.spyOn(store, "updateTask").mockResolvedValue({ outcome: "conflict" });
+
+    const result = await service.setOrderIndex(alice, created.value.id, 2);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/changed by someone else/i);
+  });
+});
+
 describe("setStatus — the free-set status model", () => {
   it("an intern can set their own task to done without a higher-up — this is intended behaviour, not a permission bug", async () => {
     const { service } = makeService();

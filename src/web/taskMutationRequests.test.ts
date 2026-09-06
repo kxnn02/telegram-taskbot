@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  parseCreateTagRequest,
   parseCreateTaskRequest,
   parseDueDateTextRequest,
   parseEditTaskRequest,
+  parseReorderRequest,
+  parseSetPriorityRequest,
+  parseSetTaskTagsRequest,
 } from "./taskMutationRequests.js";
 
 /**
@@ -137,6 +141,133 @@ describe("parseEditTaskRequest", () => {
   it("combines a status change with other field edits in one patch", () => {
     const result = parseEditTaskRequest({ title: "New title", status: "done" });
     expect(result).toEqual({ ok: true, value: { title: "New title", status: "done" } });
+  });
+});
+
+describe("parseReorderRequest (issue #105 sub-stage 5b)", () => {
+  it("accepts a valid non-negative integer orderIndex", () => {
+    const result = parseReorderRequest({ orderIndex: 3 });
+    expect(result).toEqual({ ok: true, value: { orderIndex: 3 } });
+  });
+
+  it("accepts zero", () => {
+    const result = parseReorderRequest({ orderIndex: 0 });
+    expect(result).toEqual({ ok: true, value: { orderIndex: 0 } });
+  });
+
+  it("rejects a missing orderIndex", () => {
+    const result = parseReorderRequest({});
+    expect(result.ok).toBe(false);
+  });
+
+  it("rejects a non-number orderIndex", () => {
+    const result = parseReorderRequest({ orderIndex: "3" });
+    expect(result.ok).toBe(false);
+  });
+
+  it("rejects a non-integer orderIndex", () => {
+    const result = parseReorderRequest({ orderIndex: 1.5 });
+    expect(result.ok).toBe(false);
+  });
+
+  it("rejects NaN and Infinity", () => {
+    expect(parseReorderRequest({ orderIndex: NaN }).ok).toBe(false);
+    expect(parseReorderRequest({ orderIndex: Infinity }).ok).toBe(false);
+  });
+
+  it("rejects a negative orderIndex", () => {
+    const result = parseReorderRequest({ orderIndex: -1 });
+    expect(result.ok).toBe(false);
+  });
+
+  it("rejects a non-object body", () => {
+    expect(parseReorderRequest(null).ok).toBe(false);
+  });
+});
+
+describe("parseCreateTagRequest (issue #105 sub-stage 5b)", () => {
+  it("accepts a name with no color", () => {
+    const result = parseCreateTagRequest({ name: "Backend" });
+    expect(result).toEqual({ ok: true, value: { name: "Backend" } });
+  });
+
+  it("accepts a name with a valid hex color", () => {
+    const result = parseCreateTagRequest({ name: "Backend", color: "#ef4444" });
+    expect(result).toEqual({ ok: true, value: { name: "Backend", color: "#ef4444" } });
+  });
+
+  it("rejects a missing name", () => {
+    expect(parseCreateTagRequest({}).ok).toBe(false);
+  });
+
+  it("rejects an empty name", () => {
+    expect(parseCreateTagRequest({ name: "   " }).ok).toBe(false);
+  });
+
+  it("rejects a malformed hex color", () => {
+    expect(parseCreateTagRequest({ name: "Backend", color: "red" }).ok).toBe(false);
+    expect(parseCreateTagRequest({ name: "Backend", color: "#fff" }).ok).toBe(false);
+    expect(parseCreateTagRequest({ name: "Backend", color: "123456" }).ok).toBe(false);
+  });
+
+  it("rejects a non-object body", () => {
+    expect(parseCreateTagRequest(null).ok).toBe(false);
+  });
+});
+
+describe("parseSetTaskTagsRequest (issue #105 sub-stage 5b)", () => {
+  it("accepts an array of non-negative integers", () => {
+    const result = parseSetTaskTagsRequest({ tagIds: [1, 2, 3] });
+    expect(result).toEqual({ ok: true, value: { tagIds: [1, 2, 3] } });
+  });
+
+  it("accepts an empty array — means 'no tags'", () => {
+    const result = parseSetTaskTagsRequest({ tagIds: [] });
+    expect(result).toEqual({ ok: true, value: { tagIds: [] } });
+  });
+
+  it("rejects a missing tagIds field", () => {
+    expect(parseSetTaskTagsRequest({}).ok).toBe(false);
+  });
+
+  it("rejects a non-array tagIds", () => {
+    expect(parseSetTaskTagsRequest({ tagIds: "1,2,3" }).ok).toBe(false);
+  });
+
+  it("rejects non-integer array elements", () => {
+    expect(parseSetTaskTagsRequest({ tagIds: [1, 2.5] }).ok).toBe(false);
+    expect(parseSetTaskTagsRequest({ tagIds: [1, "2"] }).ok).toBe(false);
+  });
+
+  it("rejects a negative array element", () => {
+    expect(parseSetTaskTagsRequest({ tagIds: [1, -2] }).ok).toBe(false);
+  });
+
+  it("rejects a non-object body", () => {
+    expect(parseSetTaskTagsRequest(null).ok).toBe(false);
+  });
+});
+
+describe("parseSetPriorityRequest (issue #105 sub-stage 5b — the dashboard's task-dialog priority write path, per taskService.ts's own setPriority doc comment)", () => {
+  it("accepts every one of the four priorities", () => {
+    for (const priority of ["low", "medium", "high", "urgent"]) {
+      expect(parseSetPriorityRequest({ priority })).toEqual({ ok: true, value: { priority } });
+    }
+  });
+
+  it("rejects a missing priority", () => {
+    expect(parseSetPriorityRequest({}).ok).toBe(false);
+  });
+
+  it("rejects a priority that isn't one of the four", () => {
+    const result = parseSetPriorityRequest({ priority: "urgentest" });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected failure");
+    expect(result.error).toContain("priority");
+  });
+
+  it("rejects a non-object body", () => {
+    expect(parseSetPriorityRequest(null).ok).toBe(false);
   });
 });
 
