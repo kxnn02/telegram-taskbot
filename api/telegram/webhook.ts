@@ -7,6 +7,7 @@ import { SupabaseRegistrationStore } from "../../src/storage/supabaseRegistratio
 import { SupabaseRosterStore } from "../../src/storage/supabaseRosterStore.js";
 import { SupabaseProcessedUpdatesStore } from "../../src/storage/supabaseProcessedUpdatesStore.js";
 import { loadRosterFromStore } from "../../src/config/roster.js";
+import { GroqTextModel } from "../../src/nlp/groqTextModel.js";
 import { handleTelegramWebhook, type WebhookHandlerDeps } from "../../src/webhook/webhookHandler.js";
 
 /**
@@ -56,6 +57,9 @@ async function buildDeps(): Promise<WebhookHandlerDeps> {
     activeCohortId,
     dashboardUrl:
       process.env.DASHBOARD_URL ?? "https://example.com/dashboard-coming-soon",
+    // Groq, not Anthropic (issue #102 follow-up): the account behind
+    // ANTHROPIC_API_KEY has no billing credit — see .env.example.
+    model: new GroqTextModel(),
   });
   // Webhook mode (unlike bot.start()'s long polling) needs bot.init() called
   // once so grammy has its own bot info (id, username, etc.) cached before

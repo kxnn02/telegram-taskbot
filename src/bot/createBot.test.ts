@@ -5,6 +5,7 @@ import { Roster } from "../domain/roster.js";
 import { InMemoryTaskStore } from "../storage/inMemoryTaskStore.js";
 import { InMemoryRegistrationStore } from "../storage/inMemoryRegistrationStore.js";
 import { InMemoryRosterStore } from "../storage/inMemoryRosterStore.js";
+import { FakeTextModel, ThrowingTextModel, type TextModel } from "../nlp/textModel.js";
 import { createBot, BOT_COMMANDS, HANDLED_COMMANDS, type CreatedBot } from "./createBot.js";
 
 /**
@@ -89,7 +90,16 @@ function nextUserId() {
   return userIdSeq++;
 }
 
-function makeTestBot(roster: Roster, activeCohortId: string = COHORT) {
+// Defaults to a model that always throws: every parser call site degrades
+// to its heuristic path on a model error (issue #102), so tests that don't
+// care about the bulk-paste path (issue #104) never need to queue a
+// response, and one that unexpectedly hit the model would fail loudly
+// instead of hanging.
+function makeTestBot(
+  roster: Roster,
+  activeCohortId: string = COHORT,
+  model: TextModel = new ThrowingTextModel(),
+) {
   const { calls, transformer } = makeFakeTransformer();
   const bot = new Bot("TEST_TOKEN", { botInfo: FAKE_BOT_INFO });
   bot.api.config.use(transformer);
@@ -102,6 +112,7 @@ function makeTestBot(roster: Roster, activeCohortId: string = COHORT) {
     dashboardUrl: "http://localhost:1234",
     bot,
     roster,
+    model,
   });
   return { ...created, calls };
 }
@@ -1031,6 +1042,305 @@ describe("mention trigger (issue #34, widened by #103)", () => {
     });
     if (!ownCohort.ok) throw new Error("read failed");
     expect(ownCohort.value.map((t) => t.title)).toEqual(["mention-scoped task"]);
+  });
+});
+
+// Issue #104: paste-in bulk task capture, wired through /addtask, the
+// trailing-/addtask entry point, and the mention trigger — all three share
+// `handleAddTaskArgs`, so bulk detection covers all of them at once.
+describe("bulk-paste task capture (issue #104)", () => {
+  function bulkModel(tasks: Array<Record<string, unknown>>) {
+    return new FakeTextModel([JSON.stringify(tasks)]);
+  }
+
+  it("creates one task per extracted paragraph, grouped by assignee in the reply", async () => {
+    // The caller ("carla") must already be a roster member — auto-
+    // registering a never-before-seen caller replaces this in-process
+    // roster wholesale from the (empty) roster store, which would wipe out
+    // dale/kien below (see resolveCaller's replaceAll).
+    const roster = new Roster([
+      { username: "carla", cohortId: COHORT },
+      { username: "dale", cohortId: COHORT },
+      { username: "kien", cohortId: COHORT },
+    ]);
+    const model = bulkModel([
+      { assignee: "dale", title: "Summarize recommendations", priority: "medium", dueDate: null },
+      { assignee: "kien", title: "Review the PR", priority: "medium", dueDate: null },
+    ]);
+    const testBot = makeTestBot(roster, COHORT, model);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(
+        userId,
+        "carla",
+        userId,
+        "/addtask @dale summarize the recs\n\n@kien review the PR",
+      ),
+    );
+
+    const call = lastCall(testBot.calls, "sendMessage")!;
+    expect(call.payload.parse_mode).toBe("HTML");
+    expect(call.payload.text).toContain("<b>2 tasks added.</b>");
+    expect(call.payload.text).toContain("@dale");
+    expect(call.payload.text).toContain("@kien");
+
+    const tasks = await testBot.service.listAllTasks({ username: "carla", cohortId: COHORT });
+    if (!tasks.ok) throw new Error("read failed");
+    expect(tasks.value.map((t) => t.assigneeUsername).sort()).toEqual(["dale", "kien"]);
+  });
+
+  it("creates an orphan task when the parsed assignee matches no roster member (carbon-copy rule)", async () => {
+    const roster = new Roster([{ username: "carla", cohortId: COHORT }]);
+    const model = bulkModel([
+      { assignee: "notarealperson", title: "Mystery task", priority: "medium", dueDate: null },
+    ]);
+    const testBot = makeTestBot(roster, COHORT, model);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(
+        userId,
+        "carla",
+        userId,
+        "/addtask @notarealperson do the mystery thing\n\nsecond line",
+      ),
+    );
+
+    const tasks = await testBot.service.listAllTasks({ username: "carla", cohortId: COHORT });
+    if (!tasks.ok) throw new Error("read failed");
+    expect(tasks.value.map((t) => t.assigneeUsername)).toEqual(["notarealperson"]);
+  });
+
+  it("falls back to the message author when the parser found no @mention at all", async () => {
+    const roster = new Roster([{ username: "carla", cohortId: COHORT }]);
+    const model = bulkModel([
+      { assignee: "unassigned", title: "First bullet", priority: "medium", dueDate: null },
+      { assignee: "unassigned", title: "Second bullet", priority: "medium", dueDate: null },
+    ]);
+    const testBot = makeTestBot(roster, COHORT, model);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "carla", userId, "/addtask - First bullet\n\n- Second bullet"),
+    );
+
+    const tasks = await testBot.service.listAllTasks({ username: "carla", cohortId: COHORT });
+    if (!tasks.ok) throw new Error("read failed");
+    expect(tasks.value.every((t) => t.assigneeUsername === "carla")).toBe(true);
+  });
+
+  it("defaults a task's due date to the nearest onsite Tuesday/Thursday, not comingFriday", async () => {
+    // System time is 2026-09-05T02:00:00Z (Saturday, Manila) — see the
+    // top-level beforeEach. Nearest onsite day is Tuesday 2026-09-08.
+    const roster = new Roster([
+      { username: "carla", cohortId: COHORT },
+      { username: "dale", cohortId: COHORT },
+    ]);
+    const model = bulkModel([
+      { assignee: "dale", title: "No date given", priority: "medium", dueDate: null },
+    ]);
+    const testBot = makeTestBot(roster, COHORT, model);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "carla", userId, "/addtask @dale no date given\n\nsecond line"),
+    );
+
+    const tasks = await testBot.service.listAllTasks({ username: "carla", cohortId: COHORT });
+    if (!tasks.ok) throw new Error("read failed");
+    expect(tasks.value[0]?.dueDate).toBe("2026-09-08");
+  });
+
+  it("replies with Devie's no-tasks-extracted message when the parser returns nothing", async () => {
+    // An empty model response ([]) alone isn't enough to reach this reply —
+    // `parseBulkTasks` falls back to its heuristic parser whenever the
+    // model's own extraction comes back empty (issue #102), and that
+    // heuristic is resilient enough to find *something* in almost any text.
+    // This body is chosen so the heuristic also comes up empty: a single
+    // punctuation-only "paragraph" whose title strips down to nothing once
+    // trailing `!`/`?` characters are removed (`parseBulkTasksHeuristic`
+    // then `continue`s past it) — the semicolon-plus-space is only there to
+    // satisfy `shouldTriggerBulkCreate`'s grouped-segment gate.
+    const roster = new Roster([]);
+    const model = bulkModel([]);
+    const testBot = makeTestBot(roster, COHORT, model);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "carla", userId, "/addtask !!! ;  ???"),
+    );
+
+    expect(lastReplyText(testBot.calls)).toBe(
+      "❌ Could not extract any tasks from that message.",
+    );
+  });
+
+  it("degrades to the heuristic parser when the model throws, and still creates tasks", async () => {
+    const roster = new Roster([{ username: "carla", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster, COHORT, new ThrowingTextModel());
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "carla", userId, "/addtask @dale fix the bug\n\n@kien review the PR"),
+    );
+
+    const tasks = await testBot.service.listAllTasks({ username: "carla", cohortId: COHORT });
+    if (!tasks.ok) throw new Error("read failed");
+    expect(tasks.value.length).toBeGreaterThan(0);
+  });
+
+  it("cohort isolation: a bulk paste cannot create tasks in another cohort", async () => {
+    const roster = new Roster([
+      { username: "carla", cohortId: COHORT },
+      { username: "dale", cohortId: COHORT },
+      { username: "other", cohortId: "cohort-9" },
+    ]);
+    const model = bulkModel([
+      { assignee: "dale", title: "Cohort-scoped bulk task", priority: "medium", dueDate: null },
+    ]);
+    const testBot = makeTestBot(roster, COHORT, model);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "carla", userId, "/addtask @dale task one\n\nsecond line"),
+    );
+
+    const otherCohort = await testBot.service.listAllTasks({
+      username: "other",
+      cohortId: "cohort-9",
+    });
+    if (!otherCohort.ok) throw new Error("read failed");
+    expect(otherCohort.value).toEqual([]);
+  });
+
+  it("an ordinary single-line, single-mention /addtask is unaffected — no bulk detour", async () => {
+    const roster = new Roster([
+      { username: "carla", cohortId: COHORT },
+      { username: "dale", cohortId: COHORT },
+    ]);
+    const testBot = makeTestBot(roster, COHORT, new ThrowingTextModel());
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "carla", userId, "/addtask fix the login bug @dale"),
+    );
+
+    expect(lastReplyText(testBot.calls)).toContain("created and assigned to @dale");
+  });
+});
+
+// Issue #104: Devie's `@all`/role-slug fan-out for the single-mention
+// /addtask grammar. The caller is always one of the roster members already
+// seeded below (not a fresh "carla") — auto-registering a never-before-seen
+// caller replaces the whole in-process roster from the (empty) roster
+// store, wiping out anyone seeded directly (see resolveCaller's
+// replaceAll). Devie's "no members found to assign to" branch (route.ts:
+// 1207-1209) is carbon-copied in `fanOut.ts` and covered at the unit level
+// in `fanOut.test.ts` — it has no honest end-to-end reproduction here,
+// since the caller is always auto-registered into their own cohort before
+// this handler runs, so `@all` (fanning out across that same cohort) can
+// never actually come back empty.
+describe("@all and role fan-out (issue #104)", () => {
+  it("/addtask <title> @all creates one task per roster member in the caller's cohort", async () => {
+    const roster = new Roster([
+      { username: "alice", cohortId: COHORT },
+      { username: "bob", cohortId: COHORT },
+    ]);
+    const testBot = makeTestBot(roster, COHORT);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, "/addtask Fix the login page @all"),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("✅ Task assigned to all <b>2</b> members");
+    expect(text).toContain("Fix the login page");
+
+    const tasks = await testBot.service.listAllTasks({ username: "alice", cohortId: COHORT });
+    if (!tasks.ok) throw new Error("read failed");
+    expect(tasks.value.map((t) => t.assigneeUsername).sort()).toEqual(["alice", "bob"]);
+  });
+
+  // `/addtask`'s mention grammar reuses `MENTION_RE` (`\w+` only — no
+  // hyphens), the same restriction Devie's own `@(\w+)` mention capture has.
+  // A cohort id with no hyphen (e.g. "cohort5b" below) fans out cleanly; the
+  // real deployed cohort id ("cohort-5", see the next test) can't be typed
+  // as a mention token at all — not a bug this ticket introduces, since
+  // Telegram's own mention syntax has the identical restriction.
+  it("/addtask <title> @<cohort-id> fans out to that cohort's roster (role mapped onto cohort_id)", async () => {
+    const HYPHEN_FREE_COHORT = "cohort5b";
+    const roster = new Roster([
+      { username: "alice", cohortId: HYPHEN_FREE_COHORT },
+      { username: "bob", cohortId: HYPHEN_FREE_COHORT },
+      { username: "erin", cohortId: "cohort-9" },
+    ]);
+    const testBot = makeTestBot(roster, HYPHEN_FREE_COHORT);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, `/addtask Fix the login page @${HYPHEN_FREE_COHORT}`),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain(`in <b>${HYPHEN_FREE_COHORT}</b>`);
+
+    const tasks = await testBot.service.listAllTasks({
+      username: "alice",
+      cohortId: HYPHEN_FREE_COHORT,
+    });
+    if (!tasks.ok) throw new Error("read failed");
+    expect(tasks.value.map((t) => t.assigneeUsername).sort()).toEqual(["alice", "bob"]);
+  });
+
+  it("a hyphenated cohort id (the real deployed shape, e.g. 'cohort-5') can't be typed as a mention token at all — falls through to plain single-assignee creation", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster, COHORT);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, `/addtask Fix the login page @${COHORT}`),
+    );
+
+    // MENTION_RE's `\w+` stops at the hyphen, and the lookahead then fails
+    // (what follows isn't whitespace/end-of-string) — so no mention is
+    // recognized at all, and the whole `@cohort-5` stays in the title.
+    expect(lastReplyText(testBot.calls)).toContain("created and assigned to @alice");
+  });
+
+  it("a role/cohort token matching nobody falls through to the ordinary unknown-member reply", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster, COHORT);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, "/addtask Fix the login page @nonexistentcohort"),
+    );
+
+    expect(lastReplyText(testBot.calls)).toContain(
+      "don't see @nonexistentcohort on this cohort's roster",
+    );
+  });
+
+  it("cohort isolation: @all never reaches a member of another cohort", async () => {
+    const roster = new Roster([
+      { username: "alice", cohortId: COHORT },
+      { username: "erin", cohortId: "cohort-9" },
+    ]);
+    const testBot = makeTestBot(roster, COHORT);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, "/addtask Fix the login page @all"),
+    );
+
+    const otherCohort = await testBot.service.listAllTasks({
+      username: "erin",
+      cohortId: "cohort-9",
+    });
+    if (!otherCohort.ok) throw new Error("read failed");
+    expect(otherCohort.value).toEqual([]);
   });
 });
 

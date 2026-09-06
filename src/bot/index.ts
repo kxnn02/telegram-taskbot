@@ -5,6 +5,7 @@ import { SupabaseTaskStore } from "../storage/supabaseTaskStore.js";
 import { SupabaseRegistrationStore } from "../storage/supabaseRegistrationStore.js";
 import { SupabaseRosterStore } from "../storage/supabaseRosterStore.js";
 import { loadRosterFromStore } from "../config/roster.js";
+import { GroqTextModel } from "../nlp/groqTextModel.js";
 
 /**
  * LOCAL-DEV-ONLY entrypoint (`npm run dev`). Runs the bot via long polling
@@ -46,6 +47,9 @@ async function main() {
     activeCohortId,
     dashboardUrl:
       process.env.DASHBOARD_URL ?? "https://example.com/dashboard-coming-soon",
+    // Groq, not Anthropic (issue #102 follow-up): the account behind
+    // ANTHROPIC_API_KEY has no billing credit — see .env.example.
+    model: new GroqTextModel(),
   });
 
   await registerBotCommands(bot);

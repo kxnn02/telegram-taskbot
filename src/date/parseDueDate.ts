@@ -66,3 +66,27 @@ export function comingFriday(referenceDate: Date = new Date()): DueDateResult {
     friendly: due.toFormat("cccc, LLLL d, yyyy"),
   };
 }
+
+/** Luxon ISO weekday numbers (1 = Monday .. 7 = Sunday) for Tuesday/Thursday. */
+const ONSITE_WEEKDAYS = new Set([2, 4]);
+
+/**
+ * DevieBot's `defaultDueDate()` (`app/api/telegram/webhook/route.ts:12-14`,
+ * delegating to `lib/date.ts:69-76`'s `getNextOnsiteDay` @ `632a22c`): the
+ * nearest upcoming Tuesday or Thursday, Asia/Manila-resolved. Always
+ * strictly after `referenceDate` — even a `referenceDate` that already
+ * falls on Tuesday or Thursday rolls forward to the *next* one, never the
+ * same day (issue #104's bulk-paste default, kept deliberately separate
+ * from `comingFriday`, which is issue #27's default for the single-task
+ * `/addtask` grammar and predates the carbon-copy direction).
+ */
+export function getNextOnsiteDay(referenceDate: Date = new Date()): DueDateResult {
+  let dt = DateTime.fromJSDate(referenceDate, { zone: MANILA_ZONE }).plus({ days: 1 });
+  while (!ONSITE_WEEKDAYS.has(dt.weekday)) {
+    dt = dt.plus({ days: 1 });
+  }
+  return {
+    isoDate: dt.toFormat("yyyy-MM-dd"),
+    friendly: dt.toFormat("cccc, LLLL d, yyyy"),
+  };
+}
