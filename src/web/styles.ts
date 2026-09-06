@@ -53,6 +53,23 @@ export const TOKENS = `
   --radius-md:14px; --radius-lg:18px; --radius-pill:999px;
   --shadow-sm:0 1px 3px rgba(15,23,42,.06),0 1px 2px rgba(15,23,42,.04);
   --shadow-primary:0 8px 22px rgb(var(--color-primary)/0.30);
+}
+
+/* Dark-mode variants of the tokens above (issue #105 sub-stage 5e) — this
+   repo's own DEVCON+ values carried into a dark palette, not Devie's own
+   dark theme (ticket decision: "do NOT invent Devie's own dark palette").
+   next-themes (attribute="class") toggles this ".dark" class on <html>,
+   matching app/globals.css's shadcn ".dark" block and its
+   "@custom-variant dark (&:is(.dark *))". Only the tokens that actually
+   read as "light theme" change; the brand colors (--primary, the status
+   bg/fg pairs, the navy sidebar gradient) already work on a dark
+   background and are left as-is so light and dark stay recognizably the
+   same brand rather than two different products. */
+.dark{
+  --bg:#0B1120; --surface:#131C3D; --surface-2:#0F172A; --surface-sunken:#0C1330;
+  --fg1:#F1F5F9; --fg2:#94A3B8; --fg3:#64748B;
+  --border:rgba(255,255,255,0.10); --border-strong:rgba(255,255,255,0.18);
+  --shadow-sm:0 1px 3px rgba(0,0,0,.30),0 1px 2px rgba(0,0,0,.20);
 }`;
 
 export const CSS = `

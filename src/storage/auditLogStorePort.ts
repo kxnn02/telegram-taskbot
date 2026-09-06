@@ -19,4 +19,15 @@ export interface AuditLogStorePort {
    * `fetchAuditLogs` (`:126-134`: `.order('created_at', { ascending: false
    * }).limit(50)`). */
   listRecent(cohortId: string, limit: number): Promise<AuditLog[]>;
+
+  /** Keyset-paginated rows for a cohort, newest first, for the dedicated
+   * activity-log view (issue #105 sub-stage 5e) — `listRecent` is enough
+   * for the settings page's inline preview, but a standalone view over a
+   * table that only ever grows needs pagination rather than one capped
+   * `limit`. `beforeId` (when given) returns rows with `id` strictly less
+   * than it — ids are a Postgres `bigserial`, monotonic with insertion
+   * order, so this is a stable cursor even when two rows share the same
+   * millisecond `created_at`. `hasMore` tells the caller whether another
+   * page exists past the one returned. */
+  listPage(cohortId: string, opts: { limit: number; beforeId?: number }): Promise<{ items: AuditLog[]; hasMore: boolean }>;
 }

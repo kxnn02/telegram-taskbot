@@ -59,16 +59,35 @@ up the codebase later.
 > migration in this project is additive. See
 > [`docs/runbooks/migrations.md`](./docs/runbooks/migrations.md).
 >
-> **A sixth change adds a Tailwind v4 + shadcn/ui toolchain to the dashboard**
-> (issue [#105](https://github.com/kxnn02/telegram-taskbot/issues/105) sub-stage 5a, part of the
-> larger Cohort 4 carbon-copy port — see `RESUME-cohort4-port.md`): `app/globals.css`,
-> `components.json`, `components/ui/`, and `lib/utils.ts` bring in Tailwind v4 and shadcn/ui,
-> used starting with #105's later sub-stages (the kanban board, settings, and team pages). The
-> Tailwind theme's `@theme` block maps the *same* DEVCON design tokens `src/web/styles.ts` already
-> defines (colors, radii, Proxima Nova) rather than introducing a second palette — this stage
-> ships no visible change to any existing page. See `app/globals.css`'s doc comment for the exact
-> mapping and for why Tailwind's reset/defaults (loaded in a CSS cascade layer) can't override the
-> existing hand-rolled stylesheet (rendered as plain, un-layered CSS).
+> **A sixth change ports DevieBot's dashboard as a real kanban board, settings, team, and
+> activity-log pages, on a Tailwind v4 + shadcn/ui toolchain, with light/dark theming**
+> (issue [#105](https://github.com/kxnn02/telegram-taskbot/issues/105), now closed, part of the
+> larger Cohort 4 carbon-copy port — see `RESUME-cohort4-port.md`), shipped in five sub-stages:
+>
+> - **5a** — `app/globals.css`, `components.json`, `components/ui/`, and `lib/utils.ts` bring in
+>   Tailwind v4 and shadcn/ui. The Tailwind theme's `@theme` block maps the *same* DEVCON design
+>   tokens `src/web/styles.ts` already defines (colors, radii, Proxima Nova) rather than
+>   introducing a second palette — this stage shipped no visible change to any existing page. See
+>   `app/globals.css`'s doc comment for the exact mapping and for why Tailwind's reset/defaults
+>   (loaded in a CSS cascade layer) can't override the existing hand-rolled stylesheet (rendered as
+>   plain, un-layered CSS).
+> - **5b** — the kanban board (`app/dashboard/board`, `components/kanban/`): columns per status,
+>   drag-and-drop via dnd-kit writing `order_index`, the task dialog, and tags (`tags`/`task_tags`,
+>   created empty by #101, get their first and only consumer here).
+> - **5c** — the settings page (`app/dashboard/settings`, `components/settings/`), minus Devie's
+>   bot-token field (the token lives in `BOT_TOKEN`, never rendered) — and `audit_logs`' one and
+>   only writer, `SettingsService.saveGroupChatId`, which writes an `ok`/`error` row after every
+>   group-chat-id save.
+> - **5d** — the team page (`app/dashboard/team`, `components/team/`), fully editable with no role
+>   column or permission tier — #106 deleted roles and every access-control gate, so there is
+>   nothing left to enforce.
+> - **5e** — `next-themes` light/dark switching (a toggle in the dashboard topbar, `.dark` class on
+>   `<html>`) with dark variants of the *same* DEVCON tokens (not Devie's own dark palette) added
+>   to both `src/web/styles.ts`'s `TOKENS` and `app/globals.css`'s shadcn `.dark` block; and a
+>   dedicated, keyset-paginated activity-log page (`app/dashboard/activity`, `/api/activity`,
+>   `ActivityLogService`, `src/web/activityLogView.ts`) over `audit_logs` — separate from the
+>   settings page's own inline, capped-at-50 preview (`SettingsService.listRecentActivity`,
+>   unchanged).
 
 ## Glossary
 

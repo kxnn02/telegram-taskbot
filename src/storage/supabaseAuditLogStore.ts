@@ -55,6 +55,33 @@ export class SupabaseAuditLogStore implements AuditLogStorePort {
     }
     return ((data ?? []) as AuditLogRow[]).map(toAuditLog);
   }
+
+  /** Keyset pagination by `id` (issue #105 sub-stage 5e's dedicated
+   * activity-log view) rather than an offset — cheaper for Postgres and
+   * stable under concurrent inserts, since a new row landing between two
+   * page fetches can't shift already-seen rows into the next page. Fetches
+   * one extra row to derive `hasMore` without a separate count query. */
+  async listPage(
+    cohortId: string,
+    opts: { limit: number; beforeId?: number },
+  ): Promise<{ items: AuditLog[]; hasMore: boolean }> {
+    let query = this.client
+      .from("audit_logs")
+      .select("id, cohort_id, action, status, message, meta, created_at")
+      .eq("cohort_id", cohortId)
+      .order("id", { ascending: false })
+      .limit(opts.limit + 1);
+    if (opts.beforeId !== undefined) {
+      query = query.lt("id", opts.beforeId);
+    }
+    const { data, error } = await query;
+    if (error) {
+      throw new Error(`listPage(${cohortId}) failed: ${error.message}`);
+    }
+    const rows = (data ?? []) as AuditLogRow[];
+    const hasMore = rows.length > opts.limit;
+    return { items: rows.slice(0, opts.limit).map(toAuditLog), hasMore };
+  }
 }
 
 function toAuditLog(row: AuditLogRow): AuditLog {
