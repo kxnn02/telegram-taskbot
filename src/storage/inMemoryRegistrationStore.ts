@@ -10,11 +10,13 @@ import type { RegistrationStorePort } from "./registrationStorePort.js";
 export class InMemoryRegistrationStore implements RegistrationStorePort {
   private readonly byTelegramId = new Map<number, string>();
   private readonly byUsername = new Map<string, number>();
+  private readonly registeredAtByUsername = new Map<string, string>();
 
   async register(telegramUserId: number, username: string): Promise<void> {
     const normalized = normalizeUsername(username);
     this.byTelegramId.set(telegramUserId, normalized);
     this.byUsername.set(normalized, telegramUserId);
+    this.registeredAtByUsername.set(normalized, new Date().toISOString());
   }
 
   async findUsername(telegramUserId: number): Promise<string | undefined> {
@@ -23,5 +25,9 @@ export class InMemoryRegistrationStore implements RegistrationStorePort {
 
   async findTelegramId(username: string): Promise<number | undefined> {
     return this.byUsername.get(normalizeUsername(username));
+  }
+
+  async findRegisteredAt(username: string): Promise<string | undefined> {
+    return this.registeredAtByUsername.get(normalizeUsername(username));
   }
 }
