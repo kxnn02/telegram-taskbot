@@ -173,6 +173,8 @@ const ICON_PATHS: Record<string, string> = {
   users:
     '<circle cx="9.5" cy="8.5" r="3.5"/><path d="M3.5 19.5a6 6 0 0 1 12 0"/><path d="M16 5.6a3.5 3.5 0 0 1 0 5.8M17.5 19.5a6 6 0 0 0-2-4.5"/>',
   spark: '<path d="M12 3.5 14.2 9l5.8.5-4.4 3.9 1.3 5.6L12 16.1 7.1 19l1.3-5.6L4 9.5 9.8 9Z"/>',
+  gear:
+    '<circle cx="12" cy="12" r="3.2"/><path d="M12 4.5v2M12 17.5v2M19.5 12h-2M6.5 12h-2M17.4 6.6l-1.4 1.4M8 16l-1.4 1.4M17.4 17.4 16 16M8 8 6.6 6.6"/>',
   chevronDown: '<path d="M7 10l5 5 5-5"/>',
 };
 

@@ -92,3 +92,23 @@ export interface Tag {
   name: string;
   color: string;
 }
+
+/** Devie's `AuditLogStatus` (issue #101's `audit_logs` migration CHECK
+ * constraint) — `"ok"`/`"error"`/`"info"`, matching the settings page's
+ * three-way status glyph (issue #105 sub-stage 5c). */
+export type AuditLogStatus = "ok" | "error" | "info";
+
+/** A cohort-scoped row in `audit_logs` (issue #101's migration; issue
+ * #105 sub-stage 5c is the first and, per the ticket, only writer —
+ * `SettingsService.saveGroupChatId` — mirroring DevieBot's
+ * `app/dashboard/settings/page.tsx:137`, the sole writer in their own
+ * codebase). */
+export interface AuditLog {
+  id: number;
+  cohortId: string;
+  action: string;
+  status: AuditLogStatus;
+  message: string;
+  meta: Record<string, unknown>;
+  createdAt: string;
+}

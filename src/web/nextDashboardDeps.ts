@@ -1,8 +1,11 @@
 import { loadRosterFromStore } from "../config/roster.js";
 import { SystemClock } from "../domain/clock.js";
 import type { Roster } from "../domain/roster.js";
+import { SettingsService } from "../service/settingsService.js";
 import { TagService } from "../service/tagService.js";
 import { TaskService } from "../service/taskService.js";
+import { SupabaseAuditLogStore } from "../storage/supabaseAuditLogStore.js";
+import { SupabaseCohortStore } from "../storage/supabaseCohortStore.js";
 import { createSupabaseClient } from "../storage/supabaseClient.js";
 import { SupabaseRosterStore } from "../storage/supabaseRosterStore.js";
 import { SupabaseTagStore } from "../storage/supabaseTagStore.js";
@@ -35,6 +38,9 @@ export interface DashboardDeps {
    * — added the same way `service`/`rosterStore` are, over the same
    * Supabase client. */
   tagService: TagService;
+  /** Backs the settings page's group-chat-id save and its inline audit log
+   * (issue #105 sub-stage 5c) — added the same way `tagService` was. */
+  settingsService: SettingsService;
 }
 
 function requireEnv(name: string): string {
@@ -56,6 +62,10 @@ async function buildDashboardDeps(): Promise<DashboardDeps> {
   const roster = await loadRosterFromStore(rosterStore);
   const service = new TaskService(new SupabaseTaskStore(supabase), roster, new SystemClock());
   const tagService = new TagService(new SupabaseTagStore(supabase), service);
+  const settingsService = new SettingsService(
+    new SupabaseCohortStore(supabase),
+    new SupabaseAuditLogStore(supabase),
+  );
 
   return {
     botToken,
@@ -66,6 +76,7 @@ async function buildDashboardDeps(): Promise<DashboardDeps> {
     service,
     rosterStore,
     tagService,
+    settingsService,
   };
 }
 

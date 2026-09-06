@@ -12,4 +12,12 @@ export class InMemoryCohortStore implements CohortStorePort {
   async getGroupChatId(cohortId: string): Promise<string | undefined> {
     return this.groupChatIds.get(cohortId);
   }
+
+  async setGroupChatId(cohortId: string, groupChatId: string): Promise<void> {
+    if (groupChatId === "") {
+      this.groupChatIds.delete(cohortId);
+      return;
+    }
+    this.groupChatIds.set(cohortId, groupChatId);
+  }
 }
