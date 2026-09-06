@@ -8,7 +8,7 @@ import {
   sendStandupPush,
 } from "../../src/jobs/standupPush.js";
 import { notifyJobFailure } from "../../src/jobs/notifyJobFailure.js";
-import { AnthropicTextModel } from "../../src/nlp/anthropicTextModel.js";
+import { GroqTextModel } from "../../src/nlp/groqTextModel.js";
 import { ThrowingTextModel, type TextModel } from "../../src/nlp/textModel.js";
 
 /**
@@ -27,22 +27,22 @@ import { ThrowingTextModel, type TextModel } from "../../src/nlp/textModel.js";
 const JOB_NAME = "standup-push";
 
 /**
- * The real model behind `dailyQuote`. Uses `AnthropicTextModel` — the
- * ticket pins `claude-haiku-4-5` and its own acceptance criteria name
- * `ANTHROPIC_API_KEY` specifically — rather than the `GroqTextModel` the
- * webhook's language parser substitutes in (`api/telegram/webhook.ts`,
- * issue #102 follow-up: that account has no billing credit). If the
- * account still can't be billed, this call simply throws and `dailyQuote`
- * degrades to `''` exactly as it must — same outcome either way, so this
- * follows the ticket's literal wording rather than the webhook's
- * workaround. Missing-key is handled as a throwing model rather than a
- * constructor throw, so a standup with no key configured still renders
- * (quote omitted) instead of 500ing.
+ * The real model behind `dailyQuote`. Uses `GroqTextModel`, matching every
+ * other real call site in this repo (`api/telegram/webhook.ts`,
+ * `src/bot/index.ts`) — the ticket's own wording pins `claude-haiku-4-5` /
+ * `ANTHROPIC_API_KEY`, but the account behind that key has no billing
+ * credit (issue #102 follow-up), the same reason the webhook's language
+ * parser already substitutes Groq's free tier. `dailyQuote` degrades to
+ * `''` on any model failure regardless of which provider is behind it, so
+ * this keeps the actual behavior identical to the ticket's while using the
+ * provider that can actually be called. Missing-key is handled as a
+ * throwing model rather than a constructor throw, so a standup with no key
+ * configured still renders (quote omitted) instead of 500ing.
  */
 function buildQuoteModel(): TextModel {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return new ThrowingTextModel(new Error("ANTHROPIC_API_KEY is not set."));
-  return new AnthropicTextModel(apiKey);
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) return new ThrowingTextModel(new Error("GROQ_API_KEY is not set."));
+  return new GroqTextModel(apiKey);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
