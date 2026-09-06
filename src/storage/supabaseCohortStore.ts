@@ -21,4 +21,16 @@ export class SupabaseCohortStore implements CohortStorePort {
     }
     return (data as CohortRow | null)?.group_chat_id ?? undefined;
   }
+
+  /** `groupChatId === ""` clears the column back to `null` — matches
+   * `getGroupChatId`'s "undefined means unset" contract. */
+  async setGroupChatId(cohortId: string, groupChatId: string): Promise<void> {
+    const { error } = await this.client
+      .from("cohorts")
+      .update({ group_chat_id: groupChatId === "" ? null : groupChatId })
+      .eq("cohort_id", cohortId);
+    if (error) {
+      throw new Error(`setGroupChatId(${cohortId}) failed: ${error.message}`);
+    }
+  }
 }
