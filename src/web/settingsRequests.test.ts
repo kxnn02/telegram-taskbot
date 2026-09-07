@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseSaveSettingsRequest } from "./settingsRequests.js";
+import {
+  parseSaveSettingsRequest,
+  parseStandupRequest,
+  isMaintainer,
+  stripWebhookUrlQuery,
+  buildWebhookStatusResponse,
+} from "./settingsRequests.js";
 
 describe("parseSaveSettingsRequest", () => {
   it("accepts a groupChatId string", () => {
@@ -26,5 +32,109 @@ describe("parseSaveSettingsRequest", () => {
     expect(parseSaveSettingsRequest(null).ok).toBe(false);
     expect(parseSaveSettingsRequest("nope").ok).toBe(false);
     expect(parseSaveSettingsRequest([]).ok).toBe(false);
+  });
+});
+
+describe("parseStandupRequest", () => {
+  it("accepts mode: preview", () => {
+    expect(parseStandupRequest({ mode: "preview" })).toEqual({
+      ok: true,
+      value: { mode: "preview" },
+    });
+  });
+
+  it("accepts mode: test", () => {
+    expect(parseStandupRequest({ mode: "test" })).toEqual({
+      ok: true,
+      value: { mode: "test" },
+    });
+  });
+
+  it("rejects a missing mode field", () => {
+    expect(parseStandupRequest({}).ok).toBe(false);
+  });
+
+  it("rejects an unrecognized mode value", () => {
+    expect(parseStandupRequest({ mode: "send" }).ok).toBe(false);
+  });
+
+  it("rejects a malformed (non-object) body", () => {
+    expect(parseStandupRequest(null).ok).toBe(false);
+    expect(parseStandupRequest("nope").ok).toBe(false);
+    expect(parseStandupRequest([]).ok).toBe(false);
+  });
+});
+
+describe("isMaintainer", () => {
+  it("matches the same username", () => {
+    expect(isMaintainer({ username: "kxnn02", cohortId: "c1" }, "kxnn02")).toBe(true);
+  });
+
+  it("is case-insensitive", () => {
+    expect(isMaintainer({ username: "KxNn02", cohortId: "c1" }, "kxnn02")).toBe(true);
+  });
+
+  it("ignores a leading @ on either side", () => {
+    expect(isMaintainer({ username: "@kxnn02", cohortId: "c1" }, "kxnn02")).toBe(true);
+    expect(isMaintainer({ username: "kxnn02", cohortId: "c1" }, "@kxnn02")).toBe(true);
+  });
+
+  it("rejects a different username", () => {
+    expect(isMaintainer({ username: "someoneelse", cohortId: "c1" }, "kxnn02")).toBe(false);
+  });
+});
+
+describe("stripWebhookUrlQuery", () => {
+  it("removes the query string, keeping origin and path", () => {
+    expect(
+      stripWebhookUrlQuery(
+        "https://example.vercel.app/api/telegram/webhook?x-vercel-protection-bypass=secret",
+      ),
+    ).toBe("https://example.vercel.app/api/telegram/webhook");
+  });
+
+  it("passes through a URL with no query string unchanged", () => {
+    expect(stripWebhookUrlQuery("https://example.vercel.app/api/telegram/webhook")).toBe(
+      "https://example.vercel.app/api/telegram/webhook",
+    );
+  });
+
+  it("returns an empty string as-is (webhook not registered)", () => {
+    expect(stripWebhookUrlQuery("")).toBe("");
+  });
+});
+
+describe("buildWebhookStatusResponse", () => {
+  it("shapes a registered webhook, stripping its query string", () => {
+    expect(
+      buildWebhookStatusResponse({
+        url: "https://example.vercel.app/api/telegram/webhook?x-vercel-protection-bypass=secret",
+        pending_update_count: 0,
+      }),
+    ).toEqual({
+      url: "https://example.vercel.app/api/telegram/webhook",
+      pendingCount: 0,
+      lastError: undefined,
+    });
+  });
+
+  it("carries through a last_error_message", () => {
+    expect(
+      buildWebhookStatusResponse({
+        url: "https://example.vercel.app/api/telegram/webhook",
+        pending_update_count: 3,
+        last_error_message: "Connection timed out",
+      }),
+    ).toEqual({
+      url: "https://example.vercel.app/api/telegram/webhook",
+      pendingCount: 3,
+      lastError: "Connection timed out",
+    });
+  });
+
+  it("shapes an unregistered webhook (empty url)", () => {
+    expect(
+      buildWebhookStatusResponse({ url: "", pending_update_count: 0 }),
+    ).toEqual({ url: "", pendingCount: 0, lastError: undefined });
   });
 });
