@@ -1,6 +1,6 @@
 import { DateTime } from "luxon";
 import type { TaskWithFlags } from "../service/taskService.js";
-import type { TaskPriority, TaskStatus } from "../domain/types.js";
+import type { Task, TaskPriority, TaskStatus } from "../domain/types.js";
 import { MANILA_ZONE } from "../domain/overdue.js";
 
 /** Display labels for the six free-set statuses (#27's normative status
@@ -77,6 +77,41 @@ function paginationFooter(
     return `Page ${page} of ${totalPages} — send /${commandName} ${prefix}${page + 1} for more`;
   }
   return `Page ${page} of ${totalPages}.`;
+}
+
+function esc(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** Devie's "no active task found" card (issue #124 stage S1,
+ * `route.ts:952`/`:1012`), sent with `parse_mode: "HTML"`. */
+export function formatTaskNotFound(input: string): string {
+  return [
+    `❌ No active task found matching <b>"${esc(input)}"</b>.`,
+    "",
+    "<i>Use /tasks to see all active tasks.</i>",
+  ].join("\n");
+}
+
+/** Devie's keyword-lookup disambiguation card (issue #124 stage S1,
+ * `route.ts:957-960`, each candidate line from `taskRefLine` at
+ * `route.ts:456-460`), sent with `parse_mode: "HTML"`. `command` is
+ * whichever of `/done`, `/complete` or `/update` was typed. `{id}` renders
+ * as the bare `task_number`, not the `T-001` form — copied from Devie. */
+export function formatAmbiguousTaskMatches(
+  command: string,
+  input: string,
+  matches: Task[],
+): string {
+  return [
+    `🔍 Multiple tasks matched <b>"${esc(input)}"</b>:`,
+    ...matches.map(
+      (t) => `• <b>${t.id}</b> · ${esc(t.title)} (${t.status.replace(/_/g, " ")})`,
+    ),
+    "",
+    "Please be more specific, or use the task number:",
+    `<code>${command} &lt;number&gt;</code>`,
+  ].join("\n");
 }
 
 export function formatTaskLine(task: TaskWithFlags): string {

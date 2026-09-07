@@ -20,10 +20,13 @@ export interface BatchItem {
   note?: string;
 }
 
-/** `/done 21,22,23`, `/complete t21, t22` — a bare comma-separated ref
- * list, no per-item status text (issue #32). */
+/** `/done 21,22,23`, `/complete t21, t22` — a comma/newline-separated ref
+ * list, no per-item status text (issue #32). Splits on `/[\n,]+/`, matching
+ * Devie's own bulk-list guard (issue #124 stage S1, `route.ts:914`/`:973`),
+ * so a plain keyword with no comma or newline — including a multi-word one
+ * like `login bug` — passes through untouched as a single item. */
 export function parseRefListItems(raw: string): BatchItem[] {
-  return splitNonEmpty(raw, ",").map((token) => ({
+  return splitNonEmpty(raw, /[\n,]+/).map((token) => ({
     label: token,
     ref: parseTaskRef(token),
     statusText: undefined,
@@ -206,7 +209,7 @@ export function parseUpdateItems(raw: string): BatchItem[] {
   }));
 }
 
-function splitNonEmpty(raw: string, separator: string): string[] {
+function splitNonEmpty(raw: string, separator: string | RegExp): string[] {
   return raw
     .split(separator)
     .map((s) => s.trim())

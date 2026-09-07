@@ -32,6 +32,27 @@ describe("parseRefListItems — /done and /complete ref lists (issue #32)", () =
   it("empty input yields no items", () => {
     expect(parseRefListItems("")).toEqual([]);
   });
+
+  it("splits on newlines too, matching Devie's [\\n,]+ (issue #124 stage S1)", () => {
+    expect(parseRefListItems("t21\nt22")).toEqual([
+      { label: "t21", ref: 21, statusText: undefined },
+      { label: "t22", ref: 22, statusText: undefined },
+    ]);
+  });
+
+  it("splits on a mix of commas and newlines", () => {
+    expect(parseRefListItems("t21,\nt22\n,t23")).toEqual([
+      { label: "t21", ref: 21, statusText: undefined },
+      { label: "t22", ref: 22, statusText: undefined },
+      { label: "t23", ref: 23, statusText: undefined },
+    ]);
+  });
+
+  it("a multi-word keyword with no comma or newline stays one item (issue #124 stage S1)", () => {
+    expect(parseRefListItems("login bug")).toEqual([
+      { label: "login bug", ref: undefined, statusText: undefined },
+    ]);
+  });
 });
 
 // ---- Issue #103 item 6: Devie's /update grammar --------------------------
