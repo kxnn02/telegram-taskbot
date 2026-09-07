@@ -1,7 +1,8 @@
 import { DateTime } from "luxon";
 import type { StandupReport } from "./standup.js";
 import { formatCohortName, formatReportDate } from "./standup.js";
-import { esc, greeting, renderByMember } from "./standupCard.js";
+import { greeting, renderByMember } from "./standupCard.js";
+import { esc } from "./html.js";
 import { STATUS_EMOJI, statusLabel } from "./format.js";
 import { getWeekBounds, formatWeekLabel } from "../date/weekBounds.js";
 import { MANILA_ZONE } from "../domain/overdue.js";

@@ -233,6 +233,14 @@ function lastReplyText(calls: RecordedCall[]): string {
   return (call?.payload.text as string) ?? "";
 }
 
+/** Like `lastReplyText`, but scoped to messages sent into `chatId` — needed
+ * whenever a status-change reply and its (separately-addressed) DM
+ * notification could otherwise both land in `calls` and the notification,
+ * being later, would win a plain `lastReplyText`. */
+function lastReplyTextIn(calls: RecordedCall[], chatId: number): string {
+  return lastReplyText(calls.filter((c) => Number(c.payload.chat_id) === chatId));
+}
+
 function allReplyTexts(calls: RecordedCall[]): string[] {
   return calls
     .filter((c) => c.method === "sendMessage" || c.method === "editMessageText")
@@ -284,8 +292,8 @@ describe("BOT_COMMANDS / HANDLED_COMMANDS", () => {
   });
 });
 
-describe("/start", () => {
-  it("registers the sender and says hello — no role question, no group check", async () => {
+describe("/start (issue #124 stage S3: a pure alias for /help)", () => {
+  it("registers the sender and sends byte-identical output to /help — no role question, no hello, no group check", async () => {
     const roster = new Roster([]);
     const testBot = makeTestBot(roster);
     const userId = nextUserId();
@@ -293,12 +301,15 @@ describe("/start", () => {
     await testBot.bot.handleUpdate(messageUpdate(userId, "newbie", userId, "/start"));
 
     const text = lastReplyText(testBot.calls);
-    expect(text).toContain("newbie");
-    expect(text).toContain(COHORT);
+    const { formatHelp } = await import("./format.js");
+    expect(text).toBe(formatHelp());
     expect(text.toLowerCase()).not.toContain("intern");
     expect(text.toLowerCase()).not.toContain("higher-up");
     expect(await testBot.registrations.findUsername(userId)).toBe("newbie");
     expect(roster.isMember("newbie", COHORT)).toBe(true);
+
+    const call = lastCall(testBot.calls, "sendMessage")!;
+    expect(call.payload.parse_mode).toBe("HTML");
   });
 
   it("asks for a username when the sender has none set", async () => {
@@ -309,6 +320,21 @@ describe("/start", () => {
     await testBot.bot.handleUpdate(noUsernameMessageUpdate(userId, userId, "/start"));
 
     expect(lastReplyText(testBot.calls).toLowerCase()).toContain("username");
+  });
+});
+
+describe("/help (issue #124 stage S3: Devie's HTML card)", () => {
+  it("sends formatHelp()'s exact text with parse_mode HTML", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/help"));
+
+    const { formatHelp } = await import("./format.js");
+    const call = lastCall(testBot.calls, "sendMessage")!;
+    expect(call.payload.text).toBe(formatHelp());
+    expect(call.payload.parse_mode).toBe("HTML");
   });
 });
 
@@ -343,7 +369,7 @@ describe("auto-registration (ADR-0013) — every surviving command works for a n
     );
 
     const text = lastReplyText(testBot.calls);
-    expect(text).toContain("created");
+    expect(text).toContain("Task added");
     expect(text).toContain("@freshuser");
   });
 
@@ -367,33 +393,36 @@ describe("auto-registration (ADR-0013) — every surviving command works for a n
     const taskId = created.value.id;
 
     await testBot.bot.handleUpdate(messageUpdate(bobId, "bob", bobId, `/done ${taskId}`));
-    expect(lastReplyText(testBot.calls)).toContain("In review");
+    expect(lastReplyTextIn(testBot.calls, bobId)).toContain("Moved to In Review.");
 
     await testBot.bot.handleUpdate(messageUpdate(bobId, "bob", bobId, `/complete ${taskId}`));
-    expect(lastReplyText(testBot.calls)).toContain("Done");
+    expect(lastReplyTextIn(testBot.calls, bobId)).toContain("Marked as done. Nice work!");
 
     await testBot.bot.handleUpdate(messageUpdate(bobId, "bob", bobId, `/update ${taskId} todo`));
-    expect(lastReplyText(testBot.calls)).toContain("To do");
+    expect(lastReplyTextIn(testBot.calls, bobId)).toContain("Updated to: <b>todo</b>");
 
     const completedId = nextUserId();
     await testBot.bot.handleUpdate(messageUpdate(completedId, "carol", completedId, `/completed ${taskId}`));
-    expect(lastReplyText(testBot.calls)).toContain("Done");
+    expect(lastReplyTextIn(testBot.calls, completedId)).toContain("Marked as done. Nice work!");
   });
 });
 
-describe("/addtask bare command (no wizard, #106)", () => {
-  it("replies with a usage example instead of starting a step-by-step form", async () => {
+describe("/addtask bare command (no wizard, #106, Devie's block per issue #124 stage S3)", () => {
+  it("replies with Devie's usage block instead of starting a step-by-step form", async () => {
     const roster = new Roster([]);
     const testBot = makeTestBot(roster);
     const userId = nextUserId();
 
     await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/addtask"));
 
-    const text = lastReplyText(testBot.calls);
-    expect(text).toMatch(/^Usage: \/addtask/);
+    const { ADDTASK_USAGE } = await import("./addTaskParse.js");
+    const call = lastCall(testBot.calls, "sendMessage")!;
+    const text = call.payload.text as string;
+    expect(text).toMatch(/^Usage: <code>\/addtask/);
     expect(text.toLowerCase()).not.toContain("who is this task for");
     expect(text.toLowerCase()).not.toContain("step-by-step");
-    expect(text).toBe("Usage: /addtask <title> [!priority] [by <date>] [@username]");
+    expect(text).toBe(ADDTASK_USAGE);
+    expect(call.payload.parse_mode).toBe("HTML");
   });
 });
 
@@ -415,6 +444,18 @@ describe("removed commands get Telegram's default unknown-command fallback, not 
       expect(allReplyTexts(testBot.calls).some((t) => t.toLowerCase().includes("error"))).toBe(false);
     });
   }
+
+  it("sends Devie's exact unknown-command wording with parse_mode HTML (issue #124 stage S3)", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/roster"));
+
+    const call = lastCall(testBot.calls, "sendMessage")!;
+    expect(call.payload.text).toBe("❓ Unknown command. Try /help to see what's available.");
+    expect(call.payload.parse_mode).toBe("HTML");
+  });
 });
 
 describe("cohort isolation survives the strip (the one guarantee that must)", () => {
@@ -846,7 +887,7 @@ describe("keyword task lookup for /done, /complete, /update (issue #124 stage S1
 
     await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/done login bug"));
 
-    expect(lastReplyText(testBot.calls)).toContain("In review");
+    expect(lastReplyText(testBot.calls)).toContain("Moved to In Review.");
     const task = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, id);
     if (!task.ok) throw new Error("read failed");
     expect(task.value.status).toBe("in_review");
@@ -860,7 +901,7 @@ describe("keyword task lookup for /done, /complete, /update (issue #124 stage S1
 
     await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/complete onboarding"));
 
-    expect(lastReplyText(testBot.calls)).toContain("Done");
+    expect(lastReplyText(testBot.calls)).toContain("Marked as done. Nice work!");
     const task = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, id);
     if (!task.ok) throw new Error("read failed");
     expect(task.value.status).toBe("done");
@@ -874,7 +915,7 @@ describe("keyword task lookup for /done, /complete, /update (issue #124 stage S1
 
     await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/update login bug blocked"));
 
-    expect(lastReplyText(testBot.calls)).toContain("Blocked");
+    expect(lastReplyText(testBot.calls)).toContain("Updated to: <b>blocked</b>");
     const task = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, id);
     if (!task.ok) throw new Error("read failed");
     expect(task.value.status).toBe("blocked");
@@ -947,6 +988,93 @@ describe("keyword task lookup for /done, /complete, /update (issue #124 stage S1
   });
 });
 
+describe("Devie's batch reply shape (issue #124 stage S3)", () => {
+  async function seedTask(testBot: ReturnType<typeof makeTestBot>, title: string) {
+    const created = await testBot.service.assignTask(
+      { username: "alice", cohortId: COHORT },
+      { assigneeUsername: "alice", title, dueDate: "2026-09-10" },
+    );
+    if (!created.ok) throw new Error("setup failed");
+    return created.value.id;
+  }
+
+  it("a mixed success/failure /done batch groups failures under a Skipped header, HTML", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const id = await seedTask(testBot, "Fix the login bug");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, `/done t${id},t999`),
+    );
+
+    const call = lastCall(testBot.calls, "sendMessage")!;
+    expect(call.payload.parse_mode).toBe("HTML");
+    const text = call.payload.text as string;
+    expect(text).toContain("👀 <b>Moved 1 task to In Review.</b>");
+    expect(text).toContain(`<code>T-${String(id).padStart(3, "0")}</code> Fix the login bug → <b>in review</b>`);
+    expect(text).toContain("⚠️ <b>Skipped 1 item:</b>");
+    expect(text).toContain("t999");
+  });
+
+  it("an all-failed /complete batch renders the dedicated no-tasks-updated block, not usage text", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, "/complete t998,t999"),
+    );
+
+    const call = lastCall(testBot.calls, "sendMessage")!;
+    expect(call.payload.parse_mode).toBe("HTML");
+    const text = call.payload.text as string;
+    expect(text).toContain("❌ No tasks were updated.");
+    expect(text).toContain("<i>Use /tasks to see valid task numbers.</i>");
+    expect(text).not.toMatch(/^Usage:/);
+  });
+
+  it("an /update batch's link:/note: riders render as indented sub-lines", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const first = await seedTask(testBot, "Fix the login bug");
+    const second = await seedTask(testBot, "Write the docs");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(
+        userId,
+        "alice",
+        userId,
+        `/update t${first} done link:https://example.com/pr/1, t${second} done`,
+      ),
+    );
+
+    const call = lastCall(testBot.calls, "sendMessage")!;
+    const text = call.payload.text as string;
+    expect(text).toContain("✅ <b>Updated 2 tasks.</b>");
+    expect(text).toContain("  🔗 https://example.com/pr/1");
+  });
+
+  it("single-item /done, /complete and /update replies are all sent with parse_mode HTML", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    const id1 = await seedTask(testBot, "Task one");
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, `/done ${id1}`));
+    expect(lastCall(testBot.calls, "sendMessage")!.payload.parse_mode).toBe("HTML");
+
+    const id2 = await seedTask(testBot, "Task two");
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, `/complete ${id2}`));
+    expect(lastCall(testBot.calls, "sendMessage")!.payload.parse_mode).toBe("HTML");
+
+    const id3 = await seedTask(testBot, "Task three");
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, `/update ${id3} todo`));
+    expect(lastCall(testBot.calls, "sendMessage")!.payload.parse_mode).toBe("HTML");
+  });
+});
+
 describe("trailing /addtask entry point (issue #103 item 4)", () => {
   it("a message whose final line is exactly /addtask creates a task from the text above it", async () => {
     const roster = new Roster([]);
@@ -958,7 +1086,7 @@ describe("trailing /addtask entry point (issue #103 item 4)", () => {
     );
 
     const text = lastReplyText(testBot.calls);
-    expect(text).toContain("created");
+    expect(text).toContain("Task added");
     const tasks = await testBot.service.listAllTasks({ username: "alice", cohortId: COHORT });
     if (!tasks.ok) throw new Error("read failed");
     expect(tasks.value.map((t) => t.title)).toEqual(["Fix the login bug"]);
@@ -973,7 +1101,7 @@ describe("trailing /addtask entry point (issue #103 item 4)", () => {
       groupMessageUpdate(userId, "alice", -100, "Ship the release notes\n/addtask"),
     );
 
-    expect(lastReplyText(testBot.calls)).toContain("created");
+    expect(lastReplyText(testBot.calls)).toContain("Task added");
   });
 
   it("does NOT route when /addtask is the last token on a line with text before it", async () => {
@@ -1024,7 +1152,7 @@ describe("trailing /addtask entry point (issue #103 item 4)", () => {
 
     await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/addtask"));
 
-    expect(lastReplyText(testBot.calls)).toMatch(/^Usage: \/addtask/);
+    expect(lastReplyText(testBot.calls)).toMatch(/^Usage: <code>\/addtask/);
   });
 
   it("carries the assignee and date grammar through, same as /addtask", async () => {
@@ -1071,7 +1199,7 @@ describe("mention trigger (issue #34, widened by #103)", () => {
     );
 
     const text = lastReplyText(testBot.calls);
-    expect(text).toContain("created");
+    expect(text).toContain("Task added");
     expect(text).toContain("@alice");
   });
 
@@ -1083,12 +1211,12 @@ describe("mention trigger (issue #34, widened by #103)", () => {
     await testBot.bot.handleUpdate(
       groupMessageUpdate(userId, "alice", -100, "@test_bot create task write the docs"),
     );
-    expect(lastReplyText(testBot.calls)).toContain("created");
+    expect(lastReplyText(testBot.calls)).toContain("Task added");
 
     await testBot.bot.handleUpdate(
       groupMessageUpdate(userId, "alice", -100, "@test_bot add task: ship the release"),
     );
-    expect(lastReplyText(testBot.calls)).toContain("created");
+    expect(lastReplyText(testBot.calls)).toContain("Task added");
   });
 
   it("'todo ...' no longer routes and produces no reply — Devie never accepted it (#103)", async () => {
@@ -1137,7 +1265,7 @@ describe("mention trigger (issue #34, widened by #103)", () => {
       groupMessageUpdate(userId, "alice", -100, "@test_bot add task"),
     );
 
-    expect(lastReplyText(testBot.calls)).toMatch(/^Usage: \/addtask/);
+    expect(lastReplyText(testBot.calls)).toMatch(/^Usage: <code>\/addtask/);
   });
 
   it("cohort isolation: a mention-created task lands in the caller's own cohort only", async () => {
@@ -1346,7 +1474,9 @@ describe("bulk-paste task capture (issue #104)", () => {
       messageUpdate(userId, "carla", userId, "/addtask fix the login bug @dale"),
     );
 
-    expect(lastReplyText(testBot.calls)).toContain("created and assigned to @dale");
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("Task added");
+    expect(text).toContain("👤 Assigned to: @dale");
   });
 });
 
@@ -1467,7 +1597,7 @@ describe("Parity S2: onsite default, NL priority, status fallback (issue #126)",
       messageUpdate(userId, "alice", userId, `/update ${created.value.id} working on it`),
     );
 
-    expect(lastReplyText(testBot.calls)).toContain("In progress");
+    expect(lastReplyText(testBot.calls)).toContain("Updated to: <b>in progress</b>");
     expect(model.requests).toHaveLength(1);
   });
 
@@ -1511,7 +1641,7 @@ describe("Parity S2: onsite default, NL priority, status fallback (issue #126)",
       messageUpdate(userId, "alice", userId, `/update ${created.value.id} done`),
     );
 
-    expect(lastReplyText(testBot.calls)).toContain("Done");
+    expect(lastReplyText(testBot.calls)).toContain("Updated to: <b>done</b>");
     expect(model.requests).toHaveLength(0);
   });
 });
@@ -1592,7 +1722,9 @@ describe("@all and role fan-out (issue #104)", () => {
     // MENTION_RE's `\w+` stops at the hyphen, and the lookahead then fails
     // (what follows isn't whitespace/end-of-string) — so no mention is
     // recognized at all, and the whole `@cohort-5` stays in the title.
-    expect(lastReplyText(testBot.calls)).toContain("created and assigned to @alice");
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("Task added");
+    expect(text).toContain("👤 Assigned to: @alice");
   });
 
   it("a role/cohort token matching nobody falls through to the ordinary unknown-member reply", async () => {
@@ -1631,10 +1763,11 @@ describe("@all and role fan-out (issue #104)", () => {
 });
 
 describe("BOT_COMMANDS / formatHelp coherence", () => {
-  it("every command Telegram's autocomplete menu offers also appears in /help", async () => {
+  it("every command Telegram's autocomplete menu offers, except /start and /help (Devie's own card has no line for either), also appears in /help", async () => {
     const { formatHelp } = await import("./format.js");
     const helpText = formatHelp();
     for (const { command } of BOT_COMMANDS) {
+      if (command === "start" || command === "help") continue;
       expect(helpText).toContain(`/${command}`);
     }
   });

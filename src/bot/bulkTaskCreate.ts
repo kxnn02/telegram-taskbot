@@ -1,6 +1,7 @@
 import { DateTime } from "luxon";
 import { normalizeUsername } from "../domain/roster.js";
 import { formatTaskRef } from "./taskRef.js";
+import { esc } from "./html.js";
 
 /**
  * The paste-in bulk task capture path (issue #104), ported from DevieBot's
@@ -53,10 +54,6 @@ export interface BulkCreatedTask {
 }
 
 const URL_RE = /https?:\/\//;
-
-function esc(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
 
 /**
  * Devie's grouped bulk-creation confirmation (`route.ts:1152-1163`), wording

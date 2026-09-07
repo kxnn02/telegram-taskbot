@@ -14,6 +14,7 @@ import { suggestClosestUsername } from "./usernameSuggest.js";
 import { parseStatusWord, VALID_STATUS_WORDS_TEXT } from "./statusParse.js";
 import { parseRefListItems, parseUpdateItems, type BatchItem } from "./updateBatch.js";
 import { findTaskByRef, type TaskLookup } from "./taskLookup.js";
+import { formatTaskRef } from "./taskRef.js";
 import {
   shouldTriggerBulkCreate,
   resolveBulkAssignee,
@@ -32,11 +33,22 @@ import type { TextModel } from "../nlp/textModel.js";
 import {
   chunkMessage,
   formatAmbiguousTaskMatches,
+  formatBatchReply,
+  formatCompleteOk,
   formatDeadlines,
+  formatDoneOk,
   formatHelp,
+  formatTaskAdded,
   formatTaskNotFound,
+  formatUpdateOk,
   statusLabel,
   STATUS_EMOJI,
+  COMPLETE_USAGE,
+  DONE_USAGE,
+  UPDATE_USAGE,
+  UNKNOWN_COMMAND_REPLY,
+  type BatchFailureLine,
+  type BatchSuccessLine,
 } from "./format.js";
 import {
   buildStandup,
@@ -230,28 +242,18 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }
   });
 
-  // ---- /start -----------------------------------------------------------
-  // Devie's version (#106/ADR-0013): register the sender and say hello.
-  // No role question, no group-membership check — auto-registration
-  // already happened inside requireCaller by the time this runs.
+  // ---- /start and /help --------------------------------------------------
+  // Issue #124 stage S3: Devie's /start is a pure alias for /help — no role
+  // question, no hello message of its own, no group-membership check.
+  // Registered on the same handler, exactly like /complete and /completed
+  // share `completeHandler` below.
 
-  bot.command(
-    "start",
-    withCaller(async (ctx, caller) => {
-      await ctx.reply(
-        `Hey @${caller.username}! You're set up for ${caller.cohortId} — send /help anytime to see what I can do.`,
-      );
-    }),
-  );
+  const helpHandler = withCaller(async (ctx: import("grammy").Context) => {
+    await ctx.reply(formatHelp(), { parse_mode: "HTML" as const });
+  });
 
-  // ---- /help ------------------------------------------------------------
-
-  bot.command(
-    "help",
-    withCaller(async (ctx) => {
-      await ctx.reply(formatHelp());
-    }),
-  );
+  bot.command("start", helpHandler);
+  bot.command("help", helpHandler);
 
   /** Sends `text` as one or more Telegram-sized messages (issue #55/F8):
    * several unbounded list commands could otherwise throw
@@ -267,10 +269,12 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   // `/tasks <page>` argument: paging is the inline keyboard's job now, one
   // page per member, edited in place. See `tasksPage.ts`.
 
-  /** Sends a page-plus-keyboard card. `parse_mode: "HTML"` is scoped to
-   * exactly these two views (`/tasks` and `/standup`'s keyboard card),
-   * because Devie's `/tasks` text is copied verbatim and is HTML — every
-   * other reply in this bot is still plain text with no parse_mode. */
+  /** Sends a page-plus-keyboard card. `html` still varies per call — the
+   * `/standup` in-chat keyboard card stays plain text (issue #103) while
+   * `/tasks` is HTML — but as of issue #124 stage S3, HTML `parse_mode` is
+   * no longer a rare carve-out: nearly every reply in this bot is HTML now,
+   * so this is just one more caller of the same shared plumbing rather than
+   * the exception it used to be. */
   async function sendCard(
     ctx: import("grammy").Context,
     text: string,
@@ -430,13 +434,19 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   /** Sets `status` on `id` and applies the shared status-change notification
    * policy (issue #27/#29): DM the assignee and creator, skipping the actor.
    * Shared by `/update`, `/done`, and `/complete`/`/completed` — all three
-   * are just this with a different fixed or parsed status and reply text. */
+   * are just this with a different fixed or parsed status and reply
+   * builder. `buildReply` gets the task's title (issue #124 stage S3's
+   * `formatDoneOk`/`formatCompleteOk`/`formatUpdateOk` all need it) and
+   * returns the HTML reply body; `/update`'s `link:`/`note:` rider suffix
+   * is appended after it, same as before. The DM notification text itself
+   * is untouched (issue #124 stage S3 leaves `notify.ts` and every
+   * notification call site's wording alone). */
   async function applyStatusChange(
     caller: Caller,
     id: number,
     status: TaskStatus,
     ctx: import("grammy").Context,
-    replySuffix: string,
+    buildReply: (title: string) => string,
     meta?: BatchItem,
   ) {
     const result = await service.setStatus(caller, id, status);
@@ -445,7 +455,9 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       return;
     }
     const metaSuffix = meta ? await attachUpdateMeta(caller, id, meta) : "";
-    await ctx.reply(`Task ${id} ${replySuffix}${metaSuffix}`);
+    await ctx.reply(`${buildReply(result.value.title)}${metaSuffix}`, {
+      parse_mode: "HTML" as const,
+    });
     await notifyStatusChange(
       bot,
       registrations,
@@ -481,12 +493,11 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     return suffix;
   }
 
-  const UPDATE_USAGE = `Usage: /update <ref> <status> — status is one of: ${VALID_STATUS_WORDS_TEXT}`;
-
   interface BatchOutcome {
     label: string;
     ok: boolean;
     message: string;
+    id?: number;
     task?: { assigneeUsername: string; assignedByUsername: string; title: string };
     status?: TaskStatus;
     /** The `🔗`/`📝` lines for this item's `/update` riders (#103 item 6),
@@ -540,6 +551,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         label,
         ok: true,
         message: statusLabel(resolvedStatus.status),
+        id: ref,
         task: result.value,
         status: resolvedStatus.status,
         metaSuffix: await attachUpdateMeta(caller, ref, item),
@@ -572,27 +584,53 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }
   }
 
-  /** Replies with partial-failure reporting (issue #32): a wholly-invalid
-   * batch gets usage help instead of a wall of identical errors; otherwise
-   * every item gets a ✓/✗ line and a one-line summary, then notifications
-   * fire once the reply is sent. */
+  /** Devie's per-kind batch status word/emoji (issue #124 stage S3):
+   * `/done` and `/complete` always report their own fixed status, since
+   * that's the only status either command can ever set; `/update` reports
+   * whatever status each item actually resolved to. */
+  function batchStatusWord(kind: "done" | "complete" | "update", status: TaskStatus): string {
+    if (kind === "done") return "in review";
+    if (kind === "complete") return "done";
+    return status.replace(/_/g, " ");
+  }
+
+  function batchEmoji(kind: "done" | "complete" | "update", status: TaskStatus): string {
+    if (kind === "done") return "👀";
+    if (kind === "complete") return "✅";
+    return STATUS_EMOJI[status] ?? "📌";
+  }
+
+  /** Replies with Devie's batch shape (issue #124 stage S3): a per-kind
+   * success header and line style, failures grouped at the end under a
+   * `⚠️ Skipped` header, and — when nothing at all succeeded — the
+   * dedicated "no tasks were updated" block (`formatBatchReply`) instead of
+   * any per-command usage text. Notifications fire once the reply is sent,
+   * same as before. */
   async function finishBatch(
     ctx: import("grammy").Context,
     caller: Caller,
     outcomes: BatchOutcome[],
-    usageText: string,
+    kind: "done" | "complete" | "update",
   ): Promise<void> {
-    if (outcomes.every((o) => !o.ok)) {
-      await ctx.reply(usageText);
-    } else {
-      const successCount = outcomes.filter((o) => o.ok).length;
-      const lines = outcomes.map((o) =>
-        o.ok ? `${o.label} ✓ ${o.message}${o.metaSuffix ?? ""}` : `${o.label} ✗ ${o.message}`,
-      );
-      const header = `${successCount}/${outcomes.length} updated.`;
-      for (const chunk of chunkMessage([header, ...lines].join("\n"))) {
-        await ctx.reply(chunk);
-      }
+    const successes: BatchSuccessLine[] = outcomes
+      .filter(
+        (o): o is BatchOutcome & { id: number; task: NonNullable<BatchOutcome["task"]>; status: TaskStatus } =>
+          o.ok && o.id !== undefined && o.task !== undefined && o.status !== undefined,
+      )
+      .map((o) => ({
+        ref: formatTaskRef(o.id),
+        title: o.task.title,
+        statusWord: batchStatusWord(kind, o.status),
+        emoji: batchEmoji(kind, o.status),
+        metaSuffix: o.metaSuffix,
+      }));
+    const failures: BatchFailureLine[] = outcomes
+      .filter((o) => !o.ok)
+      .map((o) => ({ ref: o.label, reason: o.message }));
+
+    const text = formatBatchReply(kind, successes, failures);
+    for (const chunk of chunkMessage(text)) {
+      await ctx.reply(chunk, { parse_mode: "HTML" as const });
     }
     await sendBatchNotifications(caller, outcomes);
   }
@@ -603,14 +641,14 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       const raw = matchToString(ctx.match).trim();
       const items = parseUpdateItems(raw);
       if (items.length === 0) {
-        await ctx.reply(UPDATE_USAGE);
+        await ctx.reply(UPDATE_USAGE, { parse_mode: "HTML" as const });
         return;
       }
       if (items.length === 1) {
         const item = items[0]!;
         const statusText = item.statusText ?? "";
         if (statusText.trim().length === 0) {
-          await ctx.reply(UPDATE_USAGE);
+          await ctx.reply(UPDATE_USAGE, { parse_mode: "HTML" as const });
           return;
         }
         const aliasStatus = parseStatusWord(statusText);
@@ -641,7 +679,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
           resolved.task.id,
           status,
           ctx,
-          `set to ${STATUS_EMOJI[status]} ${statusLabel(status)}.`,
+          (title) => formatUpdateOk(title, status),
           item,
         );
         return;
@@ -655,7 +693,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         const status = aliasStatus ?? (await parseStatus(statusText, options.model)) ?? undefined;
         return status ? { status } : { error: `unrecognized status "${statusText.trim()}"` };
       });
-      await finishBatch(ctx, caller, outcomes, UPDATE_USAGE);
+      await finishBatch(ctx, caller, outcomes, "update");
     }),
   );
 
@@ -667,7 +705,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       const raw = matchToString(ctx.match).trim();
       const items = parseRefListItems(raw);
       if (items.length === 0) {
-        await ctx.reply("Usage: /done <ref>");
+        await ctx.reply(DONE_USAGE, { parse_mode: "HTML" as const });
         return;
       }
       if (items.length === 1) {
@@ -677,17 +715,13 @@ export function createBot(options: CreateBotOptions): CreatedBot {
           await replyNotFoundOrAmbiguous(ctx, "/done", item.label, resolved);
           return;
         }
-        await applyStatusChange(
-          caller,
-          resolved.task.id,
-          "in_review",
-          ctx,
-          "is now 👀 In review. Nice work!",
+        await applyStatusChange(caller, resolved.task.id, "in_review", ctx, (title) =>
+          formatDoneOk(title),
         );
         return;
       }
       const outcomes = await runBatch(caller, items, async () => ({ status: "in_review" }));
-      await finishBatch(ctx, caller, outcomes, "Usage: /done <ref>");
+      await finishBatch(ctx, caller, outcomes, "done");
     }),
   );
 
@@ -697,7 +731,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     const raw = matchToString(ctx.match).trim();
     const items = parseRefListItems(raw);
     if (items.length === 0) {
-      await ctx.reply("Usage: /complete <ref>");
+      await ctx.reply(COMPLETE_USAGE, { parse_mode: "HTML" as const });
       return;
     }
     if (items.length === 1) {
@@ -707,11 +741,11 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         await replyNotFoundOrAmbiguous(ctx, typedCommand(ctx), item.label, resolved);
         return;
       }
-      await applyStatusChange(caller, resolved.task.id, "done", ctx, "marked ✅ Done. Nice work!");
+      await applyStatusChange(caller, resolved.task.id, "done", ctx, (title) => formatCompleteOk(title));
       return;
     }
     const outcomes = await runBatch(caller, items, async () => ({ status: "done" }));
-    await finishBatch(ctx, caller, outcomes, "Usage: /complete <ref>");
+    await finishBatch(ctx, caller, outcomes, "complete");
   });
 
   bot.command("complete", completeHandler);
@@ -911,7 +945,13 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       await ctx.reply(`Couldn't create the task: ${result.error}`);
       return;
     }
-    let reply = `Task ${result.value.id} created and assigned to @${result.value.assigneeUsername}, due ${result.value.dueDate}.`;
+    let reply = formatTaskAdded({
+      id: result.value.id,
+      title: result.value.title,
+      priority: result.value.priority,
+      assigneeUsername: result.value.assigneeUsername,
+      dueDate: result.value.dueDate,
+    });
     if (isPastDate(result.value.dueDate, new Date())) {
       reply += `\n${PAST_DUE_WARNING}`;
     }
@@ -926,7 +966,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         reply += `\nHeads-up: @${result.value.assigneeUsername} hasn't messaged me yet, so I couldn't notify them.`;
       }
     }
-    await ctx.reply(reply);
+    await ctx.reply(reply, { parse_mode: "HTML" as const });
   }
 
   bot.command(
@@ -936,7 +976,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       if (raw.length === 0) {
         // Devie's bare /addtask: a usage example, not a step-by-step form
         // (#106 — the wizard system is gone entirely).
-        await ctx.reply(ADDTASK_USAGE);
+        await ctx.reply(ADDTASK_USAGE, { parse_mode: "HTML" as const });
         return;
       }
       await handleAddTaskArgs(ctx, caller, raw);
@@ -959,7 +999,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       const caller = await requireCaller(ctx);
       if (!caller) return;
       if (trailingBody.length === 0) {
-        await ctx.reply(ADDTASK_USAGE);
+        await ctx.reply(ADDTASK_USAGE, { parse_mode: "HTML" as const });
         return;
       }
       await handleAddTaskArgs(ctx, caller, trailingBody);
@@ -972,7 +1012,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       // special-cased redirect (#106 — removed means removed): this is
       // the same generic fallback any other unaddressed text gets.
       if (ctx.chat.type === "private" && !isAddressedToOtherBot(text, bot.botInfo.username)) {
-        await ctx.reply("Not sure what you're asking — try /help to see what I can do.");
+        await ctx.reply(UNKNOWN_COMMAND_REPLY, { parse_mode: "HTML" as const });
       }
       return;
     }
@@ -989,7 +1029,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       // `/addtask` alone gets (#103) — not the old "did you mean to create a
       // task?" nudge, which is gone along with every other reply Devie
       // doesn't send.
-      await ctx.reply(ADDTASK_USAGE);
+      await ctx.reply(ADDTASK_USAGE, { parse_mode: "HTML" as const });
       return;
     }
     if (trigger.kind === "addtask") {

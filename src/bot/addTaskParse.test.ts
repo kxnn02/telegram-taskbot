@@ -1,9 +1,25 @@
 import { describe, expect, it } from "vitest";
 import {
+  ADDTASK_USAGE,
   parseAddTaskArgs,
   parseTrailingAddTask,
   type AddTaskParsed,
 } from "./addTaskParse.js";
+
+describe("ADDTASK_USAGE (issue #124 stage S3, subsumes #121 — the wizard is gone)", () => {
+  it("matches Devie's verbatim block, HTML, not the old wizard-referencing plain text", () => {
+    expect(ADDTASK_USAGE).toBe(
+      [
+        "Usage: <code>/addtask &lt;title&gt;</code>",
+        "",
+        "<b>Examples:</b>",
+        "/addtask fix login bug",
+        "/addtask fix login bug, high priority",
+        "/addtask fix login @dale urgent",
+      ].join("\n"),
+    );
+  });
+});
 
 // Monday, 2026-08-31, 10:00 Asia/Manila (02:00 UTC).
 const REFERENCE = new Date("2026-08-31T02:00:00.000Z");

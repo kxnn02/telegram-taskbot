@@ -2,6 +2,7 @@ import type { TaskService, TaskWithFlags } from "../service/taskService.js";
 import type { Caller, Note, TaskPriority } from "../domain/types.js";
 import { normalizeUsername, type Roster } from "../domain/roster.js";
 import { formatTaskRef } from "./taskRef.js";
+import { esc } from "./html.js";
 
 /**
  * DevieBot's paged `/tasks` browser (issue #103 items 1 and 2), ported from
@@ -89,10 +90,6 @@ export interface TasksFilter {
 /** Prefix on every `/tasks` inline-button payload, so one callback handler
  * can tell a tasks button from a standup one. */
 export const TASKS_CALLBACK_PREFIX = "tasks|";
-
-function esc(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
 
 /**
  * Devie's `/tasks [role|@name]` argument grammar (`route.ts:834-845`). The

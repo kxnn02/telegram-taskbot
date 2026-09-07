@@ -3,6 +3,7 @@ import type { TaskWithFlags } from "../service/taskService.js";
 import { formatTaskRef } from "./taskRef.js";
 import { PRIORITY_BADGE, STATUS_EMOJI } from "./format.js";
 import { MANILA_ZONE } from "../domain/overdue.js";
+import { esc } from "./html.js";
 
 /**
  * Issue #107: the HTML-rendering presentation layer for the standup's
@@ -19,14 +20,6 @@ import { MANILA_ZONE } from "../domain/overdue.js";
  * `groupByMember`/`renderByMember` @ lines 110/124), carbon-copied per this
  * ticket's rules 1-3.
  */
-
-/** Devie's `esc(s)` (`lib/standup.ts:59`): `&` `<` `>` only, in that order.
- * Duplicated locally rather than imported, matching this repo's existing
- * convention of a private per-file `esc` (see `fanOut.ts`, `tasksPage.ts`,
- * `bulkTaskCreate.ts`) rather than one shared export. */
-export function esc(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
 
 /** Devie's three Manila-hour greeting bands (`lib/standup.ts:134`), copied
  * verbatim — wording, emoji, spacing. Boundaries are Manila hour `< 12`,
