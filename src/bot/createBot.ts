@@ -13,6 +13,7 @@ import { notifyUser, notifyStatusChange } from "./notify.js";
 import { suggestClosestUsername } from "./usernameSuggest.js";
 import { parseStatusWord, VALID_STATUS_WORDS_TEXT } from "./statusParse.js";
 import { parseRefListItems, parseUpdateItems, type BatchItem } from "./updateBatch.js";
+import { findTaskByRef, type TaskLookup } from "./taskLookup.js";
 import {
   shouldTriggerBulkCreate,
   resolveBulkAssignee,
@@ -30,8 +31,10 @@ import { parseBulkTasks } from "../nlp/parse.js";
 import type { TextModel } from "../nlp/textModel.js";
 import {
   chunkMessage,
+  formatAmbiguousTaskMatches,
   formatDeadlines,
   formatHelp,
+  formatTaskNotFound,
   statusLabel,
   STATUS_EMOJI,
 } from "./format.js";
@@ -373,6 +376,44 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     await ctx.answerCallbackQuery();
   });
 
+  // ---- Title-keyword task lookup (issue #124 stage S1) ------------------
+  // Devie's own `findTaskByRef` (`route.ts:434-453`) is the single dispatcher
+  // for every /done, /complete and /update ref — numeric or keyword alike —
+  // so this mirrors that: every single-ref path below resolves through here
+  // rather than trusting `BatchItem.ref`'s own numeric parse for existence.
+
+  /** Cohort-scoped (via `listAllTasks`) resolution of a single ref argument
+   * to a task, by numeric id or title keyword. */
+  async function resolveRef(caller: Caller, raw: string): Promise<TaskLookup> {
+    const all = await service.listAllTasks(caller);
+    if (!all.ok) return { kind: "none" };
+    return findTaskByRef(all.value, raw);
+  }
+
+  /** Sends Devie's "not found" or "ambiguous" card for a `resolveRef` result
+   * that isn't `found` (issue #124 stage S1, `route.ts:952`/`:1012`/`:957-960`).
+   * `command` is whichever of `/done`, `/complete`, `/completed` or
+   * `/update` was actually typed, since the ambiguous card's example uses it. */
+  async function replyNotFoundOrAmbiguous(
+    ctx: import("grammy").Context,
+    command: string,
+    raw: string,
+    resolved: Exclude<TaskLookup, { kind: "found" }>,
+  ): Promise<void> {
+    const text =
+      resolved.kind === "ambiguous"
+        ? formatAmbiguousTaskMatches(command, raw, resolved.matches)
+        : formatTaskNotFound(raw);
+    await ctx.reply(text, { parse_mode: "HTML" as const });
+  }
+
+  /** The command word actually typed (`/complete` vs `/completed` share one
+   * handler, and the ambiguous-match card must echo back whichever it was). */
+  function typedCommand(ctx: import("grammy").Context): string {
+    const text = (ctx.message as { text?: string } | undefined)?.text ?? "";
+    return `/${parseCommandName(text)}`;
+  }
+
   // ---- Status-setting commands (issue #27/#31 — replaces the review gate)
 
   /** Sets `status` on `id` and applies the shared status-change notification
@@ -456,17 +497,30 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   ): Promise<BatchOutcome[]> {
     const outcomes: BatchOutcome[] = [];
     for (const item of items) {
-      if (item.ref === undefined) {
-        outcomes.push({ label: `"${item.label}"`, ok: false, message: "not a valid task ref" });
+      let ref = item.ref;
+      if (ref === undefined) {
+        const lookup = await resolveRef(caller, item.label);
+        if (lookup.kind === "ambiguous") {
+          outcomes.push({
+            label: `"${item.label}"`,
+            ok: false,
+            message: "multiple tasks matched; use task number",
+          });
+          continue;
+        }
+        if (lookup.kind === "none") {
+          outcomes.push({ label: `"${item.label}"`, ok: false, message: "no active task found" });
+          continue;
+        }
+        ref = lookup.task.id;
+      }
+      const label = `t${ref}`;
+      const resolvedStatus = resolveStatus(item);
+      if ("error" in resolvedStatus) {
+        outcomes.push({ label, ok: false, message: resolvedStatus.error });
         continue;
       }
-      const label = `t${item.ref}`;
-      const resolved = resolveStatus(item);
-      if ("error" in resolved) {
-        outcomes.push({ label, ok: false, message: resolved.error });
-        continue;
-      }
-      const result = await service.setStatus(caller, item.ref, resolved.status);
+      const result = await service.setStatus(caller, ref, resolvedStatus.status);
       if (!result.ok) {
         outcomes.push({ label, ok: false, message: result.error });
         continue;
@@ -474,10 +528,10 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       outcomes.push({
         label,
         ok: true,
-        message: statusLabel(resolved.status),
+        message: statusLabel(resolvedStatus.status),
         task: result.value,
-        status: resolved.status,
-        metaSuffix: await attachUpdateMeta(caller, item.ref, item),
+        status: resolvedStatus.status,
+        metaSuffix: await attachUpdateMeta(caller, ref, item),
       });
     }
     return outcomes;
@@ -543,10 +597,6 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       }
       if (items.length === 1) {
         const item = items[0]!;
-        if (item.ref === undefined) {
-          await ctx.reply(UPDATE_USAGE);
-          return;
-        }
         const statusText = item.statusText ?? "";
         if (statusText.trim().length === 0) {
           await ctx.reply(UPDATE_USAGE);
@@ -559,9 +609,14 @@ export function createBot(options: CreateBotOptions): CreatedBot {
           );
           return;
         }
+        const resolved = await resolveRef(caller, item.label);
+        if (resolved.kind !== "found") {
+          await replyNotFoundOrAmbiguous(ctx, "/update", item.label, resolved);
+          return;
+        }
         await applyStatusChange(
           caller,
-          item.ref,
+          resolved.task.id,
           status,
           ctx,
           `set to ${STATUS_EMOJI[status]} ${statusLabel(status)}.`,
@@ -591,11 +646,18 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       }
       if (items.length === 1) {
         const item = items[0]!;
-        if (item.ref === undefined) {
-          await ctx.reply("Usage: /done <ref>");
+        const resolved = await resolveRef(caller, item.label);
+        if (resolved.kind !== "found") {
+          await replyNotFoundOrAmbiguous(ctx, "/done", item.label, resolved);
           return;
         }
-        await applyStatusChange(caller, item.ref, "in_review", ctx, "is now 👀 In review. Nice work!");
+        await applyStatusChange(
+          caller,
+          resolved.task.id,
+          "in_review",
+          ctx,
+          "is now 👀 In review. Nice work!",
+        );
         return;
       }
       const outcomes = await runBatch(caller, items, () => ({ status: "in_review" }));
@@ -614,11 +676,12 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }
     if (items.length === 1) {
       const item = items[0]!;
-      if (item.ref === undefined) {
-        await ctx.reply("Usage: /complete <ref>");
+      const resolved = await resolveRef(caller, item.label);
+      if (resolved.kind !== "found") {
+        await replyNotFoundOrAmbiguous(ctx, typedCommand(ctx), item.label, resolved);
         return;
       }
-      await applyStatusChange(caller, item.ref, "done", ctx, "marked ✅ Done. Nice work!");
+      await applyStatusChange(caller, resolved.task.id, "done", ctx, "marked ✅ Done. Nice work!");
       return;
     }
     const outcomes = await runBatch(caller, items, () => ({ status: "done" }));

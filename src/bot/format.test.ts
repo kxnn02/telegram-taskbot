@@ -3,6 +3,7 @@ import type { TaskWithFlags } from "../service/taskService.js";
 import type { TaskStatus } from "../domain/types.js";
 import {
   chunkMessage,
+  formatAmbiguousTaskMatches,
   formatApproved,
   formatBacklog,
   formatBlocked,
@@ -11,6 +12,7 @@ import {
   formatPending,
   formatTaskLine,
   formatTaskDetail,
+  formatTaskNotFound,
   formatHelp,
   statusLabel,
 } from "./format.js";
@@ -43,6 +45,44 @@ function tasks(count: number, overrides: Partial<TaskWithFlags> = {}): TaskWithF
     task({ id: i + 1, title: `Task ${i + 1}`, status: "todo", previousStatus: null, blockedReason: null, ...overrides }),
   );
 }
+
+describe("formatTaskNotFound (issue #124 stage S1, Devie route.ts:952/1012)", () => {
+  it("renders the not-found card, HTML-escaping the input", () => {
+    expect(formatTaskNotFound(`login <script>`)).toBe(
+      [
+        `❌ No active task found matching <b>"login &lt;script&gt;"</b>.`,
+        "",
+        "<i>Use /tasks to see all active tasks.</i>",
+      ].join("\n"),
+    );
+  });
+});
+
+describe("formatAmbiguousTaskMatches (issue #124 stage S1, Devie route.ts:957-960/456-460)", () => {
+  it("lists up to five candidates with the bare task number and spaced status", () => {
+    const matches = [
+      task({ id: 22, title: "Login page redesign", status: "in_progress" }),
+      task({ id: 21, title: "Fix login bug", status: "todo" }),
+    ];
+    expect(formatAmbiguousTaskMatches("/done", "login", matches)).toBe(
+      [
+        `🔍 Multiple tasks matched <b>"login"</b>:`,
+        "• <b>22</b> · Login page redesign (in progress)",
+        "• <b>21</b> · Fix login bug (todo)",
+        "",
+        "Please be more specific, or use the task number:",
+        "<code>/done &lt;number&gt;</code>",
+      ].join("\n"),
+    );
+  });
+
+  it("HTML-escapes the input and each title", () => {
+    const matches = [task({ id: 5, title: "A <b>bold</b> & risky title" })];
+    const result = formatAmbiguousTaskMatches("/update", `<i>x</i>`, matches);
+    expect(result).toContain(`"&lt;i&gt;x&lt;/i&gt;"`);
+    expect(result).toContain("A &lt;b&gt;bold&lt;/b&gt; &amp; risky title");
+  });
+});
 
 describe("formatBlocked", () => {
   it("says nothing is blocked when the list is empty", () => {

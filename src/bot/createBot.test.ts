@@ -828,6 +828,125 @@ describe("/update's link: and note: riders (issue #103 item 6)", () => {
   });
 });
 
+describe("keyword task lookup for /done, /complete, /update (issue #124 stage S1)", () => {
+  async function seedTask(testBot: ReturnType<typeof makeTestBot>, title: string) {
+    const created = await testBot.service.assignTask(
+      { username: "alice", cohortId: COHORT },
+      { assigneeUsername: "alice", title, dueDate: "2026-09-10" },
+    );
+    if (!created.ok) throw new Error("setup failed");
+    return created.value.id;
+  }
+
+  it("/done <keyword> moves the matching task to in_review", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const id = await seedTask(testBot, "Fix the login bug");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/done login bug"));
+
+    expect(lastReplyText(testBot.calls)).toContain("In review");
+    const task = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, id);
+    if (!task.ok) throw new Error("read failed");
+    expect(task.value.status).toBe("in_review");
+  });
+
+  it("/complete <keyword> marks the matching task done", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const id = await seedTask(testBot, "Write the onboarding doc");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/complete onboarding"));
+
+    expect(lastReplyText(testBot.calls)).toContain("Done");
+    const task = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, id);
+    if (!task.ok) throw new Error("read failed");
+    expect(task.value.status).toBe("done");
+  });
+
+  it("/update <keyword> <status> resolves by title", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const id = await seedTask(testBot, "Fix the login bug");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/update login bug blocked"));
+
+    expect(lastReplyText(testBot.calls)).toContain("Blocked");
+    const task = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, id);
+    if (!task.ok) throw new Error("read failed");
+    expect(task.value.status).toBe("blocked");
+  });
+
+  it("an ambiguous keyword lists candidates via /done and mutates no task", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const first = await seedTask(testBot, "Fix the login page");
+    const second = await seedTask(testBot, "Redesign the login page");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/done login page"));
+
+    const reply = lastReplyText(testBot.calls);
+    expect(reply).toContain("Multiple tasks matched");
+    expect(reply).toContain("/done &lt;number&gt;");
+    const firstTask = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, first);
+    const secondTask = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, second);
+    if (!firstTask.ok || !secondTask.ok) throw new Error("read failed");
+    expect(firstTask.value.status).not.toBe("in_review");
+    expect(secondTask.value.status).not.toBe("in_review");
+  });
+
+  it("a numeric miss replies 'no active task found' and never falls through to keyword search", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    await seedTask(testBot, "999");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/done 999"));
+
+    expect(lastReplyText(testBot.calls)).toContain("No active task found");
+  });
+
+  it("/done t21,t22 (comma bulk) still works", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const first = await seedTask(testBot, "First task");
+    const second = await seedTask(testBot, "Second task");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, `/done t${first},t${second}`),
+    );
+
+    const firstTask = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, first);
+    const secondTask = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, second);
+    if (!firstTask.ok || !secondTask.ok) throw new Error("read failed");
+    expect(firstTask.value.status).toBe("in_review");
+    expect(secondTask.value.status).toBe("in_review");
+  });
+
+  it("/done t21\\nt22 (newline bulk) now works", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const first = await seedTask(testBot, "First task");
+    const second = await seedTask(testBot, "Second task");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, `/done t${first}\nt${second}`),
+    );
+
+    const firstTask = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, first);
+    const secondTask = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, second);
+    if (!firstTask.ok || !secondTask.ok) throw new Error("read failed");
+    expect(firstTask.value.status).toBe("in_review");
+    expect(secondTask.value.status).toBe("in_review");
+  });
+});
+
 describe("trailing /addtask entry point (issue #103 item 4)", () => {
   it("a message whose final line is exactly /addtask creates a task from the text above it", async () => {
     const roster = new Roster([]);
