@@ -60,7 +60,7 @@ export function parseTrailingAddTask(
 }
 
 export const ADDTASK_USAGE =
-  "Usage: /addtask <title> [!priority] [by <date>] [@username], or bare /addtask to use the step-by-step form.";
+  "Usage: /addtask <title> [!priority] [by <date>] [@username]";
 const USAGE = ADDTASK_USAGE;
 
 // Matches a whole `@username` token anywhere in the string, with the

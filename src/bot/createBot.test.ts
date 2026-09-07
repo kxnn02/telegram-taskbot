@@ -109,7 +109,6 @@ function makeTestBot(
     registrationStore: new InMemoryRegistrationStore(),
     rosterStore: new InMemoryRosterStore(),
     activeCohortId,
-    dashboardUrl: "http://localhost:1234",
     bot,
     roster,
     model,
@@ -393,6 +392,8 @@ describe("/addtask bare command (no wizard, #106)", () => {
     const text = lastReplyText(testBot.calls);
     expect(text).toMatch(/^Usage: \/addtask/);
     expect(text.toLowerCase()).not.toContain("who is this task for");
+    expect(text.toLowerCase()).not.toContain("step-by-step");
+    expect(text).toBe("Usage: /addtask <title> [!priority] [by <date>] [@username]");
   });
 });
 

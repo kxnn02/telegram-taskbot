@@ -69,7 +69,6 @@ export interface CreateBotOptions {
    * username (the dry run intentionally reuses real accounts across
    * cohorts). */
   activeCohortId: string;
-  dashboardUrl: string;
   /** Storage port `resolveCaller`'s auto-registration writes to (ADR-0013):
    * anyone who messages the bot gets a roster row in this cohort on first
    * contact. Production code passes a `SupabaseRosterStore`; tests pass an

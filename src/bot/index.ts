@@ -45,8 +45,6 @@ async function main() {
     rosterStore,
     roster,
     activeCohortId,
-    dashboardUrl:
-      process.env.DASHBOARD_URL ?? "https://example.com/dashboard-coming-soon",
     // Groq, not Anthropic (issue #102 follow-up): the account behind
     // ANTHROPIC_API_KEY has no billing credit — see .env.example.
     model: new GroqTextModel(),
