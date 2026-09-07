@@ -27,61 +27,14 @@ const SESSION_COOKIE = "session";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = Record<string, string | string[] | undefined>;
-
-function firstValue(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-export default async function OversightPage({
-  searchParams,
-}: {
-  searchParams: Promise<SearchParams>;
-}) {
-  const deps = await getDashboardDeps();
-
-  const cookieStore = await cookies();
-  const cookieValue = cookieStore.get(SESSION_COOKIE)?.value;
-  const verified = cookieValue ? verifySession(cookieValue, deps.sessionSecret) : undefined;
-  if (!verified || !verified.ok) {
-    redirect("/login");
-  }
-  const caller: Caller = verified.session;
-
-  const params = await searchParams;
-  const result = await loadOversightView(deps.service, caller, {
-    status: firstValue(params.status),
-    assignee: firstValue(params.assignee),
-    group: firstValue(params.group),
-  });
-
-  if (!result.ok) {
-    return (
-      <DashboardShell active="tasks" title="Task oversight" caller={caller}>
-        <MessageCard title="Error" message={result.error} backHref="/" backLabel="Back to dashboard" />
-      </DashboardShell>
-    );
-  }
-
-  const { tasks, allTasks, groupMode, statusGroup, assignee } = result.value;
-  const assignees = [...new Set(allTasks.map((t) => t.assigneeUsername))].sort();
-
-  const newTaskBtn = (
-    <a className="btn primary" href="/tasks/new">
-      <Icon name="plus" size={17} />
-      <span>New task</span>
-    </a>
-  );
-
-  return (
-    <DashboardShell active="tasks" title="Task oversight" actions={newTaskBtn} caller={caller}>
-      <Controls groupMode={groupMode} assignees={assignees} activeAssignee={assignee} />
-      {groupMode === "intern" ? <StatusChips activeStatus={statusGroup} /> : null}
-      {groupMode === "action" ? (
-        <ActionSections tasks={tasks} canEdit={true} />
-      ) : (
-        <InternPanels tasks={tasks} canEdit={true} />
-      )}
-    </DashboardShell>
-  );
+/**
+ * Devie's own `app/page.tsx` is a three-line `redirect("/dashboard")`
+ * (issue #124 stage S4, build 4). This repo's pre-port oversight page is
+ * still deleted here rather than in this stage — S5 (#129) removes it and
+ * everything it imports; this stage only changes where `/` sends you, so
+ * S4 stays revertable on its own and S5's deletion stays reviewable as a
+ * deletion.
+ */
+export default async function RootPage() {
+  redirect("/dashboard");
 }
