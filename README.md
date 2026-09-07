@@ -66,7 +66,6 @@ Fill in `.env`:
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | Supabase service-role key (bypasses RLS; see ADR-0006) |
 | `ACTIVE_COHORT_ID` | yes | The single cohort this deployment serves — every live request (bot commands, dashboard login) binds to this id; see CONTEXT.md's cohort-binding note |
 | `GROUP_CHAT_ID` | no, unused | Superseded by the `cohorts` table (ADR-0006) as of Phase 3 — kept only as a historical placeholder |
-| `DASHBOARD_URL` | no, unused | Was shown by the bot's `/dashboard` command; that command is gone (#106) and nothing reads this any more — kept only because removing the option isn't this doc's job |
 | `BOT_USERNAME` | yes, for the dashboard | Must match the bot behind `BOT_TOKEN` |
 | `DASHBOARD_PORT` | no (defaults to `3000`) | Port the dashboard listens on |
 | `GROQ_API_KEY` | only to exercise the real model | Used by `src/nlp/groqTextModel.ts` (issue #102) — the active `TextModel` implementation — for bulk-task extraction, status parsing, and intent routing via `qwen/qwen3.6-27b` on Groq's free tier. Get one at https://console.groq.com. The module's test suite runs against a fake `TextModel` and needs no key |
