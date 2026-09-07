@@ -59,8 +59,17 @@ export function parseTrailingAddTask(
   return match ? match[1]!.trim() : undefined;
 }
 
-export const ADDTASK_USAGE =
-  "Usage: /addtask <title> [!priority] [by <date>] [@username]";
+/** Devie's bare `/addtask` block (issue #124 stage S3, subsumes #121 —
+ * closes the stale wizard-referencing usage text), sent with
+ * `parse_mode: "HTML"`. */
+export const ADDTASK_USAGE = [
+  "Usage: <code>/addtask &lt;title&gt;</code>",
+  "",
+  "<b>Examples:</b>",
+  "/addtask fix login bug",
+  "/addtask fix login bug, high priority",
+  "/addtask fix login @dale urgent",
+].join("\n");
 const USAGE = ADDTASK_USAGE;
 
 // Matches a whole `@username` token anywhere in the string, with the

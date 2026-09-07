@@ -1,5 +1,5 @@
 import type { TextModel } from "../nlp/textModel.js";
-import { esc } from "./standupCard.js";
+import { esc } from "./html.js";
 
 /**
  * Issue #107, deviation #4: Devie's `dailyQuote()` (`lib/standup.ts:26`) —

@@ -1,5 +1,6 @@
 import type { Roster } from "../domain/roster.js";
 import { formatTaskRef } from "./taskRef.js";
+import { esc } from "./html.js";
 
 /**
  * Devie's `@all`/role-slug fan-out for the *single*-mention `/addtask`
@@ -33,10 +34,6 @@ export function resolveRoleMembers(roster: Roster, roleSlug: string): string[] {
     .all()
     .filter((entry) => entry.cohortId.toLowerCase() === target)
     .map((entry) => entry.username);
-}
-
-function esc(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function memberList(members: string[]): string {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TaskWithFlags } from "../service/taskService.js";
-import { esc, greeting, groupByMember, renderByMember, taskLine } from "./standupCard.js";
+import { greeting, groupByMember, renderByMember, taskLine } from "./standupCard.js";
+import { esc } from "./html.js";
 
 // Issue #107: presentation helpers for the standup's "character" — the
 // greeting, HTML escaping, and the HTML task-line/member-grouping used by
