@@ -13,10 +13,10 @@
  * `@layer base` block below) puts Tailwind's reset and these defaults in
  * CSS layer `base`. The existing hand-rolled stylesheet
  * (`src/web/styles.ts`'s `STYLESHEET`, rendered as a plain, un-layered
- * `<style>` tag in `app/layout.tsx` and `src/web/layout.ts`) always wins
- * over anything in a layer, regardless of selector specificity or source
- * order — that's why adding Tailwind here doesn't visually change any
- * existing page. If a future stage wants a Tailwind utility class to
+ * `<style>` tag in `app/layout.tsx`) always wins over anything in a layer,
+ * regardless of selector specificity or source order — that's why adding
+ * Tailwind here doesn't visually change any existing page. If a future
+ * stage wants a Tailwind utility class to
  * override one of the legacy `.btn`/`.panel`/etc. rules on an *existing*
  * element, the utility needs `!` (Tailwind's `!important` marker) or the
  * legacy rule needs to move into a layer too.
