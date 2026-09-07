@@ -14,7 +14,7 @@ import { ThemeToggle } from "./ThemeToggle";
  * of the Express app's `/logout` page route — see HANDOFF for why.
  */
 
-type NavKey = "tasks" | "stats" | "board" | "settings" | "team" | "activity";
+type NavKey = "overview" | "tasks" | "stats" | "board" | "settings" | "team" | "activity";
 
 function Sidebar({ active, username }: { active: NavKey; username: string }) {
   return (
@@ -28,6 +28,10 @@ function Sidebar({ active, username }: { active: NavKey; username: string }) {
       </div>
       <div className="nav-eyebrow">Oversight</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <a className={`nav-item${active === "overview" ? " active" : ""}`} href="/dashboard">
+          <Icon name="chart" />
+          <span>Overview</span>
+        </a>
         <a className={`nav-item${active === "tasks" ? " active" : ""}`} href="/">
           <Icon name="clipboard" />
           <span>Task oversight</span>
