@@ -279,12 +279,6 @@ const HELP_SECTIONS: { heading: string; lines: string[] }[] = [
   },
 ];
 
-/** The bot's user-facing display name for the /help card's header. No such
- * constant existed anywhere in this repo before this stage (checked
- * `BOT_COMMANDS` and every other user-facing string) — defaults to Devie's
- * own name per issue #124 stage S3's instructions. */
-export const BOT_DISPLAY_NAME = "Devie";
-
 /** Splits a reply into Telegram-sized chunks (issue #55/F8): several
  * unbounded list commands (/standup, /task, /pending, /overdue, /blocked,
  * /deadlines) could otherwise exceed the 4096-character message limit and
@@ -324,10 +318,14 @@ export function chunkMessage(text: string, limit = 4000): string[] {
 
 /** Devie's /help card (issue #124 stage S3), sent with `parse_mode: "HTML"`.
  * `/start` is a pure alias for this (`createBot.ts`), so the two must
- * produce byte-identical output. */
-export function formatHelp(): string {
+ * produce byte-identical output. `botDisplayName` is the caller's job to
+ * supply — Devie hardcodes its own name, but this repo is deployed under
+ * whatever name the cohort's Telegram bot actually carries, so
+ * `createBot.ts` passes `bot.botInfo.first_name` rather than a fixed
+ * string. */
+export function formatHelp(botDisplayName: string): string {
   return [
-    `🤖 <b>${BOT_DISPLAY_NAME} — Available Commands</b>`,
+    `🤖 <b>${botDisplayName} — Available Commands</b>`,
     "",
     ...HELP_SECTIONS.flatMap((section) => [
       section.heading,

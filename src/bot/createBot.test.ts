@@ -302,7 +302,7 @@ describe("/start (issue #124 stage S3: a pure alias for /help)", () => {
 
     const text = lastReplyText(testBot.calls);
     const { formatHelp } = await import("./format.js");
-    expect(text).toBe(formatHelp());
+    expect(text).toBe(formatHelp("TestBot"));
     expect(text.toLowerCase()).not.toContain("intern");
     expect(text.toLowerCase()).not.toContain("higher-up");
     expect(await testBot.registrations.findUsername(userId)).toBe("newbie");
@@ -333,7 +333,7 @@ describe("/help (issue #124 stage S3: Devie's HTML card)", () => {
 
     const { formatHelp } = await import("./format.js");
     const call = lastCall(testBot.calls, "sendMessage")!;
-    expect(call.payload.text).toBe(formatHelp());
+    expect(call.payload.text).toBe(formatHelp("TestBot"));
     expect(call.payload.parse_mode).toBe("HTML");
   });
 });
@@ -1765,7 +1765,7 @@ describe("@all and role fan-out (issue #104)", () => {
 describe("BOT_COMMANDS / formatHelp coherence", () => {
   it("every command Telegram's autocomplete menu offers, except /start and /help (Devie's own card has no line for either), also appears in /help", async () => {
     const { formatHelp } = await import("./format.js");
-    const helpText = formatHelp();
+    const helpText = formatHelp("TestBot");
     for (const { command } of BOT_COMMANDS) {
       if (command === "start" || command === "help") continue;
       expect(helpText).toContain(`/${command}`);

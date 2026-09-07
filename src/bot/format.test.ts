@@ -276,7 +276,7 @@ describe("formatTaskDetail", () => {
 
 describe("formatHelp (issue #124 stage S3: Devie's HTML card, verbatim)", () => {
   const EXPECTED = [
-    "🤖 <b>Devie — Available Commands</b>",
+    "🤖 <b>Test Bot — Available Commands</b>",
     "",
     "📋 <b>View</b>",
     "/tasks — browse tasks by member (paginated)",
@@ -306,11 +306,15 @@ describe("formatHelp (issue #124 stage S3: Devie's HTML card, verbatim)", () => 
   ].join("\n");
 
   it("matches Devie's card character for character", () => {
-    expect(formatHelp()).toBe(EXPECTED);
+    expect(formatHelp("Test Bot")).toBe(EXPECTED);
+  });
+
+  it("interpolates whatever display name it's given, unescaped", () => {
+    expect(formatHelp("Cohort 5 Bot")).toContain("🤖 <b>Cohort 5 Bot — Available Commands</b>");
   });
 
   it("has no ⚙️ Other section, no /help or /start line, and no Statuses list section", () => {
-    const text = formatHelp();
+    const text = formatHelp("Test Bot");
     expect(text).not.toContain("⚙️");
     expect(text).not.toContain("Other");
     expect(text).not.toMatch(/\/help — this list/);
@@ -320,7 +324,7 @@ describe("formatHelp (issue #124 stage S3: Devie's HTML card, verbatim)", () => 
   });
 
   it("has no access-control wording of any kind", () => {
-    const text = formatHelp().toLowerCase();
+    const text = formatHelp("Test Bot").toLowerCase();
     expect(text).not.toContain("higher-up");
     expect(text).not.toContain("intern");
     expect(text).not.toContain("restricted");
@@ -330,7 +334,7 @@ describe("formatHelp (issue #124 stage S3: Devie's HTML card, verbatim)", () => 
 describe("BOT_COMMANDS / formatHelp coherence", () => {
   it("every command Telegram's autocomplete menu offers, except /start and /help (which Devie's own card omits), also appears in /help", async () => {
     const { BOT_COMMANDS } = await import("./createBot.js");
-    const helpText = formatHelp();
+    const helpText = formatHelp("Test Bot");
     for (const { command } of BOT_COMMANDS) {
       if (command === "start" || command === "help") continue;
       expect(helpText).toContain(`/${command}`);

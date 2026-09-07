@@ -249,7 +249,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   // share `completeHandler` below.
 
   const helpHandler = withCaller(async (ctx: import("grammy").Context) => {
-    await ctx.reply(formatHelp(), { parse_mode: "HTML" as const });
+    await ctx.reply(formatHelp(bot.botInfo.first_name), { parse_mode: "HTML" as const });
   });
 
   bot.command("start", helpHandler);
