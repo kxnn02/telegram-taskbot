@@ -51,22 +51,6 @@ export function parseDueDate(
   };
 }
 
-const FRIDAY_ISO_WEEKDAY = 5;
-
-/** Default due date for a bare `/addtask <title>` (no "by" clause): the
- * coming Friday, Asia/Manila. When `referenceDate` already falls on a
- * Friday there, "coming" resolves to that same day (issue #27 — this
- * cohort has no onsite-day configuration to default to instead). */
-export function comingFriday(referenceDate: Date = new Date()): DueDateResult {
-  const dt = DateTime.fromJSDate(referenceDate, { zone: MANILA_ZONE });
-  const daysUntilFriday = (FRIDAY_ISO_WEEKDAY - dt.weekday + 7) % 7;
-  const due = dt.plus({ days: daysUntilFriday });
-  return {
-    isoDate: due.toFormat("yyyy-MM-dd"),
-    friendly: due.toFormat("cccc, LLLL d, yyyy"),
-  };
-}
-
 /** Luxon ISO weekday numbers (1 = Monday .. 7 = Sunday) for Tuesday/Thursday. */
 const ONSITE_WEEKDAYS = new Set([2, 4]);
 
@@ -76,9 +60,10 @@ const ONSITE_WEEKDAYS = new Set([2, 4]);
  * nearest upcoming Tuesday or Thursday, Asia/Manila-resolved. Always
  * strictly after `referenceDate` — even a `referenceDate` that already
  * falls on Tuesday or Thursday rolls forward to the *next* one, never the
- * same day (issue #104's bulk-paste default, kept deliberately separate
- * from `comingFriday`, which is issue #27's default for the single-task
- * `/addtask` grammar and predates the carbon-copy direction).
+ * same day. Issue #104's bulk-paste default, and since issue #126/Parity
+ * S2 also the single-task `/addtask` default — `comingFriday`, issue #27's
+ * original single-task default that predated the carbon-copy direction,
+ * has been removed.
  */
 export function getNextOnsiteDay(referenceDate: Date = new Date()): DueDateResult {
   let dt = DateTime.fromJSDate(referenceDate, { zone: MANILA_ZONE }).plus({ days: 1 });

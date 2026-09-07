@@ -253,7 +253,7 @@ const HELP_SECTIONS: { heading: string; lines: string[] }[] = [
   {
     heading: "➕ Create",
     lines: [
-      "/addtask <title> — add a task (defaults to the coming Friday)",
+      "/addtask <title> — add a task (defaults to nearest Tue or Thu onsite day)",
       "/addtask <title> by Friday — add a task with a specific deadline",
       "/addtask <title> @username — add a task and assign it to someone",
       '@-mention the bot, "pls work on <title>" — same as /addtask, works in group chats too',

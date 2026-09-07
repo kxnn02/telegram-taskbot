@@ -14,7 +14,6 @@ describe("parseStatusWord (issue #27's status-word table)", () => {
     ["in progress", "in_progress"],
     ["wip", "in_progress"],
     ["review", "in_review"],
-    ["inreview", "in_review"],
     ["in-review", "in_review"],
     ["in review", "in_review"],
     ["blocked", "blocked"],
@@ -36,6 +35,11 @@ describe("parseStatusWord (issue #27's status-word table)", () => {
 
   it("rejects an unrecognised word", () => {
     expect(parseStatusWord("finished")).toBeUndefined();
+  });
+
+  it("rejects the exact spelling 'inreview' — Devie refuses it by name rather than resolving it (issue #126)", () => {
+    expect(parseStatusWord("inreview")).toBeUndefined();
+    expect(parseStatusWord("in-review")).toBe("in_review");
   });
 
   it("rejects an empty string", () => {
