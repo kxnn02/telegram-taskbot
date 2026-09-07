@@ -56,6 +56,10 @@ export interface DashboardDeps {
    * reads from (both are read-only views over `audit_logs`; only
    * `SettingsService.saveGroupChatId` ever writes to it). */
   activityLogService: ActivityLogService;
+  /** Backs the settings page's Daily Standup preview/test (issue #130,
+   * Build 0a) — the same `SupabaseCohortStore` instance already handed to
+   * `settingsService`, hoisted out rather than a second one constructed. */
+  cohorts: SupabaseCohortStore;
 }
 
 function requireEnv(name: string): string {
@@ -78,7 +82,8 @@ async function buildDashboardDeps(): Promise<DashboardDeps> {
   const service = new TaskService(new SupabaseTaskStore(supabase), roster, new SystemClock());
   const tagService = new TagService(new SupabaseTagStore(supabase), service);
   const auditLogStore = new SupabaseAuditLogStore(supabase);
-  const settingsService = new SettingsService(new SupabaseCohortStore(supabase), auditLogStore);
+  const cohortStore = new SupabaseCohortStore(supabase);
+  const settingsService = new SettingsService(cohortStore, auditLogStore);
   const rosterService = new RosterService(rosterStore, new SupabaseRegistrationStore(supabase));
   const activityLogService = new ActivityLogService(auditLogStore);
 
@@ -94,6 +99,7 @@ async function buildDashboardDeps(): Promise<DashboardDeps> {
     settingsService,
     rosterService,
     activityLogService,
+    cohorts: cohortStore,
   };
 }
 
