@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { comingFriday, getNextOnsiteDay, parseDueDate } from "./parseDueDate.js";
+import { getNextOnsiteDay, parseDueDate } from "./parseDueDate.js";
 
 // Monday, 2026-08-31, 10:00 Asia/Manila (02:00 UTC), used as a fixed
 // reference "now" for every phrase below so results are deterministic.
@@ -43,34 +43,13 @@ describe("parseDueDate", () => {
   });
 });
 
-describe("comingFriday", () => {
-  it("resolves to this week's Friday when 'now' is a Monday", () => {
-    // REFERENCE is Monday, 2026-08-31.
-    expect(comingFriday(REFERENCE).isoDate).toBe("2026-09-04");
-  });
-
-  it("resolves to the same day when 'now' is already a Friday", () => {
-    const friday = new Date("2026-09-04T02:00:00.000Z"); // Friday, Manila
-    expect(comingFriday(friday).isoDate).toBe("2026-09-04");
-  });
-
-  it("resolves to the coming Friday when 'now' is a Saturday", () => {
-    const saturday = new Date("2026-09-05T02:00:00.000Z");
-    expect(comingFriday(saturday).isoDate).toBe("2026-09-11");
-  });
-
-  it("resolves to the coming Friday when 'now' is a Sunday", () => {
-    const sunday = new Date("2026-09-06T02:00:00.000Z");
-    expect(comingFriday(sunday).isoDate).toBe("2026-09-11");
-  });
-});
-
 // DevieBot's `defaultDueDate()` (`app/api/telegram/webhook/route.ts:12-14`,
 // `lib/date.ts:69-76` @ `632a22c`): the nearest upcoming Tuesday or Thursday,
 // always strictly after "today" — never the same day, even when "today"
 // itself is already Tuesday or Thursday. Issue #104's bulk-paste default,
-// deliberately distinct from `comingFriday` (issue #27's default for the
-// single-task /addtask grammar, which predates the carbon-copy direction).
+// now also the single-task `/addtask` default (issue #126/Parity S2) —
+// `comingFriday`, issue #27's original single-task default that predated
+// the carbon-copy direction, is gone.
 describe("getNextOnsiteDay", () => {
   it("resolves to tomorrow when tomorrow is Tuesday", () => {
     // REFERENCE is Monday, 2026-08-31; tomorrow is Tuesday, 2026-09-01.

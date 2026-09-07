@@ -235,7 +235,7 @@ export function cleanTaskTitle(
     .replace(/\b(urgent|high|medium|low)\b/gi, "")
     .replace(/\b(asap|immediately|critical|p0|p1)\b/gi, "")
     .replace(/\s{2,}/g, " ")
-    .replace(/^[\s:,-]+/, "")
+    .replace(/^[\s:,-]+|[\s:,-]+$/g, "")
     .trim();
 
   return {
@@ -409,6 +409,10 @@ Return ONLY raw JSON array, no markdown, no explanation.`;
  * original (which trusted the model's `status` string as-is), every item
  * here is validated against our six-value `TaskStatus` enum and dropped if
  * it doesn't match — a hallucinated status word never reaches the caller.
+ *
+ * Intentionally unreferenced (decision D4, issue #124/#126): dead in Devie
+ * too, so nothing here is a gap. Kept, with its tests, so the behaviour
+ * stays available if a caller is ever added.
  */
 export async function parseBulkUpdates(message: string, model: TextModel): Promise<BulkUpdate[]> {
   let raw: string;
@@ -494,8 +498,17 @@ Rules:
 
 const DEFAULT_UNKNOWN_REPLY = "I didn't quite understand that. Try /help to see what I can do.";
 
-/** Top-level intent router. On a garbage response or the model throwing,
- * degrades to `{ intent: "unknown" }` rather than crashing the caller. */
+/**
+ * Top-level intent router. On a garbage response or the model throwing,
+ * degrades to `{ intent: "unknown" }` rather than crashing the caller.
+ *
+ * Intentionally unreferenced (decision D4, issue #124/#126): live in Devie,
+ * but only on the `/addtask` path, where its whole job — stripping a
+ * natural-language priority and deadline out of a title — is already
+ * covered deterministically by `cleanTaskTitle`/`extractDueDate` (no model
+ * call, no per-message cost, no added latency). Kept, with its tests, so
+ * the behaviour stays available if a caller is ever added.
+ */
 export async function parseMessage(
   message: string,
   model: TextModel,

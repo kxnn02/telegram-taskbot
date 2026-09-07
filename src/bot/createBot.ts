@@ -5,7 +5,7 @@ import { TaskService } from "../service/taskService.js";
 import type { TaskStorePort } from "../storage/taskStorePort.js";
 import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
 import type { RosterStorePort } from "../storage/rosterStorePort.js";
-import { comingFriday, getNextOnsiteDay, parseDueDate } from "../date/parseDueDate.js";
+import { getNextOnsiteDay, parseDueDate } from "../date/parseDueDate.js";
 import { parseAddTaskArgs, parseTrailingAddTask, ADDTASK_USAGE } from "./addTaskParse.js";
 import { parseMentionTrigger } from "./mentionParse.js";
 import { resolveCaller } from "./callerResolution.js";
@@ -27,7 +27,7 @@ import {
   formatRoleAssignedReply,
   NO_MEMBERS_TO_ASSIGN_REPLY,
 } from "./fanOut.js";
-import { parseBulkTasks } from "../nlp/parse.js";
+import { cleanTaskTitle, parseBulkTasks, parseStatus } from "../nlp/parse.js";
 import type { TextModel } from "../nlp/textModel.js";
 import {
   chunkMessage,
@@ -54,6 +54,17 @@ import {
 import type { Caller, Task, TaskPriority, TaskStatus } from "../domain/types.js";
 import { isPastDate } from "../domain/overdue.js";
 import type { Roster } from "../domain/roster.js";
+
+/** Devie's one explicit status-word rejection ahead of the model fallback
+ * (issue #126/Parity S2 2c, `route.ts:1062-1065` @ `453d1a7`): the exact
+ * spelling "inreview" is refused by name rather than resolved, so the user
+ * is told to say "review" instead. Normalized the same way `parseStatusWord`
+ * normalizes its table lookups (trim/lowercase/collapse whitespace), then
+ * checked for the no-space, no-hyphen spelling specifically — "in-review"
+ * and "in review" both still resolve via the alias table. */
+function isExactInreview(statusText: string): boolean {
+  return statusText.trim().toLowerCase().replace(/\s+/g, "") === "inreview";
+}
 
 export interface CreateBotOptions {
   token: string;
@@ -493,7 +504,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   async function runBatch(
     caller: Caller,
     items: BatchItem[],
-    resolveStatus: (item: BatchItem) => { status: TaskStatus } | { error: string },
+    resolveStatus: (item: BatchItem) => Promise<{ status: TaskStatus } | { error: string }>,
   ): Promise<BatchOutcome[]> {
     const outcomes: BatchOutcome[] = [];
     for (const item of items) {
@@ -515,7 +526,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         ref = lookup.task.id;
       }
       const label = `t${ref}`;
-      const resolvedStatus = resolveStatus(item);
+      const resolvedStatus = await resolveStatus(item);
       if ("error" in resolvedStatus) {
         outcomes.push({ label, ok: false, message: resolvedStatus.error });
         continue;
@@ -602,7 +613,18 @@ export function createBot(options: CreateBotOptions): CreatedBot {
           await ctx.reply(UPDATE_USAGE);
           return;
         }
-        const status = parseStatusWord(statusText);
+        const aliasStatus = parseStatusWord(statusText);
+        if (!aliasStatus && isExactInreview(statusText)) {
+          await ctx.reply(
+            `• <b>${item.label}</b> → invalid status <b>${statusText.trim()}</b> (use <b>review</b>)`,
+            { parse_mode: "HTML" as const },
+          );
+          return;
+        }
+        // Alias table first, model fallback second (Devie's ordering,
+        // issue #126/Parity S2 2c) — the `??` short-circuits, so the model
+        // is never called once the alias table already resolved a status.
+        const status = aliasStatus ?? (await parseStatus(statusText, options.model)) ?? undefined;
         if (!status) {
           await ctx.reply(
             `I don't recognize "${statusText.trim()}" as a status — valid ones are: ${VALID_STATUS_WORDS_TEXT}`,
@@ -624,9 +646,13 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         );
         return;
       }
-      const outcomes = await runBatch(caller, items, (item) => {
+      const outcomes = await runBatch(caller, items, async (item) => {
         const statusText = item.statusText ?? "";
-        const status = parseStatusWord(statusText);
+        const aliasStatus = parseStatusWord(statusText);
+        if (!aliasStatus && isExactInreview(statusText)) {
+          return { error: `invalid status "${statusText.trim()}" (use "review")` };
+        }
+        const status = aliasStatus ?? (await parseStatus(statusText, options.model)) ?? undefined;
         return status ? { status } : { error: `unrecognized status "${statusText.trim()}"` };
       });
       await finishBatch(ctx, caller, outcomes, UPDATE_USAGE);
@@ -660,7 +686,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         );
         return;
       }
-      const outcomes = await runBatch(caller, items, () => ({ status: "in_review" }));
+      const outcomes = await runBatch(caller, items, async () => ({ status: "in_review" }));
       await finishBatch(ctx, caller, outcomes, "Usage: /done <ref>");
     }),
   );
@@ -684,7 +710,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       await applyStatusChange(caller, resolved.task.id, "done", ctx, "marked ✅ Done. Nice work!");
       return;
     }
-    const outcomes = await runBatch(caller, items, () => ({ status: "done" }));
+    const outcomes = await runBatch(caller, items, async () => ({ status: "done" }));
     await finishBatch(ctx, caller, outcomes, "Usage: /complete <ref>");
   });
 
@@ -807,6 +833,24 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       return;
     }
 
+    // Natural-language priority/deadline inference (issue #102's
+    // `cleanTaskTitle`, wired in by issue #126/Parity S2): only when the
+    // user gave no explicit `!priority` flag — an explicit flag always
+    // wins over inferred prose, even contradictory prose (deliberate, see
+    // #126). Same for the deadline: inferred only when no explicit "by
+    // <date>" was already parsed.
+    let title = parsed.title;
+    let priority = parsed.priority;
+    let inferredDueDate: string | undefined;
+    if (parsed.priority === undefined) {
+      const cleaned = cleanTaskTitle(parsed.title, new Date());
+      title = cleaned.title;
+      priority = cleaned.priority;
+      if (parsed.dueDate === undefined && cleaned.dueDate) {
+        inferredDueDate = cleaned.dueDate;
+      }
+    }
+
     let assigneeUsername = caller.username;
     if (parsed.assigneeUsername) {
       const requested = normalizeUsername(parsed.assigneeUsername.replace(/^@/, ""));
@@ -819,13 +863,13 @@ export function createBot(options: CreateBotOptions): CreatedBot {
           await ctx.reply(NO_MEMBERS_TO_ASSIGN_REPLY);
           return;
         }
-        const dueDate = parsed.dueDate?.isoDate ?? getNextOnsiteDay(new Date()).isoDate;
-        const created = await createFanOutTasks(caller, members, parsed.title, dueDate, parsed.priority);
+        const dueDate = parsed.dueDate?.isoDate ?? inferredDueDate ?? getNextOnsiteDay(new Date()).isoDate;
+        const created = await createFanOutTasks(caller, members, title, dueDate, priority);
         if (created.length === 0) {
           await ctx.reply("❌ Something went wrong while creating the tasks. Please try again.");
           return;
         }
-        await ctx.reply(formatAllAssignedReply(members, parsed.title), {
+        await ctx.reply(formatAllAssignedReply(members, title), {
           parse_mode: "HTML" as const,
         });
         return;
@@ -837,13 +881,13 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       // the token.
       const roleMembers = resolveRoleMembers(roster, requested);
       if (roleMembers.length > 0) {
-        const dueDate = parsed.dueDate?.isoDate ?? getNextOnsiteDay(new Date()).isoDate;
-        const created = await createFanOutTasks(caller, roleMembers, parsed.title, dueDate, parsed.priority);
+        const dueDate = parsed.dueDate?.isoDate ?? inferredDueDate ?? getNextOnsiteDay(new Date()).isoDate;
+        const created = await createFanOutTasks(caller, roleMembers, title, dueDate, priority);
         if (created.length === 0 || created[0] === undefined) {
           await ctx.reply("❌ Something went wrong while creating the tasks. Please try again.");
           return;
         }
-        await ctx.reply(formatRoleAssignedReply(roleMembers, parsed.title, requested, created[0].id), {
+        await ctx.reply(formatRoleAssignedReply(roleMembers, title, requested, created[0].id), {
           parse_mode: "HTML" as const,
         });
         return;
@@ -856,12 +900,12 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       assigneeUsername = requested;
     }
 
-    const dueDate = parsed.dueDate?.isoDate ?? comingFriday(new Date()).isoDate;
+    const dueDate = parsed.dueDate?.isoDate ?? inferredDueDate ?? getNextOnsiteDay(new Date()).isoDate;
     const result = await service.assignTask(caller, {
       assigneeUsername,
-      title: parsed.title,
+      title,
       dueDate,
-      priority: parsed.priority,
+      priority,
     });
     if (!result.ok) {
       await ctx.reply(`Couldn't create the task: ${result.error}`);

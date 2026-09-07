@@ -71,8 +71,11 @@ const MENTION_RE = /(?:^|\s)@(\w+)(?=\s|$)/;
 
 // Matches a whole `!priority` token anywhere in the string (issue #101),
 // same shape as MENTION_RE — stripped before "by"/date parsing so it can't
-// be mistaken for part of the title or the date phrase.
-const PRIORITY_FLAG_RE = /(?:^|\s)!(\w+)(?=\s|$)/;
+// be mistaken for part of the title or the date phrase. Tolerates a comma
+// immediately after the flag (issue #126/Parity S2 2b: "!low, high
+// priority" must still read as an explicit low, not fall through to
+// cleanTaskTitle's inferred "high").
+const PRIORITY_FLAG_RE = /(?:^|\s)!(\w+)(?=[\s,]|$)/;
 const PRIORITIES: readonly TaskPriority[] = ["low", "medium", "high", "urgent"];
 
 function parsePriorityWord(word: string): TaskPriority | undefined {

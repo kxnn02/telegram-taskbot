@@ -16,7 +16,6 @@ const STATUS_WORDS: Record<string, TaskStatus> = {
   "in progress": "in_progress",
   wip: "in_progress",
   review: "in_review",
-  inreview: "in_review",
   "in-review": "in_review",
   "in review": "in_review",
   blocked: "blocked",

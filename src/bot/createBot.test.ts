@@ -1350,6 +1350,172 @@ describe("bulk-paste task capture (issue #104)", () => {
   });
 });
 
+// Issue #126/Parity S2: three parser gaps, all fixed by wiring up code that
+// was already ported and tested but unreferenced (`getNextOnsiteDay`'s
+// single-task path, `cleanTaskTitle`, `parseStatus`).
+describe("Parity S2: onsite default, NL priority, status fallback (issue #126)", () => {
+  it("a bare /addtask defaults to the next Tue/Thu onsite day, not comingFriday", async () => {
+    // Top-level beforeEach freezes "now" to 2026-09-05T02:00:00Z (Saturday,
+    // Manila) — nearest onsite day is Tuesday 2026-09-08.
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "freshuser", userId, "/addtask fix login"),
+    );
+
+    const tasks = await testBot.service.listAllTasks({ username: "freshuser", cohortId: COHORT });
+    if (!tasks.ok) throw new Error("read failed");
+    expect(tasks.value[0]?.dueDate).toBe("2026-09-08");
+  });
+
+  it("rolls forward to the next onsite day, never the same day, when 'today' is itself Tuesday", async () => {
+    vi.setSystemTime(new Date("2026-09-08T02:00:00.000Z")); // Tuesday, Manila
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "freshuser", userId, "/addtask fix login"),
+    );
+
+    const tasks = await testBot.service.listAllTasks({ username: "freshuser", cohortId: COHORT });
+    if (!tasks.ok) throw new Error("read failed");
+    expect(tasks.value[0]?.dueDate).toBe("2026-09-10"); // next Thursday
+  });
+
+  it("/addtask fix login bug, high priority creates a high task titled 'fix login bug'", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "freshuser", userId, "/addtask fix login bug, high priority"),
+    );
+
+    const tasks = await testBot.service.listAllTasks({ username: "freshuser", cohortId: COHORT });
+    if (!tasks.ok) throw new Error("read failed");
+    expect(tasks.value[0]?.title).toBe("fix login bug");
+    expect(tasks.value[0]?.priority).toBe("high");
+  });
+
+  it("an explicit !priority flag wins over contradictory prose (deliberate gap, issue #126)", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "freshuser", userId, "/addtask fix login bug !low, high priority"),
+    );
+
+    const tasks = await testBot.service.listAllTasks({ username: "freshuser", cohortId: COHORT });
+    if (!tasks.ok) throw new Error("read failed");
+    expect(tasks.value[0]?.priority).toBe("low");
+  });
+
+  it("an explicit 'by <date>' still wins over the onsite-day default", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "freshuser", userId, "/addtask fix login by Friday"),
+    );
+
+    const tasks = await testBot.service.listAllTasks({ username: "freshuser", cohortId: COHORT });
+    if (!tasks.ok) throw new Error("read failed");
+    expect(tasks.value[0]?.dueDate).toBe("2026-09-11"); // the explicit "by Friday", not onsite Tuesday
+  });
+
+  it("a bare trailing 'urgent' with an @mention is pinned to whatever cleanTaskTitle actually does, not guessed at", async () => {
+    // Earlier draft of #126 claimed this was a gap; it isn't — parseAddTaskArgs
+    // consumes @dale but sets no priority, so cleanTaskTitle's own phrase
+    // list decides the outcome. inferPriority has no "urgent"-without-a-
+    // priority-word rule beyond its literal keyword list, which does
+    // include "urgent" — so this resolves to urgent.
+    const roster = new Roster([
+      { username: "freshuser", cohortId: COHORT },
+      { username: "dale", cohortId: COHORT },
+    ]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "freshuser", userId, "/addtask fix login @dale urgent"),
+    );
+
+    const tasks = await testBot.service.listAllTasks({ username: "freshuser", cohortId: COHORT });
+    if (!tasks.ok) throw new Error("read failed");
+    expect(tasks.value[0]?.priority).toBe("urgent");
+    expect(tasks.value[0]?.title).toBe("fix login");
+  });
+
+  it("/update <ref> <unrecognized phrase> falls back to the model, e.g. 'working on it' -> in_progress", async () => {
+    const roster = new Roster([]);
+    const model = new FakeTextModel(["in_progress"]);
+    const testBot = makeTestBot(roster, COHORT, model);
+    const userId = nextUserId();
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/help"));
+    const created = await testBot.service.assignTask(
+      { username: "alice", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Some task", dueDate: "2026-09-10" },
+    );
+    if (!created.ok) throw new Error("setup failed");
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, `/update ${created.value.id} working on it`),
+    );
+
+    expect(lastReplyText(testBot.calls)).toContain("In progress");
+    expect(model.requests).toHaveLength(1);
+  });
+
+  it("/update <ref> inreview is refused by name with a 'use review' message, and changes nothing", async () => {
+    const roster = new Roster([]);
+    const model = new FakeTextModel([]);
+    const testBot = makeTestBot(roster, COHORT, model);
+    const userId = nextUserId();
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/help"));
+    const created = await testBot.service.assignTask(
+      { username: "alice", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Some task", dueDate: "2026-09-10" },
+    );
+    if (!created.ok) throw new Error("setup failed");
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, `/update ${created.value.id} inreview`),
+    );
+
+    expect(lastReplyText(testBot.calls)).toContain("invalid status");
+    expect(lastReplyText(testBot.calls)).toContain("review");
+    expect(model.requests).toHaveLength(0);
+    const tasks = await testBot.service.listAllTasks({ username: "alice", cohortId: COHORT });
+    if (!tasks.ok) throw new Error("read failed");
+    expect(tasks.value[0]?.status).not.toBe("in_review");
+  });
+
+  it("the model is not called when the alias table already resolves the status", async () => {
+    const roster = new Roster([]);
+    const model = new FakeTextModel([]);
+    const testBot = makeTestBot(roster, COHORT, model);
+    const userId = nextUserId();
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/help"));
+    const created = await testBot.service.assignTask(
+      { username: "alice", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Some task", dueDate: "2026-09-10" },
+    );
+    if (!created.ok) throw new Error("setup failed");
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, `/update ${created.value.id} done`),
+    );
+
+    expect(lastReplyText(testBot.calls)).toContain("Done");
+    expect(model.requests).toHaveLength(0);
+  });
+});
+
 // Issue #104: Devie's `@all`/role-slug fan-out for the single-mention
 // /addtask grammar. The caller is always one of the roster members already
 // seeded below (not a fresh "carla") — auto-registering a never-before-seen
