@@ -117,6 +117,31 @@ masked in its output.
 
 Confirm the loop is alive by sending `/whoami` in the dump group.
 
+### 7. Register the Login Widget domain (dashboard access)
+
+Separate from the webhook, and easy to forget because nothing above touches it: the dashboard's
+sign-in page uses the Telegram Login Widget, and Telegram refuses it with **"Bot domain invalid"**
+until the dry-run bot's domain is registered in BotFather. There is no API for this — it's a
+one-time manual step per bot, done once and then persistent (BotFather remembers it across
+redeploys; you do not need to repeat this unless you rotate to a new dry-run bot).
+
+In [@BotFather](https://t.me/BotFather):
+
+1. Send `/setdomain`.
+2. Pick the dry-run bot from the list it shows (not the production bot — easy to mix up when both
+   are in the same chat history).
+3. When it asks for the domain, send **exactly** the branch alias from step 3 above, with no
+   `https://`, no trailing slash, no path — e.g. `telegram-taskbot-git-dry-run-kxnn02s-projects.vercel.app`.
+4. Confirm BotFather's reply names the right bot: "Success! Domain updated."
+
+**If the login page still shows "Bot domain invalid" right after this:** it's near-always
+propagation delay on Telegram's side (up to a minute or two), sometimes compounded by the browser
+caching the failed widget iframe from before the fix. Wait ~60 seconds, then retry in a fresh
+incognito/private window before assuming anything is actually broken.
+
+Do this before the first time anyone tries to log into the dry-run dashboard — not after hitting
+the error, which is what makes it feel like it "always" comes up.
+
 ---
 
 ## Part 2 — the loop, per change
