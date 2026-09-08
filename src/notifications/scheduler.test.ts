@@ -275,23 +275,20 @@ describe("runDailyDigest", () => {
   });
 });
 
-describe("runWeeklyDigest", () => {
-  it("DMs a member only their own tasks, never another member's", async () => {
-    const past = new Date("2026-09-20T02:00:00.000Z"); // after 2026-09-10 due date
-    const { deps, service, bot } = await makeDeps(past);
-    const aliceTask = await assign(service, {
-      assigneeUsername: "alice",
-      dueDate: "2026-09-10", // overdue by `past`
-    });
+describe("runWeeklyDigest (#143 D4b / #147: completed-this-week only)", () => {
+  it("DMs a member only their own completed-this-week tasks, never another member's", async () => {
+    const { deps, service, bot } = await makeDeps();
+    const aliceTask = await assign(service, { assigneeUsername: "alice" });
     const bobTask = await assign(service, {
       assigneeUsername: "bob",
       title: "Ship the release notes",
-      dueDate: "2026-10-15", // not overdue
     });
     if (!aliceTask.ok || !bobTask.ok) throw new Error("setup failed");
+    await service.setStatus(alice, aliceTask.value.id, "done");
+    await service.setStatus(caller("bob"), bobTask.value.id, "done");
 
     const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
-    await runWeeklyDigest(deps, digestBuilder, COHORT, past);
+    await runWeeklyDigest(deps, digestBuilder, COHORT, NOW);
 
     const aliceDm = bot.sent.find((m) => m.text.includes(`#${aliceTask.value.id}`));
     const bobDm = bot.sent.find((m) => m.text.includes(`#${bobTask.value.id}`));
@@ -299,35 +296,55 @@ describe("runWeeklyDigest", () => {
     expect(bobDm).toBeDefined();
     expect(aliceDm?.text).not.toContain(`#${bobTask.value.id}`);
     expect(bobDm?.text).not.toContain(`#${aliceTask.value.id}`);
-    expect(bot.sent.some((m) => m.text.includes("Awaiting review"))).toBe(false);
-    expect(bot.sent.some((m) => m.text.includes("Overdue:"))).toBe(false);
   });
 
-  it("sends nothing to a member with no open tasks", async () => {
-    const past = new Date("2026-09-20T02:00:00.000Z"); // after 2026-09-10 due date
-    const { deps, service, bot, registrations } = await makeDeps(past);
-    await assign(service, { assigneeUsername: "alice" }); // overdue by `past`
-
-    const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
-    await runWeeklyDigest(deps, digestBuilder, COHORT, past);
-
-    const bobId = await registrations.findTelegramId("bob");
-    expect(bot.sent.some((m) => m.chatId === bobId)).toBe(false);
-    expect(bot.sent).toHaveLength(1);
-  });
-
-  it("a broken lookup for the middle roster member still reaches the last one (issue #59/H3)", async () => {
-    const { deps, service, bot, registrations } = await makeDeps();
-    await assign(service, { assigneeUsername: "alice" });
-    await assign(service, { assigneeUsername: "bob" });
-    // Roster order is alice, bob, carla, dave — bob is the middle member
-    // with an open task.
-    makeThrowingRegistrations(registrations, "bob");
+  it("does not include a member's still-open tasks (dropped per #143 D4b — would duplicate the daily digest)", async () => {
+    const { deps, service, bot } = await makeDeps();
+    const doneTask = await assign(service, { assigneeUsername: "alice" });
+    const openTask = await assign(service, {
+      assigneeUsername: "alice",
+      title: "Reuse the personality quiz template",
+    });
+    if (!doneTask.ok || !openTask.ok) throw new Error("setup failed");
+    await service.setStatus(alice, doneTask.value.id, "done");
 
     const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
     await runWeeklyDigest(deps, digestBuilder, COHORT, NOW);
 
     const aliceDm = bot.sent.find((m) => m.text.includes("Weekly digest"));
-    expect(aliceDm).toBeDefined();
+    expect(aliceDm?.text).toContain(`#${doneTask.value.id}`);
+    expect(aliceDm?.text).not.toContain(`#${openTask.value.id}`);
+  });
+
+  it("sends nothing to a member who completed nothing this week", async () => {
+    const { deps, service, bot, registrations } = await makeDeps();
+    await assign(service, { assigneeUsername: "alice" }); // stays open, never completed
+
+    const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
+    await runWeeklyDigest(deps, digestBuilder, COHORT, NOW);
+
+    const aliceId = await registrations.findTelegramId("alice");
+    expect(bot.sent.some((m) => m.chatId === aliceId)).toBe(false);
+    expect(bot.sent).toHaveLength(0);
+  });
+
+  it("a broken lookup for one member does not skip the rest of the roster (issue #59/H3)", async () => {
+    const { deps, service, bot, registrations } = await makeDeps();
+    const bobTask = await assign(service, { assigneeUsername: "bob" });
+    const daveTask = await assign(service, {
+      assigneeUsername: "dave",
+      title: "Ship the release notes",
+    });
+    if (!bobTask.ok || !daveTask.ok) throw new Error("setup failed");
+    await service.setStatus(caller("bob"), bobTask.value.id, "done");
+    await service.setStatus(caller("dave"), daveTask.value.id, "done");
+    // Roster order is alice, bob, carla, dave — bob's lookup throws.
+    makeThrowingRegistrations(registrations, "bob");
+
+    const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
+    await runWeeklyDigest(deps, digestBuilder, COHORT, NOW);
+
+    const daveDm = bot.sent.find((m) => m.text.includes(`#${daveTask.value.id}`));
+    expect(daveDm).toBeDefined();
   });
 });

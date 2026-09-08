@@ -15,6 +15,7 @@ import {
   formatTaskDetail,
   formatTaskNotFound,
   formatUpdateOk,
+  formatWeeklyCompleted,
   formatHelp,
   statusLabel,
   UNKNOWN_COMMAND_REPLY,
@@ -145,6 +146,48 @@ describe("formatApproved", () => {
     const text = formatApproved([task({ status: "done", previousStatus: null, blockedReason: null })]);
     expect(text).toContain("Marked done this past week:");
     expect(text).not.toContain("Approved this past week:");
+  });
+});
+
+describe("formatWeeklyCompleted (#143 D4b / #147)", () => {
+  it("says nothing was completed when the list is empty", () => {
+    expect(formatWeeklyCompleted([])).toBe("Nothing completed this week.");
+  });
+
+  it("heads the list with a count and lists each task with its marked-done date", () => {
+    const text = formatWeeklyCompleted([
+      task({
+        id: 1,
+        title: "Get design from Zendy",
+        status: "done",
+        previousStatus: null,
+        blockedReason: null,
+        updatedAt: "2026-09-03T00:00:00.000Z",
+      }),
+      task({
+        id: 4,
+        title: "Draft welcome email copy",
+        status: "done",
+        previousStatus: null,
+        blockedReason: null,
+        updatedAt: "2026-09-05T00:00:00.000Z",
+      }),
+    ]);
+    expect(text).toBe(
+      [
+        "✅ Completed this week (2):",
+        "- #1 Get design from Zendy (marked done Sep 3)",
+        "- #4 Draft welcome email copy (marked done Sep 5)",
+      ].join("\n"),
+    );
+  });
+
+  it("shares no text with formatMyTasks/formatApproved (must read as its own message, not a variant)", () => {
+    const tasksList = [
+      task({ id: 1, title: "x", status: "done", previousStatus: null, blockedReason: null }),
+    ];
+    expect(formatWeeklyCompleted(tasksList)).not.toContain("Your open tasks");
+    expect(formatWeeklyCompleted(tasksList)).not.toContain("Marked done this past week");
   });
 });
 

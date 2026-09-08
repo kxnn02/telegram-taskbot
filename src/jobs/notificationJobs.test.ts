@@ -89,24 +89,31 @@ describe("runDailyDigestJob", () => {
 });
 
 describe("runWeeklyDigestJob", () => {
-  async function makeDepsWithOpenTask() {
+  /** #143 D4b / #147: the weekly digest now reports completed-this-week
+   * tasks, not open ones — so the setup task must be marked done for a
+   * digest to have anything to send. */
+  async function makeDepsWithCompletedTask() {
     const deps = makeDeps();
     await deps.registrations.register(1, "alice");
     await deps.registrations.register(2, "bob");
-    await deps.service.assignTask(
-      { username: "bob", cohortId: "cohort-5" },
-      {
-        assigneeUsername: "alice",
-        title: "Do a thing",
-        description: "Details",
-        dueDate: "2026-09-10",
-      },
+    const bobCaller = { username: "bob", cohortId: "cohort-5" };
+    const created = await deps.service.assignTask(bobCaller, {
+      assigneeUsername: "alice",
+      title: "Do a thing",
+      description: "Details",
+      dueDate: "2026-09-10",
+    });
+    if (!created.ok) throw new Error("setup failed");
+    await deps.service.setStatus(
+      { username: "alice", cohortId: "cohort-5" },
+      created.value.id,
+      "done",
     );
     return deps;
   }
 
   it("sends digests the first time it runs for a given Manila calendar week", async () => {
-    const deps = await makeDepsWithOpenTask();
+    const deps = await makeDepsWithCompletedTask();
 
     // 2026-08-31 is a Monday.
     await runWeeklyDigestJob(deps, "cohort-5", new Date("2026-08-31T02:00:00Z"));
@@ -115,7 +122,7 @@ describe("runWeeklyDigestJob", () => {
   });
 
   it("skips sending on a retry within the same Manila calendar week", async () => {
-    const deps = await makeDepsWithOpenTask();
+    const deps = await makeDepsWithCompletedTask();
 
     await runWeeklyDigestJob(deps, "cohort-5", new Date("2026-08-31T02:00:00Z"));
     deps.sendMessage.mockClear();
