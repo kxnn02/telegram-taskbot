@@ -1,14 +1,7 @@
-import {
-  formatApproved,
-  formatBacklog,
-  formatBlocked,
-  formatMyTasks,
-  formatPending,
-} from "../bot/format.js";
+import { formatMyTasks } from "../bot/format.js";
 import type { Roster } from "../domain/roster.js";
 import type { Caller } from "../domain/types.js";
 import type { TaskService } from "../service/taskService.js";
-import { approvedInPastWeek } from "./weeklyApproved.js";
 
 export interface DigestBuilderDeps {
   service: TaskService;
@@ -18,14 +11,8 @@ export interface DigestBuilderDeps {
 /**
  * Turns already-tested TaskService read queries into the recipient-facing
  * digest text (or `null` when suppressed for having nothing to report), per
- * PRD §8 / issue #2. Deliberately thin: no new business rules, just
- * aggregation + formatting on top of `listMyTasks`, `listPending`,
- * `listBlocked`, `listBacklog`, and `listAllTasks`.
- *
- * There is no role tier any more (ADR-0013), so every roster member gets
- * the same shape of digest: their own open tasks plus the cohort-wide
- * oversight view (pending review, blocked, overdue) — previously the
- * oversight half was higher-up-only.
+ * PRD §8 / issue #2, and #143's D1: a DM is personal — it says what the
+ * recipient has to do, nothing about the rest of the cohort.
  */
 export class DigestBuilder {
   constructor(private readonly deps: DigestBuilderDeps) {}
@@ -37,60 +24,5 @@ export class DigestBuilder {
     const result = await this.deps.service.listMyTasks(caller);
     if (!result.ok || result.value.length === 0) return null;
     return formatMyTasks(result.value);
-  }
-
-  /** Daily oversight digest: pending review, blocked, and overdue,
-   * cohort-wide (not scoped to tasks the member personally assigned).
-   * Returns null when there's nothing to report. */
-  async oversightDailyDigest(username: string, cohortId: string): Promise<string | null> {
-    const caller: Caller = { username, cohortId };
-    const pending = await this.deps.service.listPending(caller);
-    const blocked = await this.deps.service.listBlocked(caller);
-    const overdue = await this.deps.service.listBacklog(caller);
-
-    const pendingTasks = pending.ok ? pending.value : [];
-    const blockedTasks = blocked.ok ? blocked.value : [];
-    const overdueTasks = overdue.ok ? overdue.value : [];
-
-    if (
-      pendingTasks.length === 0 &&
-      blockedTasks.length === 0 &&
-      overdueTasks.length === 0
-    ) {
-      return null;
-    }
-
-    const sections: string[] = [];
-    if (pendingTasks.length > 0) sections.push(formatPending(pendingTasks));
-    if (blockedTasks.length > 0) sections.push(formatBlocked(blockedTasks));
-    if (overdueTasks.length > 0) sections.push(formatBacklog(overdueTasks));
-    return sections.join("\n\n");
-  }
-
-  /** Weekly Monday oversight digest: pending review plus what was marked
-   * done in the past 7 days (PRD §8). Returns null when there's nothing to
-   * report. */
-  async oversightWeeklyDigest(
-    username: string,
-    cohortId: string,
-    now: Date,
-  ): Promise<string | null> {
-    const caller: Caller = { username, cohortId };
-    const pending = await this.deps.service.listPending(caller);
-    const all = await this.deps.service.listAllTasks(caller);
-
-    const pendingTasks = pending.ok ? pending.value : [];
-    const approvedTasks = all.ok ? approvedInPastWeek(all.value, now) : [];
-
-    if (pendingTasks.length === 0 && approvedTasks.length === 0) {
-      return null;
-    }
-
-    const sections: string[] = [];
-    if (pendingTasks.length > 0) sections.push(formatPending(pendingTasks));
-    if (approvedTasks.length > 0) {
-      sections.push(formatApproved(approvedTasks));
-    }
-    return sections.join("\n\n");
   }
 }

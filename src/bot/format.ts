@@ -133,31 +133,6 @@ export function formatMyTasks(tasks: TaskWithFlags[], page = 1): string {
   return lines.join("\n");
 }
 
-export function formatPending(tasks: TaskWithFlags[]): string {
-  if (tasks.length === 0) {
-    return "Nothing pending review right now.";
-  }
-  return [
-    "Awaiting review:",
-    ...tasks.map(
-      (t) => `- ${formatTaskLine(t)} (assigned to @${t.assigneeUsername})`,
-    ),
-  ].join("\n");
-}
-
-export function formatBacklog(tasks: TaskWithFlags[]): string {
-  if (tasks.length === 0) {
-    return "Nothing's overdue — nice.";
-  }
-  return [
-    "Overdue:",
-    ...tasks.map(
-      (t) =>
-        `- ⚠️ #${t.id} ${t.title} — ${t.daysOverdue} day(s) overdue (assigned to @${t.assigneeUsername})`,
-    ),
-  ].join("\n");
-}
-
 export function formatDeadlines(tasks: TaskWithFlags[]): string {
   if (tasks.length === 0) {
     return "Nothing due in the next 7 days.";
@@ -165,19 +140,6 @@ export function formatDeadlines(tasks: TaskWithFlags[]): string {
   return [
     "Due in the next 7 days:",
     ...tasks.map((t) => `- ⏰ ${formatTaskLine(t)} (assigned to @${t.assigneeUsername})`),
-  ].join("\n");
-}
-
-export function formatBlocked(tasks: TaskWithFlags[]): string {
-  if (tasks.length === 0) {
-    return "Nothing is currently flagged blocked.";
-  }
-  return [
-    "Blocked:",
-    ...tasks.map(
-      (t) =>
-        `- ${formatTaskLine(t)} (assigned to @${t.assigneeUsername}): ${t.blockedReason}`,
-    ),
   ].join("\n");
 }
 

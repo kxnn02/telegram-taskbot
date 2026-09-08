@@ -5,14 +5,11 @@ import {
   chunkMessage,
   formatAmbiguousTaskMatches,
   formatApproved,
-  formatBacklog,
   formatBatchReply,
-  formatBlocked,
   formatDeadlines,
   formatDoneOk,
   formatCompleteOk,
   formatMyTasks,
-  formatPending,
   formatTaskAdded,
   formatTaskLine,
   formatTaskDetail,
@@ -93,31 +90,6 @@ describe("formatAmbiguousTaskMatches (issue #124 stage S1, Devie route.ts:957-96
   });
 });
 
-describe("formatBlocked", () => {
-  it("says nothing is blocked when the list is empty", () => {
-    expect(formatBlocked([])).toBe("Nothing is currently flagged blocked.");
-  });
-
-  it("lists blocked tasks with assignee and reason", () => {
-    const text = formatBlocked([task()]);
-    expect(text).toContain("#1");
-    expect(text).toContain("@alice");
-    expect(text).toContain("waiting on API access");
-  });
-});
-
-describe("formatBacklog (H10 — /overdue no longer calls itself Backlog)", () => {
-  it("says nothing is overdue when the list is empty", () => {
-    expect(formatBacklog([])).toBe("Nothing's overdue — nice.");
-  });
-
-  it("heads the list with 'Overdue:', not 'Backlog'", () => {
-    const text = formatBacklog([task({ daysOverdue: 3 })]);
-    expect(text).toContain("Overdue:");
-    expect(text).not.toContain("Backlog");
-  });
-});
-
 describe("formatMyTasks pagination", () => {
   it("shows no pagination footer when everything fits on one page", () => {
     const text = formatMyTasks(tasks(10));
@@ -173,18 +145,6 @@ describe("formatApproved", () => {
     const text = formatApproved([task({ status: "done", previousStatus: null, blockedReason: null })]);
     expect(text).toContain("Marked done this past week:");
     expect(text).not.toContain("Approved this past week:");
-  });
-});
-
-describe("formatPending", () => {
-  it("says nothing pending when the list is empty", () => {
-    expect(formatPending([])).toBe("Nothing pending review right now.");
-  });
-
-  it("heads the list with 'Awaiting review', not 'Awaiting your review' — it's cohort-wide, not personal (F14a)", () => {
-    const text = formatPending([task({ status: "in_review", previousStatus: "in_progress", blockedReason: null })]);
-    expect(text).toContain("Awaiting review:");
-    expect(text).not.toContain("Awaiting your review:");
   });
 });
 
