@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseSaveSettingsRequest,
+  planDashboardWebhookRegistration,
   parseStandupRequest,
   isMaintainer,
   stripWebhookUrlQuery,
@@ -150,5 +151,59 @@ describe("buildWebhookStatusResponse", () => {
     expect(
       buildWebhookStatusResponse({ url: "", pending_update_count: 0 }),
     ).toEqual({ url: "", pendingCount: 0, lastError: undefined });
+  });
+});
+
+describe("planDashboardWebhookRegistration", () => {
+  /** The env a correctly-configured production deployment presents. */
+  function productionEnv(overrides: Record<string, string | undefined> = {}) {
+    return {
+      PROD_BOT_USERNAME: "devcon_cohort5_taskbot",
+      PRODUCTION_DEPLOYMENT_URL: "https://telegram-taskbot-ten.vercel.app",
+      TELEGRAM_WEBHOOK_SECRET: "production-secret",
+      VERCEL_PROTECTION_BYPASS: "bypass",
+      ...overrides,
+    };
+  }
+
+  it("registers production's webhook when the deployment really holds the production bot", () => {
+    const plan = planDashboardWebhookRegistration({
+      actualBotUsername: "devcon_cohort5_taskbot",
+      env: productionEnv(),
+    });
+    expect(plan.ok).toBe(true);
+    expect(plan.ok === true && plan.url).toContain("telegram-taskbot-ten.vercel.app");
+  });
+
+  it("refuses when pressed on the dry-run deployment, which holds the dry-run bot", () => {
+    // The hazard this closes: the route hardcodes PRODUCTION_DEPLOYMENT_URL as
+    // its destination, but ran its identity check against the deployment's own
+    // BOT_USERNAME. On the dry-run deployment both are the dry-run bot, so the
+    // check agreed with itself and Register would have pointed the DRY-RUN bot
+    // at PRODUCTION's URL — killing the dry-run loop and crossing the two.
+    const plan = planDashboardWebhookRegistration({
+      actualBotUsername: "devcon_c5_taskbot_test_bot",
+      env: productionEnv({ DRYRUN_BOT_USERNAME: "devcon_c5_taskbot_test_bot" }),
+    });
+    expect(plan.ok).toBe(false);
+  });
+
+  it("refuses rather than guessing when PROD_BOT_USERNAME is not configured", () => {
+    // Fail closed: an unset variable must not fall back to BOT_USERNAME, which
+    // is whatever bot the current deployment happens to run as.
+    const plan = planDashboardWebhookRegistration({
+      actualBotUsername: "devcon_c5_taskbot_test_bot",
+      env: productionEnv({ PROD_BOT_USERNAME: undefined }),
+    });
+    expect(plan.ok).toBe(false);
+    expect(plan.ok === false && plan.reason).toContain("PROD_BOT_USERNAME");
+  });
+
+  it("ignores BOT_USERNAME entirely, however it is set", () => {
+    const plan = planDashboardWebhookRegistration({
+      actualBotUsername: "devcon_c5_taskbot_test_bot",
+      env: productionEnv({ BOT_USERNAME: "devcon_c5_taskbot_test_bot" }),
+    });
+    expect(plan.ok).toBe(false);
   });
 });

@@ -1,4 +1,8 @@
 import type { Caller } from "../domain/types.js";
+import {
+  planWebhookRegistration,
+  type WebhookRegistrationPlan,
+} from "../ops/webhookRegistration.js";
 
 /**
  * Request-parsing/validation for the Next.js settings-page API route
@@ -93,4 +97,39 @@ export function buildWebhookStatusResponse(info: {
     pendingCount: info.pending_update_count,
     lastError: info.last_error_message,
   };
+}
+
+/**
+ * Decides whether the dashboard's Register button may repoint the production
+ * webhook, given the env of the deployment the button was pressed on.
+ *
+ * The button's destination is always `PRODUCTION_DEPLOYMENT_URL`, but the
+ * token it would write with is whatever bot the *current* deployment runs as
+ * (`deps.botToken`). Those two are only the same thing on production. The
+ * route used to check that token against `BOT_USERNAME` — the current
+ * deployment's own bot — so on the dry-run deployment the check compared the
+ * dry-run bot against itself, passed, and would have pointed the dry-run bot
+ * at production's URL: the dry-run loop silently dead, and the two loops
+ * crossed (ADR-0011).
+ *
+ * So the identity is checked against `PROD_BOT_USERNAME`, which names the
+ * production bot and nothing else. It is read with no fallback on purpose:
+ * when it is unset the button fails closed with a message naming it, rather
+ * than quietly reverting to "whichever bot is here".
+ */
+export function planDashboardWebhookRegistration(input: {
+  actualBotUsername: string;
+  env: Record<string, string | undefined>;
+}): WebhookRegistrationPlan {
+  const { env } = input;
+  return planWebhookRegistration({
+    target: "production",
+    actualBotUsername: input.actualBotUsername,
+    expectedBotUsername: env.PROD_BOT_USERNAME,
+    otherTargetBotUsername: env.DRYRUN_BOT_USERNAME,
+    deploymentUrl: env.PRODUCTION_DEPLOYMENT_URL,
+    productionDeploymentUrl: env.PRODUCTION_DEPLOYMENT_URL,
+    webhookSecret: env.TELEGRAM_WEBHOOK_SECRET,
+    protectionBypassSecret: env.VERCEL_PROTECTION_BYPASS,
+  });
 }

@@ -4,8 +4,11 @@ import { Bot } from "grammy";
 import { attachAutoRetry } from "../../../../src/bot/attachAutoRetry";
 import { getDashboardDeps } from "../../../../src/web/nextDashboardDeps";
 import { resolveCallerFromCookie, SESSION_COOKIE } from "../../../../src/web/requireDashboardSession";
-import { buildWebhookStatusResponse, isMaintainer } from "../../../../src/web/settingsRequests";
-import { planWebhookRegistration } from "../../../../src/ops/webhookRegistration";
+import {
+  buildWebhookStatusResponse,
+  isMaintainer,
+  planDashboardWebhookRegistration,
+} from "../../../../src/web/settingsRequests";
 
 /**
  * The Bot Connection section's webhook status/register routes (issue #130).
@@ -15,6 +18,11 @@ import { planWebhookRegistration } from "../../../../src/ops/webhookRegistration
  * gated to `MAINTAINER_USERNAME`: a mis-click here silences the live bot
  * for the whole cohort until someone notices, so this is the one button in
  * this section that isn't safe for anyone to press.
+ *
+ * It is additionally gated on the deployment actually holding the production
+ * bot (`planDashboardWebhookRegistration`): the destination is hardcoded to
+ * production, so pressing it on the dry-run deployment would otherwise point
+ * the dry-run bot there and cross the two loops.
  *
  * Both construct `new Bot(deps.botToken)` per request and use only
  * `bot.api` — no `bot.init()`/`bot.start()` (Build 0c): this is a webhook
@@ -77,15 +85,7 @@ export async function POST() {
     );
   }
 
-  const plan = planWebhookRegistration({
-    target: "production",
-    actualBotUsername,
-    expectedBotUsername: process.env.BOT_USERNAME,
-    deploymentUrl: process.env.PRODUCTION_DEPLOYMENT_URL,
-    productionDeploymentUrl: process.env.PRODUCTION_DEPLOYMENT_URL,
-    webhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET,
-    protectionBypassSecret: process.env.VERCEL_PROTECTION_BYPASS,
-  });
+  const plan = planDashboardWebhookRegistration({ actualBotUsername, env: process.env });
   if (!plan.ok) {
     return NextResponse.json({ ok: false, error: plan.reason }, { status: 400 });
   }

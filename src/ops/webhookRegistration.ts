@@ -28,8 +28,18 @@ export interface WebhookRegistrationInput {
   target: WebhookTarget;
   /** The bot the supplied token actually belongs to, from Telegram's getMe. */
   actualBotUsername: string;
-  /** The bot this target is configured to own (BOT_USERNAME/DRYRUN_BOT_USERNAME). */
+  /** The bot this target is configured to own (PROD_BOT_USERNAME/DRYRUN_BOT_USERNAME). */
   expectedBotUsername: string | undefined;
+  /**
+   * The *other* target's configured bot, so a token can be refused for being
+   * the wrong loop's bot even when it agrees with its own target's username.
+   * This is the check `expectedBotUsername` cannot make: if a token and the
+   * username naming it are edited together - which is exactly what happened
+   * when `BOT_TOKEN`/`BOT_USERNAME` were both pointed at the test bot - the
+   * actual-vs-expected comparison agrees with itself and waves the write
+   * through. Undefined when the other loop is not configured on this machine.
+   */
+  otherTargetBotUsername: string | undefined;
   /** Base URL of this target's deployment, without the webhook path. */
   deploymentUrl: string | undefined;
   /** Production's base URL, used to keep the dry-run bot off the live deployment. */
@@ -57,21 +67,41 @@ export type WebhookRegistrationPlan =
   | { ok: false; reason: string };
 
 /** The env var names each target reads, so a refusal can name the exact one to fix. */
-const ENV_VARS: Record<
-  WebhookTarget,
-  { botUsername: string; deploymentUrl: string; webhookSecret: string }
-> = {
+export interface TargetEnvNames {
+  botToken: string;
+  botUsername: string;
+  deploymentUrl: string;
+  webhookSecret: string;
+}
+
+/**
+ * Deliberately disjoint: no variable appears under both targets, so no single
+ * edit can move both loops at once (ADR-0011).
+ *
+ * Production reads `PROD_BOT_TOKEN`/`PROD_BOT_USERNAME`, **not** `BOT_TOKEN`.
+ * `BOT_TOKEN` means "the bot this machine runs locally", which is the test bot
+ * on purpose - so a production target reading it would report on, and could
+ * repoint, an entirely different bot than the one it names.
+ */
+const ENV_VARS: Record<WebhookTarget, TargetEnvNames> = {
   production: {
-    botUsername: "BOT_USERNAME",
+    botToken: "PROD_BOT_TOKEN",
+    botUsername: "PROD_BOT_USERNAME",
     deploymentUrl: "PRODUCTION_DEPLOYMENT_URL",
     webhookSecret: "TELEGRAM_WEBHOOK_SECRET",
   },
   "dry-run": {
+    botToken: "DRYRUN_BOT_TOKEN",
     botUsername: "DRYRUN_BOT_USERNAME",
     deploymentUrl: "DRYRUN_DEPLOYMENT_URL",
     webhookSecret: "DRYRUN_WEBHOOK_SECRET",
   },
 };
+
+/** The env vars a target reads. Exported so the script shell cannot drift from the guardrails. */
+export function envNamesFor(target: WebhookTarget): TargetEnvNames {
+  return { ...ENV_VARS[target] };
+}
 
 /** Treats whitespace-only config the same as unset — a blank line in `.env` is not a value. */
 function present(value: string | undefined): string | undefined {
@@ -109,6 +139,25 @@ export function planWebhookRegistration(
         `Token mismatch: the configured token belongs to @${input.actualBotUsername}, but the ` +
         `${input.target} target expects @${normalizeUsername(expectedBotUsername)} ` +
         `(${envVars.botUsername}). Refusing to repoint a bot that is not this target's.`,
+    };
+  }
+
+  // Runs even when the check above passed: a token and the username naming it
+  // can be wrong together, and then only the other loop's identity disagrees.
+  const otherBotUsername = present(input.otherTargetBotUsername);
+  const otherTarget: WebhookTarget = input.target === "production" ? "dry-run" : "production";
+  if (
+    otherBotUsername &&
+    normalizeUsername(input.actualBotUsername) === normalizeUsername(otherBotUsername)
+  ) {
+    return {
+      ok: false,
+      reason:
+        `Cross-target mismatch: the ${input.target} target's token belongs to ` +
+        `@${normalizeUsername(input.actualBotUsername)}, which is configured as the ` +
+        `${otherTarget} bot (${ENV_VARS[otherTarget].botUsername}). Production and the dry run ` +
+        "must be two different bots (ADR-0011); refusing to register one against the other's " +
+        "deployment.",
     };
   }
 

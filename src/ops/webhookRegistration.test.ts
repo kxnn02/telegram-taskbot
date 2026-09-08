@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { planWebhookRegistration, type WebhookRegistrationInput } from "./webhookRegistration.js";
+import {
+  envNamesFor,
+  planWebhookRegistration,
+  type WebhookRegistrationInput,
+} from "./webhookRegistration.js";
 
 /** A fully-populated, valid dry-run input; individual tests override one field. */
 function dryRunInput(overrides: Partial<WebhookRegistrationInput> = {}): WebhookRegistrationInput {
@@ -11,6 +15,7 @@ function dryRunInput(overrides: Partial<WebhookRegistrationInput> = {}): Webhook
     productionDeploymentUrl: "https://telegram-taskbot-ten.vercel.app",
     webhookSecret: "dry-run-secret",
     protectionBypassSecret: "bypass-secret",
+    otherTargetBotUsername: "devcon_cohort5_taskbot",
     ...overrides,
   };
 }
@@ -26,6 +31,7 @@ function productionInput(
     productionDeploymentUrl: "https://telegram-taskbot-ten.vercel.app",
     webhookSecret: "production-secret",
     protectionBypassSecret: "bypass-secret",
+    otherTargetBotUsername: "devcon_cohort5_dryrun_bot",
     ...overrides,
   };
 }
@@ -150,7 +156,7 @@ describe("planWebhookRegistration", () => {
   });
 
   it.each([
-    ["expectedBotUsername", "BOT_USERNAME"],
+    ["expectedBotUsername", "PROD_BOT_USERNAME"],
     ["deploymentUrl", "PRODUCTION_DEPLOYMENT_URL"],
     ["webhookSecret", "TELEGRAM_WEBHOOK_SECRET"],
   ] as const)(
@@ -166,5 +172,81 @@ describe("planWebhookRegistration", () => {
     const plan = planWebhookRegistration(dryRunInput({ webhookSecret: "   " }));
     expect(plan.ok).toBe(false);
     expect(plan.ok === false && plan.reason).toContain("DRYRUN_WEBHOOK_SECRET");
+  });
+
+  it("refuses when the production target's token turns out to be the dry-run bot", () => {
+    // The failure this exists for: BOT_TOKEN and BOT_USERNAME were both moved
+    // to the test bot together, so the actual-vs-expected check agreed with
+    // itself and the guard passed. Comparing against the *other* target's bot
+    // catches a pair that moved in step.
+    const plan = planWebhookRegistration(
+      productionInput({
+        actualBotUsername: "devcon_cohort5_dryrun_bot",
+        expectedBotUsername: "devcon_cohort5_dryrun_bot",
+      }),
+    );
+    expect(plan.ok).toBe(false);
+    expect(plan.ok === false && plan.reason).toContain("DRYRUN_BOT_USERNAME");
+  });
+
+  it("refuses when the dry-run target's token turns out to be the production bot", () => {
+    const plan = planWebhookRegistration(
+      dryRunInput({
+        actualBotUsername: "devcon_cohort5_taskbot",
+        expectedBotUsername: "devcon_cohort5_taskbot",
+      }),
+    );
+    expect(plan.ok).toBe(false);
+    expect(plan.ok === false && plan.reason).toContain("PROD_BOT_USERNAME");
+  });
+
+  it("applies the cross-target check case-insensitively and ignoring a leading @", () => {
+    const plan = planWebhookRegistration(
+      productionInput({
+        actualBotUsername: "DevCon_Cohort5_DryRun_Bot",
+        expectedBotUsername: "DevCon_Cohort5_DryRun_Bot",
+        otherTargetBotUsername: "@devcon_cohort5_dryrun_bot",
+      }),
+    );
+    expect(plan.ok).toBe(false);
+    expect(plan.ok === false && plan.reason).toContain("DRYRUN_BOT_USERNAME");
+  });
+
+  it("still succeeds when the other target's bot is not configured at all", () => {
+    // A half-configured .env must not block the target that *is* configured.
+    expect(planWebhookRegistration(productionInput({ otherTargetBotUsername: undefined })).ok).toBe(
+      true,
+    );
+  });
+});
+
+describe("envNamesFor", () => {
+  it("reads production's bot identity from PROD_BOT_TOKEN / PROD_BOT_USERNAME", () => {
+    // Not BOT_TOKEN: that variable is whatever bot this machine runs locally,
+    // which is deliberately the test bot, so a production target reading it
+    // reports on - and can repoint - the wrong bot entirely.
+    expect(envNamesFor("production")).toEqual({
+      botToken: "PROD_BOT_TOKEN",
+      botUsername: "PROD_BOT_USERNAME",
+      deploymentUrl: "PRODUCTION_DEPLOYMENT_URL",
+      webhookSecret: "TELEGRAM_WEBHOOK_SECRET",
+    });
+  });
+
+  it("reads the dry run's bot identity from DRYRUN_BOT_TOKEN / DRYRUN_BOT_USERNAME", () => {
+    expect(envNamesFor("dry-run")).toEqual({
+      botToken: "DRYRUN_BOT_TOKEN",
+      botUsername: "DRYRUN_BOT_USERNAME",
+      deploymentUrl: "DRYRUN_DEPLOYMENT_URL",
+      webhookSecret: "DRYRUN_WEBHOOK_SECRET",
+    });
+  });
+
+  it("gives the two targets entirely disjoint env vars", () => {
+    // The invariant behind ADR-0011: two bots, two secrets, two URLs. If any
+    // single variable were shared, one command could move both loops.
+    const prod = Object.values(envNamesFor("production"));
+    const dry = Object.values(envNamesFor("dry-run"));
+    expect(prod.filter((name) => dry.includes(name))).toEqual([]);
   });
 });
