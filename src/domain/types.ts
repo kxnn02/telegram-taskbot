@@ -112,3 +112,9 @@ export interface AuditLog {
   meta: Record<string, unknown>;
   createdAt: string;
 }
+
+/** `job_runs`' CHECK constraint (issue #43's migration) — whether a job
+ * endpoint's `work()` completed or threw, recorded by `handleJobEndpoint`
+ * itself so a job's own success/failure survives past Vercel's runtime-log
+ * retention window. */
+export type JobRunStatus = "success" | "error";

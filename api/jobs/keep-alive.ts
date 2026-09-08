@@ -6,6 +6,7 @@ import { createSupabaseClient } from "../../src/storage/supabaseClient.js";
 import { pingDatabase } from "../../src/jobs/keepAlive.js";
 import {
   buildErrorReportingDeps,
+  buildJobRunRecorder,
   loadErrorReportingEnv,
   makeSetupReporter,
 } from "../../src/jobs/buildJobDeps.js";
@@ -61,6 +62,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           verify: (headers) => verifyCronSecret(headers, cronSecret),
           work: () => pingDatabase(client),
           onError,
+          recordRun: buildJobRunRecorder(client, JOB_NAME),
         },
         {
           method: req.method,
