@@ -138,6 +138,44 @@ describe("taskLine", () => {
     const line = taskLine(t, { showCode: false, showStatus: false, showDue: false });
     expect(line).toBe("▸ Fix &lt;script&gt; &amp; \"bug\"");
   });
+
+  it("appends the blocked reason for a blocked task", () => {
+    const t = baseTask({
+      id: 3,
+      status: "blocked",
+      blockedReason: "waiting on Figma access",
+      dueDate: "2026-09-04",
+    });
+    const line = taskLine(t, { showStatus: true, showDue: true });
+    expect(line).toBe(
+      "▸ <code>T-003</code> Ship the thing 🚧 · Fri, Sep 4 — <i>waiting on Figma access</i>",
+    );
+  });
+
+  it("renders a blocked task with no reason exactly as before", () => {
+    const t = baseTask({ id: 3, status: "blocked", blockedReason: null, dueDate: "2026-09-04" });
+    const line = taskLine(t, { showStatus: true, showDue: true });
+    expect(line).toBe("▸ <code>T-003</code> Ship the thing 🚧 · Fri, Sep 4");
+  });
+
+  it("never appends a reason to a task that is not blocked", () => {
+    const t = baseTask({ status: "todo", blockedReason: "stale reason from an old block" });
+    const line = taskLine(t, { showCode: false, showStatus: false, showDue: false });
+    expect(line).toBe("▸ Ship the thing");
+  });
+
+  it("escapes HTML in the reason", () => {
+    const t = baseTask({
+      id: 3,
+      status: "blocked",
+      blockedReason: "blocked by <b>vendor</b> & co",
+      dueDate: "2026-09-04",
+    });
+    const line = taskLine(t, { showStatus: true, showDue: true });
+    expect(line).toBe(
+      "▸ <code>T-003</code> Ship the thing 🚧 · Fri, Sep 4 — <i>blocked by &lt;b&gt;vendor&lt;/b&gt; &amp; co</i>",
+    );
+  });
 });
 
 describe("groupByMember / renderByMember", () => {
