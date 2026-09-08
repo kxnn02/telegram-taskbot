@@ -64,6 +64,11 @@ export async function POST(request: NextRequest) {
     );
     return NextResponse.json({ ok: true, sent: result.sent });
   } catch (error) {
+    // Reported to the client as a generic message (below), so without this
+    // the actual Telegram error (e.g. a 429) is invisible in Vercel's logs —
+    // the exact gap that made the first "Failed to send test standup" report
+    // impossible to diagnose from logs alone.
+    console.error("standup test send failed:", error);
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "Failed to reach Telegram." },
       { status: 502 },
