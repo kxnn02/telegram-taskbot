@@ -8,6 +8,7 @@ import { SupabaseOverdueNotificationStore } from "../storage/supabaseOverdueNoti
 import { SupabaseCohortStore } from "../storage/supabaseCohortStore.js";
 import { SupabaseRosterStore } from "../storage/supabaseRosterStore.js";
 import { SupabaseAlertThrottleStore } from "../storage/supabaseAlertThrottleStore.js";
+import { SupabaseJobRunStore } from "../storage/supabaseJobRunStore.js";
 import { loadRosterFromStore } from "../config/roster.js";
 import { TaskService } from "../service/taskService.js";
 import { SystemClock } from "../domain/clock.js";
@@ -86,6 +87,20 @@ export async function buildErrorReportingDeps(
   attachAutoRetry(bot);
   await bot.init();
   return { bot, ...buildRegistrationsAndThrottle(supabase) };
+}
+
+/** Builds the `recordRun` a `JobEndpointDeps` passes to `handleJobEndpoint`
+ * (issue #43), reusing the caller's own Supabase client rather than opening
+ * a second connection. Only `keep-alive`/`weekly-backup` wire this up so
+ * far — the two jobs whose Vercel-Cron-triggered invocations can't
+ * otherwise be confirmed once Vercel's own runtime-log retention lapses. */
+export function buildJobRunRecorder(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  jobName: string,
+) {
+  const store = new SupabaseJobRunStore(supabase);
+  return (status: "success" | "error", detail: string | null) =>
+    store.record(jobName, status, detail);
 }
 
 export async function buildNotificationJobDeps(): Promise<NotificationJobDeps> {

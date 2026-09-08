@@ -6,6 +6,7 @@ import { createSupabaseClient } from "../../src/storage/supabaseClient.js";
 import { runWeeklyBackup } from "../../src/jobs/weeklyBackup.js";
 import {
   buildErrorReportingDeps,
+  buildJobRunRecorder,
   loadErrorReportingEnv,
   makeSetupReporter,
 } from "../../src/jobs/buildJobDeps.js";
@@ -67,6 +68,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           verify: (headers) => verifyCronSecret(headers, cronSecret),
           work: () => runWeeklyBackup({ client, githubToken, githubRepo }),
           onError,
+          recordRun: buildJobRunRecorder(client, JOB_NAME),
         },
         {
           method: req.method,

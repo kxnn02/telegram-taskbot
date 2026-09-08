@@ -34,6 +34,13 @@ export interface JobEndpointDeps {
    * a failure to *report* a failure must not change the response the
    * caller (pg_net/Vercel Cron) sees, which is already a 500 either way. */
   onError(error: unknown): Promise<void>;
+  /** Persists this run's outcome to `job_runs` (issue #43), only when `work`
+   * actually ran — never for a 401/405. Optional: only `keep-alive` and
+   * `weekly-backup` wire this up so far, since they're the two jobs whose
+   * Vercel-Cron-triggered invocations can't otherwise be confirmed after the
+   * fact. Any thrown error is swallowed the same way `onError`'s is — a
+   * failure to *record* success must not turn a 200 into a 500. */
+  recordRun?(status: "success" | "error", detail: string | null): Promise<void>;
 }
 
 /**
@@ -61,7 +68,18 @@ export async function handleJobEndpoint(
     } catch {
       // Never let a failure to report the failure change the response.
     }
+    try {
+      const message = error instanceof Error ? error.message : String(error);
+      await deps.recordRun?.("error", message);
+    } catch {
+      // Never let a failure to record the run change the response.
+    }
     return { status: 500 };
+  }
+  try {
+    await deps.recordRun?.("success", null);
+  } catch {
+    // Never let a failure to record the run change the response.
   }
   return { status: 200 };
 }
