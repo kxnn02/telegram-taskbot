@@ -16,6 +16,60 @@ Two bots exist and must never be confused:
 | branch   | `main`                                  | `dry-run`                                     |
 | URL      | `https://telegram-taskbot-ten.vercel.app` | the `dry-run` branch deployment              |
 
+### Which variable means what
+
+`BOT_TOKEN` is **not** "the production bot". It means *the bot whichever instance
+is reading it runs as*: the real bot inside production's Vercel environment, the
+dry-run bot inside the `dry-run` branch's, and — deliberately — the dry-run bot in
+a local `.env`, because every local code path reads it (`npm run dev`,
+`src/jobs/buildJobDeps.ts`, `api/telegram/webhook.ts`, and the dashboard's settings
+routes via `src/web/nextDashboardDeps.ts`). A local `BOT_TOKEN` pointed at
+production would let a local dashboard's **Test Standup** post into the live cohort
+group.
+
+To *talk about* production from a local machine — `getMe`, `getWebhookInfo`,
+`getChat`, or `webhook:register --target production` — use **`PROD_BOT_TOKEN` /
+`PROD_BOT_USERNAME`**. Nothing in `src/` or `api/` reads those names, so they
+cannot change what any deployment does.
+
+The same applies to `ACTIVE_COHORT_ID`: it is the cohort binding for the instance
+reading it, and it is the *only* thing separating dry-run data from live data —
+both cohorts share one Supabase project (ADR-0004). A local `.env` must set it to
+`cohort5-dryrun`; `cohort-5` there points a local dashboard at the real roster and
+the real tasks.
+
+Each target reads a fully disjoint set of variables, so no single edit can move
+both loops. `envNamesFor` in `src/ops/webhookRegistration.ts` is the one place that
+mapping is written down, and a unit test asserts the two sets do not intersect:
+
+|                | production                | dry run                  |
+| -------------- | ------------------------- | ------------------------ |
+| token          | `PROD_BOT_TOKEN`          | `DRYRUN_BOT_TOKEN`       |
+| username       | `PROD_BOT_USERNAME`       | `DRYRUN_BOT_USERNAME`    |
+| URL            | `PRODUCTION_DEPLOYMENT_URL` | `DRYRUN_DEPLOYMENT_URL`  |
+| webhook secret | `TELEGRAM_WEBHOOK_SECRET` | `DRYRUN_WEBHOOK_SECRET`  |
+
+`planWebhookRegistration` refuses when a target's token resolves to the *other*
+target's bot, not just when it disagrees with its own target's username. That extra
+check exists because the pair can be wrong together: when `BOT_TOKEN` and
+`BOT_USERNAME` were both moved to the test bot, the token-vs-username check agreed
+with itself and `--target production --check` cheerfully reported that production's
+webhook pointed at the dry-run deployment. It did not.
+
+### Checking the split is intact
+
+Neither command writes anything:
+
+```bash
+npm run webhook:register -- --target production --check
+npm run webhook:register -- --target dry-run --check
+```
+
+Expect two different bots, two different URLs, and each `current:` line matching its
+own target. Both webhooks are live at the same time — that is the whole point of the
+second bot (ADR-0011). If the dry-run bot reports `(none)`, the dry-run loop is down
+and nothing you send to it will be answered; re-register it with step 6 below.
+
 ---
 
 ## Part 1 — one-time setup
@@ -202,3 +256,6 @@ sensible result?*
    ```
 
    It prints the currently registered URL (secrets masked) and Telegram's last delivery error.
+   This reads `PROD_BOT_TOKEN`, not `BOT_TOKEN`, so it reports on the real bot even from a
+   machine whose `BOT_TOKEN` is the test bot. If `PROD_BOT_TOKEN` is unset it fails saying so,
+   rather than reporting on whichever bot happens to be configured.

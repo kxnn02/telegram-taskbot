@@ -1,5 +1,6 @@
 import "dotenv/config";
 import {
+  envNamesFor,
   planWebhookRegistration,
   type WebhookTarget,
 } from "../src/ops/webhookRegistration.js";
@@ -52,9 +53,13 @@ function parseArgs(argv: string[]): Args {
   };
 }
 
-/** Env var holding the bot token for each target — deliberately two distinct bots (ADR-0011). */
+/**
+ * Env var holding the bot token for each target — deliberately two distinct
+ * bots (ADR-0011). The names come from `envNamesFor` rather than being spelled
+ * out here, so this shell cannot drift from the guardrails that validate it.
+ */
 function tokenFor(target: WebhookTarget): { envVar: string; token: string | undefined } {
-  const envVar = target === "production" ? "BOT_TOKEN" : "DRYRUN_BOT_TOKEN";
+  const envVar = envNamesFor(target).botToken;
   return { envVar, token: process.env[envVar]?.trim() || undefined };
 }
 
@@ -91,20 +96,17 @@ async function main() {
 
   const me = await callTelegram<{ username: string }>(token, "getMe");
 
+  const names = envNamesFor(args.target);
+  const otherNames = envNamesFor(args.target === "production" ? "dry-run" : "production");
+
   const plan = planWebhookRegistration({
     target: args.target,
     actualBotUsername: me.username,
-    expectedBotUsername:
-      args.target === "production" ? process.env.BOT_USERNAME : process.env.DRYRUN_BOT_USERNAME,
-    deploymentUrl:
-      args.target === "production"
-        ? process.env.PRODUCTION_DEPLOYMENT_URL
-        : process.env.DRYRUN_DEPLOYMENT_URL,
+    expectedBotUsername: process.env[names.botUsername],
+    otherTargetBotUsername: process.env[otherNames.botUsername],
+    deploymentUrl: process.env[names.deploymentUrl],
     productionDeploymentUrl: process.env.PRODUCTION_DEPLOYMENT_URL,
-    webhookSecret:
-      args.target === "production"
-        ? process.env.TELEGRAM_WEBHOOK_SECRET
-        : process.env.DRYRUN_WEBHOOK_SECRET,
+    webhookSecret: process.env[names.webhookSecret],
     protectionBypassSecret: process.env.VERCEL_PROTECTION_BYPASS,
   });
 
