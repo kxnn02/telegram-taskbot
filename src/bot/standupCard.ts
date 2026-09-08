@@ -62,6 +62,9 @@ export function taskLine(task: TaskWithFlags, opts: TaskLineOptions = {}): strin
   line += PRIORITY_BADGE[task.priority];
   if (showStatus) line += ` ${STATUS_EMOJI[task.status]}`;
   if (showDue) line += ` · ${formatShortDate(task.dueDate)}`;
+  if (task.status === "blocked" && task.blockedReason?.trim()) {
+    line += ` — <i>${esc(task.blockedReason)}</i>`;
+  }
   return line;
 }
 
