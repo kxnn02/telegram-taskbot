@@ -1,6 +1,6 @@
 {
   "framework": "nextjs",
-  "buildCommand": "npm run build:next",
+  "buildCommand": "npm run check:env && npm run build:next",
   "crons": [
     {
       "path": "/api/jobs/keep-alive",
