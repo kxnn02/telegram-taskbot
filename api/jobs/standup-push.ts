@@ -19,9 +19,11 @@ import { buildQuoteModel } from "../../src/nlp/quoteModel.js";
  * at all, which this ticket treats as an abuse vector, not a carbon-copy
  * rule to keep.
  *
- * Deliberately **absent from `vercel.json`**: Devie schedules nothing here
- * either, and issue #43 is still proving the two existing crons work at
- * all. This endpoint is triggered externally or by hand.
+ * Scheduled by pg_cron at `5 0 * * *` (issue #131), gated on the cohort's
+ * `standup_enabled` flag — a disabled cohort skips silently on `POST`.
+ * Deliberately **absent from `vercel.json`**: this repo schedules through
+ * pg_cron rather than Vercel Cron, which issue #43 is still proving even
+ * works.
  */
 const JOB_NAME = "standup-push";
 
@@ -43,6 +45,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             env.activeCohortId,
             now,
           ),
+        isEnabled: () => deps.cohorts.isStandupEnabled(env.activeCohortId),
       },
       {
         method: req.method,

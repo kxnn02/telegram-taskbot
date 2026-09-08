@@ -4,6 +4,7 @@ import type { CohortStorePort } from "./cohortStorePort.js";
  * of the real Supabase-backed store. */
 export class InMemoryCohortStore implements CohortStorePort {
   private readonly groupChatIds: Map<string, string>;
+  private readonly standupEnabled = new Map<string, boolean>();
 
   constructor(seed: Record<string, string> = {}) {
     this.groupChatIds = new Map(Object.entries(seed));
@@ -19,5 +20,13 @@ export class InMemoryCohortStore implements CohortStorePort {
       return;
     }
     this.groupChatIds.set(cohortId, groupChatId);
+  }
+
+  async isStandupEnabled(cohortId: string): Promise<boolean> {
+    return this.standupEnabled.get(cohortId) ?? false;
+  }
+
+  async setStandupEnabled(cohortId: string, enabled: boolean): Promise<void> {
+    this.standupEnabled.set(cohortId, enabled);
   }
 }

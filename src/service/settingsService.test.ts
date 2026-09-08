@@ -22,24 +22,32 @@ function makeService() {
 }
 
 describe("SettingsService.getSettings", () => {
-  it("returns undefined groupChatId for a cohort with none configured", async () => {
+  it("returns undefined groupChatId and standupEnabled false for a cohort with none configured", async () => {
     const { service } = makeService();
     const result = await service.getSettings(alice);
-    expect(result).toEqual({ ok: true, value: { groupChatId: undefined } });
+    expect(result).toEqual({ ok: true, value: { groupChatId: undefined, standupEnabled: false } });
   });
 
   it("returns the cohort's configured groupChatId", async () => {
     const { service, cohortStore } = makeService();
     await cohortStore.setGroupChatId(COHORT, "-100123");
     const result = await service.getSettings(alice);
-    expect(result).toEqual({ ok: true, value: { groupChatId: "-100123" } });
+    expect(result).toEqual({ ok: true, value: { groupChatId: "-100123", standupEnabled: false } });
+  });
+
+  it("returns the cohort's configured standupEnabled", async () => {
+    const { service, cohortStore } = makeService();
+    await cohortStore.setStandupEnabled(COHORT, true);
+    const result = await service.getSettings(alice);
+    expect(result).toEqual({ ok: true, value: { groupChatId: undefined, standupEnabled: true } });
   });
 
   it("scopes to the caller's own cohort", async () => {
     const { service, cohortStore } = makeService();
     await cohortStore.setGroupChatId(OTHER_COHORT, "-100999");
+    await cohortStore.setStandupEnabled(OTHER_COHORT, true);
     const result = await service.getSettings(alice);
-    expect(result).toEqual({ ok: true, value: { groupChatId: undefined } });
+    expect(result).toEqual({ ok: true, value: { groupChatId: undefined, standupEnabled: false } });
   });
 });
 
@@ -81,6 +89,8 @@ describe("SettingsService.saveGroupChatId", () => {
       setGroupChatId: async () => {
         throw new Error("db unavailable");
       },
+      isStandupEnabled: async () => false,
+      setStandupEnabled: async () => {},
     };
     const service = new SettingsService(throwingCohortStore, auditLogStore);
     const result = await service.saveGroupChatId(alice, "-100123");
@@ -89,6 +99,57 @@ describe("SettingsService.saveGroupChatId", () => {
     const rows = await auditLogStore.listRecent(COHORT, 10);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ status: "error", action: "settings.config.save" });
+  });
+});
+
+describe("SettingsService.saveStandupEnabled", () => {
+  it("saves true and writes an ok audit row", async () => {
+    const { service, cohortStore, auditLogStore } = makeService();
+    const result = await service.saveStandupEnabled(alice, true);
+    expect(result.ok).toBe(true);
+    expect(await cohortStore.isStandupEnabled(COHORT)).toBe(true);
+
+    const rows = await auditLogStore.listRecent(COHORT, 10);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      cohortId: COHORT,
+      action: "settings.standup.toggle",
+      status: "ok",
+      message: "Settings saved",
+    });
+  });
+
+  it("saves false", async () => {
+    const { service, cohortStore } = makeService();
+    await cohortStore.setStandupEnabled(COHORT, true);
+    await service.saveStandupEnabled(alice, false);
+    expect(await cohortStore.isStandupEnabled(COHORT)).toBe(false);
+  });
+
+  it("scopes the write to the caller's own cohort", async () => {
+    const { service, cohortStore } = makeService();
+    await service.saveStandupEnabled(erin, true);
+    expect(await cohortStore.isStandupEnabled(OTHER_COHORT)).toBe(true);
+    expect(await cohortStore.isStandupEnabled(COHORT)).toBe(false);
+  });
+
+  it("writes an error audit row and returns fail when the store throws", async () => {
+    const { auditLogStore } = makeService();
+    const throwingCohortStore = {
+      getGroupChatId: async () => undefined,
+      setGroupChatId: async () => {},
+      isStandupEnabled: async () => false,
+      setStandupEnabled: async () => {
+        throw new Error("db unavailable");
+      },
+    };
+    const service = new SettingsService(throwingCohortStore, auditLogStore);
+    const result = await service.saveStandupEnabled(alice, true);
+    expect(result.ok).toBe(false);
+
+    const rows = await auditLogStore.listRecent(COHORT, 10);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: "error", action: "settings.standup.toggle" });
   });
 });
 

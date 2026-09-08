@@ -50,6 +50,20 @@ describe("parseStandupRequest", () => {
     });
   });
 
+  it("accepts mode: enable", () => {
+    expect(parseStandupRequest({ mode: "enable" })).toEqual({
+      ok: true,
+      value: { mode: "enable" },
+    });
+  });
+
+  it("accepts mode: disable", () => {
+    expect(parseStandupRequest({ mode: "disable" })).toEqual({
+      ok: true,
+      value: { mode: "disable" },
+    });
+  });
+
   it("rejects a missing mode field", () => {
     expect(parseStandupRequest({}).ok).toBe(false);
   });

@@ -38,14 +38,19 @@ export function parseSaveSettingsRequest(body: unknown): ParsedRequest<{ groupCh
 }
 
 /** `mode` picks `POST /api/settings/standup`'s branch: `"preview"` renders
- * the card text without sending, `"test"` posts it into the cohort's group. */
-export function parseStandupRequest(body: unknown): ParsedRequest<{ mode: "preview" | "test" }> {
+ * the card text without sending, `"test"` posts it into the cohort's group
+ * regardless of the Auto-standup switch (issue #131 Build 3 — testing a
+ * standup you haven't enabled yet is the whole point of the button), and
+ * `"enable"`/`"disable"` (issue #131 Build 4) flip that switch itself. */
+export function parseStandupRequest(
+  body: unknown,
+): ParsedRequest<{ mode: "preview" | "test" | "enable" | "disable" }> {
   const record = asRecord(body);
   if (!record) return fail("Request body must be a JSON object.");
 
   const mode = record.mode;
-  if (mode !== "preview" && mode !== "test") {
-    return fail(`"mode" is required and must be "preview" or "test".`);
+  if (mode !== "preview" && mode !== "test" && mode !== "enable" && mode !== "disable") {
+    return fail(`"mode" is required and must be "preview", "test", "enable" or "disable".`);
   }
   return { ok: true, value: { mode } };
 }
