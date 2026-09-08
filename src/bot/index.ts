@@ -5,7 +5,7 @@ import { SupabaseTaskStore } from "../storage/supabaseTaskStore.js";
 import { SupabaseRegistrationStore } from "../storage/supabaseRegistrationStore.js";
 import { SupabaseRosterStore } from "../storage/supabaseRosterStore.js";
 import { loadRosterFromStore } from "../config/roster.js";
-import { GroqTextModel } from "../nlp/groqTextModel.js";
+import { buildTextModel } from "../nlp/buildTextModel.js";
 
 /**
  * LOCAL-DEV-ONLY entrypoint (`npm run dev`). Runs the bot via long polling
@@ -45,9 +45,9 @@ async function main() {
     rosterStore,
     roster,
     activeCohortId,
-    // Groq, not Anthropic (issue #102 follow-up): the account behind
-    // ANTHROPIC_API_KEY has no billing credit — see .env.example.
-    model: new GroqTextModel(),
+    // Built through the factory, never `new GroqTextModel()` (issue #142):
+    // a missing key must fail on use, not while `buildDeps` is running.
+    model: buildTextModel(),
   });
 
   await registerBotCommands(bot);
