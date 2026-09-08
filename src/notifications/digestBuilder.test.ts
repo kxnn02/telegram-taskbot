@@ -134,33 +134,3 @@ describe("DigestBuilder.oversightWeeklyDigest", () => {
     expect(text).toBeNull();
   });
 });
-
-describe("DigestBuilder.groupDailyCounts", () => {
-  it("aggregates on-track/overdue/blocked counts per member", async () => {
-    const { builder, service } = makeBuilder();
-    await assign(service, { assigneeUsername: "alice" });
-    await assign(service, { assigneeUsername: "bob", dueDate: "2026-09-01" }); // overdue relative to NOW
-
-    const counts = await builder.groupDailyCounts(COHORT);
-    const aliceCounts = counts.find((c) => c.username === "alice");
-    const bobCounts = counts.find((c) => c.username === "bob");
-    expect(aliceCounts).toEqual({ username: "alice", onTrack: 1, overdue: 0, blocked: 0 });
-    expect(bobCounts).toEqual({ username: "bob", onTrack: 0, overdue: 1, blocked: 0 });
-  });
-
-  it("gives a zeroed line for a member with no tasks at all", async () => {
-    const { builder, service } = makeBuilder();
-    await assign(service, { assigneeUsername: "alice" });
-    const counts = await builder.groupDailyCounts(COHORT);
-    const bobCounts = counts.find((c) => c.username === "bob");
-    expect(bobCounts).toEqual({ username: "bob", onTrack: 0, overdue: 0, blocked: 0 });
-  });
-
-  it("includes any member holding a task, not just the one who created it", async () => {
-    const { builder, service } = makeBuilder();
-    await assign(service, { assigneeUsername: "dave" });
-    const counts = await builder.groupDailyCounts(COHORT);
-    const daveCounts = counts.find((c) => c.username === "dave");
-    expect(daveCounts).toEqual({ username: "dave", onTrack: 1, overdue: 0, blocked: 0 });
-  });
-});

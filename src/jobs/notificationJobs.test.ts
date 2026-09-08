@@ -43,10 +43,24 @@ describe("runOverdueCrossingJob / runDueSoonReminderJob", () => {
 });
 
 describe("runDailyDigestJob", () => {
-  it("sends digests the first time it runs for a given Manila calendar day", async () => {
+  async function makeDepsWithOpenTask() {
     const deps = makeDeps();
     await deps.registrations.register(1, "alice");
     await deps.registrations.register(2, "bob");
+    await deps.service.assignTask(
+      { username: "bob", cohortId: "cohort-5" },
+      {
+        assigneeUsername: "alice",
+        title: "Do a thing",
+        description: "Details",
+        dueDate: "2026-09-10",
+      },
+    );
+    return deps;
+  }
+
+  it("sends digests the first time it runs for a given Manila calendar day", async () => {
+    const deps = await makeDepsWithOpenTask();
 
     await runDailyDigestJob(deps, "cohort-5", new Date("2026-09-01T02:00:00Z"));
 
@@ -54,9 +68,7 @@ describe("runDailyDigestJob", () => {
   });
 
   it("skips sending on a retry for the same Manila calendar day (already claimed)", async () => {
-    const deps = makeDeps();
-    await deps.registrations.register(1, "alice");
-    await deps.registrations.register(2, "bob");
+    const deps = await makeDepsWithOpenTask();
 
     await runDailyDigestJob(deps, "cohort-5", new Date("2026-09-01T02:00:00Z"));
     deps.sendMessage.mockClear();
@@ -66,9 +78,7 @@ describe("runDailyDigestJob", () => {
   });
 
   it("sends again on the next Manila calendar day", async () => {
-    const deps = makeDeps();
-    await deps.registrations.register(1, "alice");
-    await deps.registrations.register(2, "bob");
+    const deps = await makeDepsWithOpenTask();
 
     await runDailyDigestJob(deps, "cohort-5", new Date("2026-09-01T02:00:00Z"));
     deps.sendMessage.mockClear();

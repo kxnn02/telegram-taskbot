@@ -9,7 +9,6 @@ import type { Roster } from "../domain/roster.js";
 import type { Caller } from "../domain/types.js";
 import type { TaskService } from "../service/taskService.js";
 import { approvedInPastWeek } from "./weeklyApproved.js";
-import type { MemberDailyCounts } from "./digestFormat.js";
 
 export interface DigestBuilderDeps {
   service: TaskService;
@@ -93,25 +92,5 @@ export class DigestBuilder {
       sections.push(formatApproved(approvedTasks));
     }
     return sections.join("\n\n");
-  }
-
-  /** Per-member counts for the daily group-chat summary (PRD §8) —
-   * deliberately counts-only, see `MemberDailyCounts`. Includes every
-   * roster member in the cohort, even ones with zero tasks, for
-   * full-cohort visibility. */
-  async groupDailyCounts(cohortId: string): Promise<MemberDailyCounts[]> {
-    const members = this.deps.roster.all().filter((entry) => entry.cohortId === cohortId);
-
-    return Promise.all(
-      members.map(async (entry) => {
-        const caller: Caller = { username: entry.username, cohortId };
-        const result = await this.deps.service.listMyTasks(caller);
-        const tasks = result.ok ? result.value : [];
-        const overdue = tasks.filter((t) => t.overdue).length;
-        const blocked = tasks.filter((t) => t.status === "blocked").length;
-        const onTrack = tasks.filter((t) => !t.overdue && t.status !== "blocked").length;
-        return { username: entry.username, onTrack, overdue, blocked };
-      }),
-    );
   }
 }
