@@ -43,7 +43,20 @@ the bot day-to-day, see [`USER_GUIDE.md`](./USER_GUIDE.md).
 >
 > **`/standup` gained Devie's character**: a daily quote, a greeting, and emoji priority/status
 > badges (issue #107), plus a separate secret-gated push endpoint that can post the same card into
-> the group on demand — not on a schedule yet.
+> the group on demand, and — as of issue #131, below — on a daily schedule too.
+>
+> **Devie parity pass 2** ([ADR-0014](./docs/adr/0014-devie-parity-pass-2.md), spec
+> [#124](https://github.com/kxnn02/telegram-taskbot/issues/124), stages
+> [#125](https://github.com/kxnn02/telegram-taskbot/issues/125)-[#131](https://github.com/kxnn02/telegram-taskbot/issues/131),
+> all closed) closed seven gaps a line-by-line re-read against Devie found: task refs resolve by
+> title keyword, not just number; `/addtask` defaults to the next Tue/Thu onsite day instead of the
+> coming Friday, and reads natural-language priority out of a title; `/update` falls back to a
+> Claude-assisted status guess on an unrecognized word; every bot reply adopts Devie's exact
+> wording and HTML formatting; the pre-port dashboard is deleted in favor of a ported Overview page
+> at `/dashboard`; the settings page gained Appearance, Bot Connection, and Daily Standup sections;
+> and the daily standup now actually runs on a schedule (Supabase `pg_cron`, `5 0 * * *`), gated by
+> the on/off switch the settings page ships alongside it. See `CONTEXT.md`'s "ninth change" entry
+> for the full stage-by-stage breakdown.
 
 ## Requirements
 

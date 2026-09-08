@@ -6,8 +6,11 @@
 > [`docs/PRD-v1-original.md`](./docs/PRD-v1-original.md). For the decisions that connect the two,
 > see `CONTEXT.md` and [`docs/adr/`](./docs/adr/) — most significantly
 > [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md) (direct one-line commands, free-set
-> statuses) and [ADR-0013](./docs/adr/0013-remove-access-control-for-devie-parity.md) (every role
-> and permission check removed).
+> statuses), [ADR-0013](./docs/adr/0013-remove-access-control-for-devie-parity.md) (every role
+> and permission check removed), and
+> [ADR-0014](./docs/adr/0014-devie-parity-pass-2.md) (task-ref keyword lookup, onsite-day
+> defaults, Devie's reply formatting, the ported dashboard's Overview/settings pages, and the
+> scheduled daily standup).
 
 ## 1. Overview
 
@@ -51,7 +54,7 @@ separate proposal may reintroduce access control if it's ever needed — see ADR
 | description | Optional — the one-line `/addtask` grammar (§5) has no room for one; still settable via the dashboard |
 | assignee | A cohort member, or unassigned if the creator didn't name one — no role restriction on who can be assigned |
 | assigned_by | Whoever ran the command or dashboard action that created it |
-| due_date | Required — defaults to the coming Friday if not given |
+| due_date | Required — defaults to the next Tue/Thu onsite day if not given |
 | status | One of six free-set values (§4) — `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done` |
 | priority | One of `low`, `medium`, `high`, `urgent` — defaults to `medium` |
 | tags | Cohort-scoped labels, managed from the dashboard's kanban board |
@@ -90,8 +93,10 @@ one is for.
   question, no group-membership check.
 - **`/help`** — the full command list, identical for everyone.
 - **`/addtask <title> [!priority] [by <date>] [@username]`** — creates a task in one line, in any
-  order, defaulting to medium priority and the coming Friday. `@all` or a cohort id fans a task
-  out to every member of that scope. A bare `/addtask` returns a usage example, not a form.
+  order, defaulting to medium priority and the next Tue/Thu onsite day. When no explicit
+  `!priority` flag is given, a natural-language priority or deadline phrase in the title (e.g.
+  "high priority") is picked up automatically instead of being ignored. `@all` or a cohort id fans
+  a task out to every member of that scope. A bare `/addtask` returns a usage example, not a form.
   Pasting a multi-task message (multiple `@mentions`, newlines, or a list-shaped paste) instead
   extracts and creates every task it can find, with no confirmation step and no roster validation
   on the assignee — matching Devie's own loose bulk-create behavior.
@@ -102,7 +107,10 @@ one is for.
 - **`/deadlines`** — open tasks due in the next 7 days.
 - **`/update <ref>[,<ref>...] <status>`** — sets a status on one or many tasks at once
   (comma- or newline-separated), optionally riding a `link:<url>` and/or `note:<text>` onto the
-  same call. Reports success/failure per task.
+  same call. Reports success/failure per task. `<ref>` may be a task number or a keyword matching
+  a task's title — a keyword match with more than one candidate is shown as a disambiguation list
+  rather than guessed; an unrecognized status word falls back to a Claude-assisted best guess
+  instead of being rejected outright.
 - **`/done`** / **`/complete`** (or **`/completed`**) — fixed-status shortcuts onto the same
   mechanism as `/update`, both accepting the same bulk-ref grammar.
 - **`/standup`** — an on-demand report for the whole cohort, with buttons to switch between
@@ -159,9 +167,12 @@ them proactively.
   who's behind. This restraint holds even though the bot can read (and post detail into, via
   commands) the full group chat — it was never about read access, only about not automating a
   callout.
-- **Standup, with character**: `/standup` (and a separate, secret-gated push endpoint, not on a
-  schedule) render a daily quote, a greeting, and emoji priority/status badges alongside the
-  counts — matching Devie's own standup presentation.
+- **Standup, with character**: `/standup` (and a separate, secret-gated push endpoint) render a
+  daily quote, a greeting, and emoji priority/status badges alongside the counts — matching
+  Devie's own standup presentation. The push endpoint now also runs on a schedule (Supabase
+  `pg_cron`, 00:05 UTC / 8:05am Asia/Manila daily), gated by an Auto-standup on/off switch on the
+  dashboard's settings page (default off); the on-demand `/standup` command is unaffected by the
+  switch either way.
 
 No standup response-collection (a "what did you do yesterday" prompt-and-reply flow) and no
 overdue-nagging loop — unchanged from the original design's deferrals (§11). All scheduled
@@ -173,10 +184,11 @@ notifications run on **Asia/Manila time**.
 - **Auth**: Telegram Login Widget (official, free) — no separate password system. Logging in
   still requires an existing roster row (i.e., having messaged the bot at least once); nothing
   distinguishes members further once logged in.
-- **Features**: a kanban board (drag-and-drop, tags), full task list/oversight filterable by
-  status or member, task creation and editing, a settings page, a team page, a paginated
-  activity-log view, light/dark theming, and a stats view (tasks completed per member, completion
-  rate).
+- **Features**: an Overview landing page at `/dashboard` (the app's `/` redirects there), a kanban
+  board (drag-and-drop, tags), full task list/oversight filterable by status or member, task
+  creation and editing, a settings page (Appearance, Bot Connection, Daily Standup — including the
+  Auto-standup on/off switch), a team page, a paginated activity-log view, light/dark theming, and
+  a stats view (tasks completed per member, completion rate).
 
 ## 10. Reusability
 

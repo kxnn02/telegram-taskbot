@@ -6,7 +6,7 @@ export interface AddTaskParsed {
   /** Raw username, `@` stripped, not yet checked against the roster. */
   assigneeUsername?: string;
   /** Undefined means no "by <date>" clause was found — the caller applies
-   * the coming-Friday default (issue #27). */
+   * the next-onsite-day default (issue #27, redefined from the coming Friday by #126). */
   dueDate?: ParsedDueDate;
   /** Undefined means no `!priority` flag was found — the caller applies
    * the medium default (issue #101). */

@@ -107,10 +107,50 @@ later.
 > [#104](https://github.com/kxnn02/telegram-taskbot/issues/104)); and `/standup` gained Devie's
 > character — a daily quote, a greeting, and emoji priority/status badges, plus a separate,
 > secret-gated push endpoint (`api/jobs/standup-push.ts`) that can post the same card into the
-> group on demand, not on a schedule (issue
-> [#107](https://github.com/kxnn02/telegram-taskbot/issues/107)). See the "Priority, order_index,
-> tags and audit_logs" entry below for the schema side of the first, and `src/bot/standupQuote.ts`
-> / `src/jobs/standupPush.ts` for the second.
+> group on demand (issue
+> [#107](https://github.com/kxnn02/telegram-taskbot/issues/107)) — **superseded below**, that push
+> endpoint now also runs on a schedule. See the "Priority, order_index, tags and audit_logs" entry
+> below for the schema side of the first, and `src/bot/standupQuote.ts` / `src/jobs/standupPush.ts`
+> for the second.
+>
+> **A ninth change, Devie parity pass 2, closes seven gaps a 2026-09-07 line-by-line re-read
+> against Devie found** ([ADR-0014](./docs/adr/0014-devie-parity-pass-2.md), spec
+> [#124](https://github.com/kxnn02/telegram-taskbot/issues/124), stages
+> [#125](https://github.com/kxnn02/telegram-taskbot/issues/125)-[#131](https://github.com/kxnn02/telegram-taskbot/issues/131),
+> all closed 2026-09-08):
+>
+> - **S1** (#125) — `/done`, `/complete`, and `/update`'s single-ref path resolves a task by
+>   title-keyword substring match when the ref isn't a number (`findTaskByRef`,
+>   `src/bot/taskLookup.ts`), with a "which one?" list on multiple matches.
+> - **S2** (#126) — `/addtask`'s single-task path defaults to the next Tue/Thu onsite day
+>   (`getNextOnsiteDay`) instead of the coming Friday; `cleanTaskTitle` (ported by #102, previously
+>   unwired) now runs whenever no explicit `!priority` flag is given, so natural-language priority
+>   in a title is honored; `/update` falls back to a Claude-assisted status guess (`parseStatus`)
+>   on an unrecognized status word instead of rejecting it.
+> - **S3** (#127) — every bot reply adopts Devie's exact wording and HTML formatting; `/start`
+>   becomes a pure alias for `/help`; the five duplicated `esc()` copies consolidate into
+>   `src/bot/html.ts`.
+> - **S4** (#128) — Devie's Overview page is built at `/dashboard`; `/` redirects to it (was a 404).
+> - **S5** (#129) — the pre-port dashboard (`/`, `/stats`, `/tasks/new`, `/tasks/[id]/edit`) is
+>   deleted now that S4 gives `/` somewhere to redirect to.
+> - **S6** (#130) — the settings page gains Appearance, Bot Connection, and Daily Standup
+>   (Preview/Test, no schedule yet) sections.
+> - **S7** (#131) — the daily standup actually runs on a schedule: `cohorts.standup_enabled`
+>   (default `false`) plus a `pg_cron` job (`job-standup-push`, `5 0 * * *` / 00:05 UTC), gated
+>   inside `handleStandupPushEndpoint`'s `POST` branch only — never in `sendStandupPush` itself,
+>   which the settings page's Test button reuses and must ignore the flag. `pg_cron` was chosen
+>   over Vercel Cron (can't send the custom auth header; the one scheduling path never proven to
+>   fire, #43) and over Devie's own cron-job.org (an unnecessary third-party dependency when
+>   `pg_cron`/`call_job_endpoint` already does the exact same job for four other endpoints). This is
+>   the one deliberate schema-touching exception to #124's "no migrations in this pass" rule. S7's
+>   PR also shipped `attachAutoRetry()` (`src/bot/attachAutoRetry.ts`, wrapping grammy's official
+>   `@grammyjs/auto-retry`) across every place this repo constructs a real `Bot` — nothing
+>   previously retried a rate-limited or transient Telegram API call, which is what turned routine
+>   dry-run testing into a stuck "Failed to send" once a test group's flood limit tripped — plus a
+>   fix for that failure surfacing as a bare 500 and a forever-hung spinner on the settings page
+>   (uncaught error + unguarded `res.json()`).
+>
+> See ADR-0014 for the full context and the alternatives rejected on the scheduler choice.
 
 ## Glossary
 
@@ -488,9 +528,9 @@ restores that spec rather than changing it): every ` by ` occurrence is a candid
 walked last-to-first so `fix the bug found by QA by next Friday` splits on the second `by`. A
 candidate is only accepted when the text after it is *entirely* consumed by chrono's match (plus
 optional trailing punctuation) — otherwise the earlier `by` is tried, and if none qualify the
-whole string stays the title with no due date (the caller's coming-Friday default applies
-instead). Do not "simplify" this back to a whole-string chrono scan; that's the exact bug this
-fixed. See `addTaskParse.ts`'s doc comment and `addTaskParse.test.ts` for the validated
+whole string stays the title with no due date (the caller's default due date applies instead —
+the coming Friday at the time this shipped, the next Tue/Thu onsite day as of ADR-0014's S2). Do
+not "simplify" this back to a whole-string chrono scan; that's the exact bug this fixed. See `addTaskParse.ts`'s doc comment and `addTaskParse.test.ts` for the validated
 input/output table.
 
 ### Wizard chat scoping stored as a `WizardData` field, not a `wizard_state` column (issue #52/#53, finding F3)

@@ -4,6 +4,35 @@ A running log of what's shipped, for interns, higher-ups, and anyone else follow
 technical changelog — see `git log` or the GitHub issues for that level of detail. See
 `PRD.md` for the full design and `CONTEXT.md` for why things were built the way they were.
 
+## 2026-09-08 — Devie parity pass 2 complete: task-ref keywords, onsite defaults, Devie's reply style, a ported dashboard, and a scheduled standup
+
+A line-by-line re-read of Devie against this repo found seven remaining gaps beyond the Cohort 4
+port below. All seven stages are closed — see
+[ADR-0014](./docs/adr/0014-devie-parity-pass-2.md) for the full picture and `CONTEXT.md`'s "ninth
+change" entry for a stage-by-stage breakdown.
+
+- **Task refs resolve by title keyword, not just number** ([#125](https://github.com/kxnn02/telegram-taskbot/issues/125)).
+  `/done login bug` now works the same as `/done 12` — a keyword that matches more than one task
+  shows a "which one?" list instead of guessing.
+- **`/addtask` defaults and parsing improved** ([#126](https://github.com/kxnn02/telegram-taskbot/issues/126)).
+  A bare due date now defaults to the next Tuesday/Thursday onsite day, not the coming Friday.
+  Natural-language priority in a title (e.g. "high priority") is now picked up automatically when
+  no explicit `!flag` is given. `/update` now falls back to a Claude-assisted guess on an
+  unrecognized status word instead of rejecting it.
+- **Every bot reply now reads like Devie's** ([#127](https://github.com/kxnn02/telegram-taskbot/issues/127)):
+  bold, emoji, and worked examples across help, usage messages, confirmations, and batch
+  summaries. `/start` is now a plain alias for `/help`.
+- **The dashboard's Overview page is live at `/dashboard`, and the old dashboard is gone**
+  ([#128](https://github.com/kxnn02/telegram-taskbot/issues/128),
+  [#129](https://github.com/kxnn02/telegram-taskbot/issues/129)). `/` now redirects there instead
+  of 404ing.
+- **Settings gained Appearance, Bot Connection, and Daily Standup sections**
+  ([#130](https://github.com/kxnn02/telegram-taskbot/issues/130)).
+- **The daily standup finally runs on its own** ([#131](https://github.com/kxnn02/telegram-taskbot/issues/131)).
+  A Supabase `pg_cron` job posts it every morning at 8:05am Manila time, gated by a new
+  Auto-standup on/off switch on the settings page (off by default) — the on-demand `/standup`
+  command still works regardless of the switch.
+
 ## 2026-09-06 — Cohort 4 carbon-copy port complete: no more roles, a real dashboard, and a standup character
 
 A full port of Cohort 4's DevieBot, so this bot now matches Devie command-for-command. All seven
@@ -28,7 +57,8 @@ the headline decision and `CONTEXT.md` for the rest.
 - **`/standup` gained Devie's character**: a daily quote, a greeting, emoji priority/status
   badges, and filter buttons (Overview/Active/Backlog/Done/In review); a separate, secret-gated
   push endpoint can post the same card into the group on demand
-  ([#107](https://github.com/kxnn02/telegram-taskbot/issues/107)). Not on a schedule yet.
+  ([#107](https://github.com/kxnn02/telegram-taskbot/issues/107)). Not on a schedule yet — see
+  2026-09-08 below, that changed.
 
 ## 2026-09-02 — Production cutover: the real Cohort 5 group is live
 

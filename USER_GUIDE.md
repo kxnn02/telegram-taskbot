@@ -37,7 +37,8 @@ including their own. Nothing double-checks this: it's a deliberate choice, match
 **`/addtask <title> [!priority] [by <date>] [@username]`** creates a task in one line, in any
 order. Examples:
 
-- `/addtask fix the login bug` — assigned to you, due the coming Friday, medium priority.
+- `/addtask fix the login bug` — assigned to you, due the next onsite day (Tuesday or
+  Thursday), medium priority.
 - `/addtask fix the login bug by next Friday` — a specific due date, in natural language
   ("next Friday", "in 3 days", "Sept 5" all work).
 - `/addtask fix the login bug !urgent` — flagged urgent (`!low`, `!medium`, `!high`, `!urgent`
@@ -47,8 +48,10 @@ order. Examples:
 
 The word **`by`** is required to set a due date — the bot only looks for a date after `by`, so a
 title that happens to mention a month, weekday, or time (`fix bug in march module`, `call sat
-about the API`) is never misread as a date. No `by` clause means the coming-Friday default
-applies, and the title is kept exactly as typed.
+about the API`) is never misread as a date. No `by` clause means the next-onsite-day default
+applies (the next Tuesday or Thursday), and the title is kept exactly as typed — unless it
+contains a natural-language priority or deadline phrase (`fix bug, high priority`), which is
+picked up automatically the same way an explicit `!flag`/`by` clause is.
 
 Send bare **`/addtask`** with no text to get a short usage example back, reminding you of the
 grammar above.
@@ -98,6 +101,12 @@ words: `backlog`, `todo`/`in progress`/`in review`/`review`, `blocked`, `done`/`
 `finished`. You can also lead with the status instead of the ref (`done t23`), and attach
 `link:<url>` and/or `note:<text>` after the status to leave a link or a note on the task at the
 same time, e.g. `/update t23 blocked note: waiting on API access`.
+
+**`<ref>` doesn't have to be a task number.** A word or phrase that appears in a task's title
+works too — `/done login bug` finds the not-yet-done task whose title contains "login bug", the
+same as typing its number. If more than one task matches, you're shown the short list of
+candidates and asked to repeat the command with the number instead; a number that doesn't exist
+is reported as not found, with no keyword fallback.
 
 Two shortcuts exist for the two moves people make constantly:
 
@@ -175,6 +184,10 @@ see every task at a glance — filterable by status or by member — with a kanb
 settings, team, and activity-log views, plus cohort-wide stats. There's no separate admin tier on
 the dashboard any more than there is in the bot: logging in just requires being a known cohort
 member. Ask whoever's running the project for the current dashboard URL.
+
+The settings page's Daily Standup section is where the automatic daily standup post gets turned
+on or off (it posts every morning once enabled, on top of the on-demand `/standup` command,
+which always works regardless of the switch).
 
 ## Something not working?
 
