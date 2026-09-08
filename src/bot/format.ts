@@ -143,6 +143,32 @@ export function formatDeadlines(tasks: TaskWithFlags[]): string {
   ].join("\n");
 }
 
+/** Short Manila-resolved date for the weekly digest's "marked done" lines
+ * (`formatWeeklyCompleted`), e.g. `Sep 3` — deliberately shorter than
+ * `formatNoteTimestamp`'s `LLL d, HH:mm` (a note's exact time of day isn't
+ * relevant to which week a task was completed in). */
+function formatShortDate(isoDate: string): string {
+  const dt = DateTime.fromISO(isoDate, { zone: MANILA_ZONE });
+  return dt.isValid ? dt.toFormat("LLL d") : isoDate;
+}
+
+/** #143 D4b / #147: the weekly digest's own content — completed-this-week
+ * only, not the open-tasks list `formatMyTasks` already sends daily. Shares
+ * no text with `formatMyTasks` or `formatApproved` (the daily digest and
+ * the old cohort-wide oversight formatter) so it reads as its own message,
+ * not a variant of either. */
+export function formatWeeklyCompleted(tasks: TaskWithFlags[]): string {
+  if (tasks.length === 0) {
+    return "Nothing completed this week.";
+  }
+  return [
+    `✅ Completed this week (${tasks.length}):`,
+    ...tasks.map(
+      (t) => `- #${t.id} ${t.title} (marked done ${formatShortDate(t.updatedAt)})`,
+    ),
+  ].join("\n");
+}
+
 export function formatApproved(tasks: TaskWithFlags[]): string {
   if (tasks.length === 0) {
     return "Nothing was approved in the past week.";

@@ -151,12 +151,13 @@ export async function runDailyDigest(
   }
 }
 
-/** Weekly Monday digest (PRD §8): every member gets their own open tasks.
- * Suppressed per-recipient when there's nothing to report. Per #143 D1, a
- * DM is personal — it no longer carries pending-review or approved-this-week
- * cohort-wide sections (#145); this currently sends the same thing as
- * `runDailyDigest`, which is expected and resolved by S4 (gated on decision
- * D4 in #143). */
+/** Weekly digest (PRD §8, #143 D4b / #147): each member gets what *they*
+ * completed in the trailing 7 days — content the daily digest never sends.
+ * Suppressed per-recipient when nothing was completed. Deliberately does
+ * NOT include the member's still-open tasks: this now sends right after
+ * the 8:05am standup card, and an open-tasks section would repeat almost
+ * exactly what the same member's 10am daily digest says two hours later on
+ * the same Monday — the duplication #143's D1 exists to eliminate. */
 export async function runWeeklyDigest(
   deps: SchedulerDeps,
   digestBuilder: DigestBuilder,
@@ -166,7 +167,7 @@ export async function runWeeklyDigest(
   const entries = deps.roster.all().filter((e) => e.cohortId === cohortId);
   for (const entry of entries) {
     try {
-      const text = await digestBuilder.ownTasksDigest(entry.username, cohortId);
+      const text = await digestBuilder.weeklyDigest(entry.username, cohortId, now);
       if (text) {
         await sendDM(
           deps.bot,
