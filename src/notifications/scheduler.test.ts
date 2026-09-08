@@ -194,20 +194,44 @@ describe("runDueSoonReminderCheck", () => {
 });
 
 describe("runDailyDigest", () => {
-  it("DMs every member with something to report", async () => {
-    const { deps, service, bot } = await makeDeps();
-    const created = await assign(service);
-    if (!created.ok) throw new Error("setup failed");
-    await service.setStatus(alice, created.value.id, "in_review");
+  it("DMs a member only their own tasks, never another member's", async () => {
+    const past = new Date("2026-09-20T02:00:00.000Z"); // after 2026-09-10 due date
+    const { deps, service, bot } = await makeDeps(past);
+    const aliceTask = await assign(service, {
+      assigneeUsername: "alice",
+      dueDate: "2026-09-10", // overdue by `past`
+    });
+    const bobTask = await assign(service, {
+      assigneeUsername: "bob",
+      title: "Ship the release notes",
+      dueDate: "2026-10-15", // not overdue
+    });
+    if (!aliceTask.ok || !bobTask.ok) throw new Error("setup failed");
 
     const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
     await runDailyDigest(deps, digestBuilder, COHORT);
 
-    // alice has an open (submitted) task -> DM. Every member also gets the
-    // cohort-wide oversight half (pending review) now that there's no role
-    // tier to restrict it to (ADR-0013), so bob/carla/dave all get one too.
-    const dmCount = bot.sent.filter((m) => typeof m.chatId === "number").length;
-    expect(dmCount).toBe(4);
+    const aliceDm = bot.sent.find((m) => m.text.includes(`#${aliceTask.value.id}`));
+    const bobDm = bot.sent.find((m) => m.text.includes(`#${bobTask.value.id}`));
+    expect(aliceDm).toBeDefined();
+    expect(bobDm).toBeDefined();
+    expect(aliceDm?.text).not.toContain(`#${bobTask.value.id}`);
+    expect(bobDm?.text).not.toContain(`#${aliceTask.value.id}`);
+    expect(bot.sent.some((m) => m.text.includes("Awaiting review"))).toBe(false);
+    expect(bot.sent.some((m) => m.text.includes("Overdue:"))).toBe(false);
+  });
+
+  it("sends nothing to a member with no open tasks", async () => {
+    const past = new Date("2026-09-20T02:00:00.000Z"); // after 2026-09-10 due date
+    const { deps, service, bot, registrations } = await makeDeps(past);
+    await assign(service, { assigneeUsername: "alice" }); // overdue by `past`
+
+    const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
+    await runDailyDigest(deps, digestBuilder, COHORT);
+
+    const bobId = await registrations.findTelegramId("bob");
+    expect(bot.sent.some((m) => m.chatId === bobId)).toBe(false);
+    expect(bot.sent).toHaveLength(1);
   });
 
   it("posts nothing to the group chat", async () => {
@@ -224,54 +248,72 @@ describe("runDailyDigest", () => {
     // should be a DM.
     expect(bot.sent.every((m) => typeof m.chatId === "number")).toBe(true);
 
-    // Member DMs still go out.
-    const dmCount = bot.sent.filter((m) => typeof m.chatId === "number").length;
-    expect(dmCount).toBe(4);
-  });
-
-  it("a member holding their own task sees it, not just the oversight view", async () => {
-    const { deps, service, bot } = await makeDeps();
-    const created = await assign(service, { assigneeUsername: "dave" });
-    if (!created.ok) throw new Error("setup failed");
-
-    const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
-    await runDailyDigest(deps, digestBuilder, COHORT);
-
-    const daveDm = bot.sent.find(
-      (m) => m.text.includes("Daily digest") && m.text.includes("onboarding doc"),
-    );
-    expect(daveDm).toBeDefined();
+    // Only alice, who holds the task, gets DMed — carla/bob/dave have
+    // nothing open of their own.
+    expect(bot.sent).toHaveLength(1);
   });
 
   it("a broken lookup for one member does not skip the rest of the roster (issue #59/H3)", async () => {
     const { deps, service, bot, registrations } = await makeDeps();
-    const created = await assign(service);
-    if (!created.ok) throw new Error("setup failed");
-    await service.setStatus(alice, created.value.id, "in_review");
+    const aliceTask = await assign(service, { assigneeUsername: "alice" });
+    const bobTask = await assign(service, {
+      assigneeUsername: "bob",
+      title: "Ship the release notes",
+    });
+    if (!aliceTask.ok || !bobTask.ok) throw new Error("setup failed");
     // Roster order is alice, bob, carla, dave — alice's lookup throws.
     makeThrowingRegistrations(registrations, "alice");
 
     const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
     await runDailyDigest(deps, digestBuilder, COHORT);
 
-    // bob, carla, and dave all get the cohort-wide oversight digest
-    // (pending review) despite alice's lookup blowing up first in roster
-    // order — alice herself is skipped since her own send fails.
+    // alice's own send fails, but bob (who holds his own task) still gets
+    // his DM.
     const dmCount = bot.sent.filter((m) => typeof m.chatId === "number").length;
-    expect(dmCount).toBe(3);
+    expect(dmCount).toBe(1);
+    expect(bot.sent[0]?.text).toContain(`#${bobTask.value.id}`);
   });
 });
 
 describe("runWeeklyDigest", () => {
-  it("suppresses members with nothing open, pending, or approved recently", async () => {
-    const { deps, service, bot } = await makeDeps();
-    await assign(service); // Assigned only, not submitted/approved -> nothing for higher-ups
-    const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
-    await runWeeklyDigest(deps, digestBuilder, COHORT, NOW);
+  it("DMs a member only their own tasks, never another member's", async () => {
+    const past = new Date("2026-09-20T02:00:00.000Z"); // after 2026-09-10 due date
+    const { deps, service, bot } = await makeDeps(past);
+    const aliceTask = await assign(service, {
+      assigneeUsername: "alice",
+      dueDate: "2026-09-10", // overdue by `past`
+    });
+    const bobTask = await assign(service, {
+      assigneeUsername: "bob",
+      title: "Ship the release notes",
+      dueDate: "2026-10-15", // not overdue
+    });
+    if (!aliceTask.ok || !bobTask.ok) throw new Error("setup failed");
 
-    const weeklyDms = bot.sent.filter((m) => m.text.includes("Weekly digest"));
-    // Only alice (has an open task) should get a weekly DM.
-    expect(weeklyDms).toHaveLength(1);
+    const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
+    await runWeeklyDigest(deps, digestBuilder, COHORT, past);
+
+    const aliceDm = bot.sent.find((m) => m.text.includes(`#${aliceTask.value.id}`));
+    const bobDm = bot.sent.find((m) => m.text.includes(`#${bobTask.value.id}`));
+    expect(aliceDm).toBeDefined();
+    expect(bobDm).toBeDefined();
+    expect(aliceDm?.text).not.toContain(`#${bobTask.value.id}`);
+    expect(bobDm?.text).not.toContain(`#${aliceTask.value.id}`);
+    expect(bot.sent.some((m) => m.text.includes("Awaiting review"))).toBe(false);
+    expect(bot.sent.some((m) => m.text.includes("Overdue:"))).toBe(false);
+  });
+
+  it("sends nothing to a member with no open tasks", async () => {
+    const past = new Date("2026-09-20T02:00:00.000Z"); // after 2026-09-10 due date
+    const { deps, service, bot, registrations } = await makeDeps(past);
+    await assign(service, { assigneeUsername: "alice" }); // overdue by `past`
+
+    const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
+    await runWeeklyDigest(deps, digestBuilder, COHORT, past);
+
+    const bobId = await registrations.findTelegramId("bob");
+    expect(bot.sent.some((m) => m.chatId === bobId)).toBe(false);
+    expect(bot.sent).toHaveLength(1);
   });
 
   it("a broken lookup for the middle roster member still reaches the last one (issue #59/H3)", async () => {

@@ -120,27 +120,12 @@ export async function runDueSoonReminderCheck(
   }
 }
 
-/** Combines a member's own open-task digest with the cohort-wide oversight
- * digest (ADR-0013 — there is no role tier to split these by any more,
- * so every member gets both halves) — without this, a member holding an
- * assigned task would never see it, only ever the oversight view. `null`
- * only when both halves have nothing to report. */
-async function memberCombinedDigest(
-  digestBuilder: DigestBuilder,
-  username: string,
-  cohortId: string,
-  oversight: () => Promise<string | null>,
-): Promise<string | null> {
-  const own = await digestBuilder.ownTasksDigest(username, cohortId);
-  const oversightText = await oversight();
-  const parts = [own, oversightText].filter((p): p is string => p !== null);
-  return parts.length === 0 ? null : parts.join("\n\n");
-}
-
 /** Daily 10am standup (PRD §8): individual DMs, suppressed per-recipient
  * when there's nothing to report. The group already has its own cohort-wide
  * view — the 8:05am standup card — so this no longer posts anything to the
- * group chat (#143 D1 / #144). */
+ * group chat (#143 D1 / #144). Per #143 D1, a DM is personal: it carries
+ * only the recipient's own open tasks, nothing about the rest of the
+ * cohort (#145). */
 export async function runDailyDigest(
   deps: SchedulerDeps,
   digestBuilder: DigestBuilder,
@@ -149,9 +134,7 @@ export async function runDailyDigest(
   const entries = deps.roster.all().filter((e) => e.cohortId === cohortId);
   for (const entry of entries) {
     try {
-      const text = await memberCombinedDigest(digestBuilder, entry.username, cohortId, () =>
-        digestBuilder.oversightDailyDigest(entry.username, cohortId),
-      );
+      const text = await digestBuilder.ownTasksDigest(entry.username, cohortId);
       if (text) {
         await sendDM(
           deps.bot,
@@ -168,10 +151,12 @@ export async function runDailyDigest(
   }
 }
 
-/** Weekly Monday digest (PRD §8): every member gets their own open tasks
- * plus pending review and what was marked done in the past week (ADR-0013
- * — no role split). Suppressed per-recipient when there's nothing to
- * report. */
+/** Weekly Monday digest (PRD §8): every member gets their own open tasks.
+ * Suppressed per-recipient when there's nothing to report. Per #143 D1, a
+ * DM is personal — it no longer carries pending-review or approved-this-week
+ * cohort-wide sections (#145); this currently sends the same thing as
+ * `runDailyDigest`, which is expected and resolved by S4 (gated on decision
+ * D4 in #143). */
 export async function runWeeklyDigest(
   deps: SchedulerDeps,
   digestBuilder: DigestBuilder,
@@ -181,9 +166,7 @@ export async function runWeeklyDigest(
   const entries = deps.roster.all().filter((e) => e.cohortId === cohortId);
   for (const entry of entries) {
     try {
-      const text = await memberCombinedDigest(digestBuilder, entry.username, cohortId, () =>
-        digestBuilder.oversightWeeklyDigest(entry.username, cohortId, now),
-      );
+      const text = await digestBuilder.ownTasksDigest(entry.username, cohortId);
       if (text) {
         await sendDM(
           deps.bot,
