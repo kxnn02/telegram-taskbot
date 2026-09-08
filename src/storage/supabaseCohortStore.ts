@@ -5,6 +5,10 @@ interface CohortRow {
   group_chat_id: string | null;
 }
 
+interface StandupEnabledRow {
+  standup_enabled: boolean;
+}
+
 /** Real `CohortStorePort` implementation over the Supabase `cohorts` table
  * (ADR-0006), via the supabase-js query builder. */
 export class SupabaseCohortStore implements CohortStorePort {
@@ -31,6 +35,31 @@ export class SupabaseCohortStore implements CohortStorePort {
       .eq("cohort_id", cohortId);
     if (error) {
       throw new Error(`setGroupChatId(${cohortId}) failed: ${error.message}`);
+    }
+  }
+
+  /** A cohort with no row at all reads as `false` (`maybeSingle()` returns
+   * `null`), never a throw — matches `getGroupChatId`'s "unset means off"
+   * contract. */
+  async isStandupEnabled(cohortId: string): Promise<boolean> {
+    const { data, error } = await this.client
+      .from("cohorts")
+      .select("standup_enabled")
+      .eq("cohort_id", cohortId)
+      .maybeSingle();
+    if (error) {
+      throw new Error(`isStandupEnabled(${cohortId}) failed: ${error.message}`);
+    }
+    return (data as StandupEnabledRow | null)?.standup_enabled ?? false;
+  }
+
+  async setStandupEnabled(cohortId: string, enabled: boolean): Promise<void> {
+    const { error } = await this.client
+      .from("cohorts")
+      .update({ standup_enabled: enabled })
+      .eq("cohort_id", cohortId);
+    if (error) {
+      throw new Error(`setStandupEnabled(${cohortId}) failed: ${error.message}`);
     }
   }
 }

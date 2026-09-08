@@ -40,6 +40,7 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     groupChatId: settingsResult.value.groupChatId ?? "",
+    standupEnabled: settingsResult.value.standupEnabled,
     activity: activityResult.value,
   });
 }

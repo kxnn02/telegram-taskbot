@@ -29,9 +29,14 @@ export class SettingsService {
     private readonly auditLogStore: AuditLogStorePort,
   ) {}
 
-  async getSettings(caller: Caller): Promise<ServiceResult<{ groupChatId: string | undefined }>> {
-    const groupChatId = await this.cohortStore.getGroupChatId(caller.cohortId);
-    return ok({ groupChatId });
+  async getSettings(
+    caller: Caller,
+  ): Promise<ServiceResult<{ groupChatId: string | undefined; standupEnabled: boolean }>> {
+    const [groupChatId, standupEnabled] = await Promise.all([
+      this.cohortStore.getGroupChatId(caller.cohortId),
+      this.cohortStore.isStandupEnabled(caller.cohortId),
+    ]);
+    return ok({ groupChatId, standupEnabled });
   }
 
   async saveGroupChatId(caller: Caller, groupChatId: string): Promise<ServiceResult<void>> {
@@ -47,6 +52,28 @@ export class SettingsService {
     }
     await this.auditLogStore.insert(caller.cohortId, {
       action: "settings.config.save",
+      status: "ok",
+      message: "Settings saved",
+    });
+    return ok(undefined);
+  }
+
+  /** Issue #131 Build 4's Auto-standup switch — same save/audit pairing as
+   * `saveGroupChatId`, its own `settings.standup.toggle` action so the
+   * activity log distinguishes the two. */
+  async saveStandupEnabled(caller: Caller, enabled: boolean): Promise<ServiceResult<void>> {
+    try {
+      await this.cohortStore.setStandupEnabled(caller.cohortId, enabled);
+    } catch {
+      await this.auditLogStore.insert(caller.cohortId, {
+        action: "settings.standup.toggle",
+        status: "error",
+        message: "Save failed",
+      });
+      return fail("Save failed");
+    }
+    await this.auditLogStore.insert(caller.cohortId, {
+      action: "settings.standup.toggle",
       status: "ok",
       message: "Settings saved",
     });

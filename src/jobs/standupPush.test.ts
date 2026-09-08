@@ -33,6 +33,8 @@ function fakeCohorts(groupChatId: string | undefined): CohortStorePort {
   return {
     getGroupChatId: vi.fn(async () => groupChatId),
     setGroupChatId: vi.fn(async () => {}),
+    isStandupEnabled: vi.fn(async () => false),
+    setStandupEnabled: vi.fn(async () => {}),
   };
 }
 
@@ -89,19 +91,22 @@ describe("sendStandupPush", () => {
 });
 
 describe("handleStandupPushEndpoint", () => {
-  function deps(overrides: { verify?: boolean } = {}) {
+  function deps(overrides: { verify?: boolean; enabled?: boolean } = {}) {
     const sendMessage = vi.fn(async () => ({}));
     const buildPreview = vi.fn(async () => "the preview text");
     const send = vi.fn(async () => ({ sent: true }));
+    const isEnabled = vi.fn(async () => overrides.enabled ?? true);
     return {
       deps: {
         verify: () => overrides.verify ?? true,
         buildPreview,
         send,
+        isEnabled,
       },
       sendMessage,
       buildPreview,
       send,
+      isEnabled,
     };
   }
 
@@ -119,8 +124,8 @@ describe("handleStandupPushEndpoint", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("an authenticated POST sends once", async () => {
-    const { deps: d, send } = deps({ verify: true });
+  it("an authenticated POST sends once when the standup is enabled", async () => {
+    const { deps: d, send } = deps({ verify: true, enabled: true });
     const result = await handleStandupPushEndpoint(d, { method: "POST", headers: {} });
     expect(result.status).toBe(200);
     expect(send).toHaveBeenCalledTimes(1);
@@ -132,6 +137,23 @@ describe("handleStandupPushEndpoint", () => {
     expect(result.status).toBe(200);
     expect(result.body).toEqual({ preview: "the preview text" });
     expect(buildPreview).toHaveBeenCalledTimes(1);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("a GET preview is unaffected by the standup flag being off", async () => {
+    const { deps: d, buildPreview, isEnabled } = deps({ verify: true, enabled: false });
+    const result = await handleStandupPushEndpoint(d, { method: "GET", headers: {} });
+    expect(result.status).toBe(200);
+    expect(buildPreview).toHaveBeenCalledTimes(1);
+    expect(isEnabled).not.toHaveBeenCalled();
+  });
+
+  it("a POST skips sending and returns sent:false with 200 when the standup is disabled", async () => {
+    const { deps: d, send, isEnabled } = deps({ verify: true, enabled: false });
+    const result = await handleStandupPushEndpoint(d, { method: "POST", headers: {} });
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({ sent: false });
+    expect(isEnabled).toHaveBeenCalledTimes(1);
     expect(send).not.toHaveBeenCalled();
   });
 

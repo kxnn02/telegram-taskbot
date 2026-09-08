@@ -8,13 +8,14 @@ import { buildQuoteModel } from "../../../../src/nlp/quoteModel";
 import { buildStandupPushText, sendStandupPush } from "../../../../src/jobs/standupPush";
 
 /**
- * The Daily Standup (DSU) section's Preview/Test routes (issue #130). No
- * new standup logic — both call `src/jobs/standupPush.ts` unchanged — but
- * both need `model` (Build 0b) and, for `test`, `bot` and `cohorts`
- * (Build 0a/0c) that `DashboardDeps` didn't carry before this stage.
- * `preview` renders the card text without sending; `test` posts it into
- * the cohort's group, exactly like the standup-push job's own `GET`/`POST`
- * split.
+ * The Daily Standup (DSU) section's Preview/Test routes (issue #130), plus
+ * the Auto-standup on/off switch (issue #131 Build 4). `preview` renders
+ * the card text without sending; `test` posts it into the cohort's group
+ * exactly like the standup-push job's own `GET`/`POST` split, and
+ * deliberately ignores `standup_enabled` — the whole point of the Test
+ * button is to try a standup before turning the schedule on.
+ * `enable`/`disable` flip that flag through `SettingsService`, which is
+ * `audit_logs`' second writer alongside `saveGroupChatId`.
  */
 export async function POST(request: NextRequest) {
   const deps = await getDashboardDeps();
@@ -28,6 +29,17 @@ export async function POST(request: NextRequest) {
   const parsed = parseStandupRequest(body);
   if (!parsed.ok) {
     return NextResponse.json({ ok: false, error: parsed.error }, { status: 400 });
+  }
+
+  if (parsed.value.mode === "enable" || parsed.value.mode === "disable") {
+    const saveResult = await deps.settingsService.saveStandupEnabled(
+      caller,
+      parsed.value.mode === "enable",
+    );
+    if (!saveResult.ok) {
+      return NextResponse.json({ ok: false, error: saveResult.error }, { status: 400 });
+    }
+    return NextResponse.json({ ok: true, standupEnabled: parsed.value.mode === "enable" });
   }
 
   const model = buildQuoteModel();

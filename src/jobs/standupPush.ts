@@ -16,9 +16,14 @@ import { dailyQuote } from "../bot/standupQuote.js";
  * Devie's own endpoint has no auth of any kind, which is an open abuse
  * vector on a group real people are in.
  *
- * Not scheduled (issue #107 item 6, `vercel.json` untouched): Devie
- * schedules nothing either, and issue #43 is still proving the two existing
- * crons work at all.
+ * Scheduled by pg_cron (issue #131) at `5 0 * * *` (00:05 UTC = 8:05am
+ * Asia/Manila), gated on `cohorts.standup_enabled` — see Build 3 there for
+ * why the check lives here, in the POST branch only, rather than in
+ * `sendStandupPush` (shared with the settings page's Test button, which
+ * must ignore the flag) or in the Vercel adapter file (untested, and never
+ * will be). Still absent from `vercel.json`: this repo schedules through
+ * pg_cron rather than Vercel Cron, which issue #43 is still proving even
+ * works.
  */
 
 /** Narrow slice of grammy's `Bot` this module needs — a `parse_mode`-aware
@@ -111,6 +116,12 @@ export interface StandupPushEndpointDeps {
   verify(headers: Record<string, string | string[] | undefined>): boolean;
   buildPreview(): Promise<string>;
   send(): Promise<StandupPushResult>;
+  /** Read on the POST path only — the cron schedule must honour the
+   * cohort's Auto-standup switch (issue #131), while the settings page's
+   * Test button (`POST /api/settings/standup` with `mode: "test"`) calls
+   * `sendStandupPush` directly and never reaches this envelope, so it is
+   * unaffected. */
+  isEnabled(): Promise<boolean>;
 }
 
 /**
@@ -135,6 +146,12 @@ export async function handleStandupPushEndpoint(
   if (req.method === "GET") {
     const preview = await deps.buildPreview();
     return { status: 200, body: { preview } };
+  }
+  const enabled = await deps.isEnabled();
+  if (!enabled) {
+    // A disabled cohort is an expected state, not an error — skip silently
+    // and never fire the failure-notification path (issue #131 Build 3).
+    return { status: 200, body: { sent: false } };
   }
   const result = await deps.send();
   return { status: 200, body: result };

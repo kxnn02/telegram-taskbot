@@ -17,4 +17,14 @@ export interface CohortStorePort {
    * column on `cohorts` before this stage (ADR-0006) — this stage only adds
    * a setter and a UI to reach it, not a new concept. */
   setGroupChatId(cohortId: string, groupChatId: string): Promise<void>;
+
+  /** Whether the daily standup push (`api/jobs/standup-push.ts`, scheduled
+   * by pg_cron per issue #131) should post into this cohort's group chat.
+   * A cohort with no row at all reads as `false`, never a throw — the same
+   * "unset means off" contract `getGroupChatId` already has. */
+  isStandupEnabled(cohortId: string): Promise<boolean>;
+
+  /** Sets the standup on/off switch — the dashboard settings page's
+   * Auto-standup toggle (issue #131 Build 4). */
+  setStandupEnabled(cohortId: string, enabled: boolean): Promise<void>;
 }

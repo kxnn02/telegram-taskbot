@@ -43,4 +43,36 @@ describe("SupabaseCohortStore (live)", () => {
     const store = new SupabaseCohortStore(client);
     expect(await store.getGroupChatId(cohortId)).toBeUndefined();
   });
+
+  it("defaults isStandupEnabled to false for a freshly created cohort row", async () => {
+    cohortId = `__contract_test_cohort_${randomUUID().slice(0, 8)}__`;
+    const { error } = await client
+      .from("cohorts")
+      .insert({ cohort_id: cohortId, name: "Contract test cohort" });
+    if (error) throw new Error(`Failed to create test cohort: ${error.message}`);
+
+    const store = new SupabaseCohortStore(client);
+    expect(await store.isStandupEnabled(cohortId)).toBe(false);
+  });
+
+  it("sets and reads back the standup flag", async () => {
+    cohortId = `__contract_test_cohort_${randomUUID().slice(0, 8)}__`;
+    const { error } = await client
+      .from("cohorts")
+      .insert({ cohort_id: cohortId, name: "Contract test cohort" });
+    if (error) throw new Error(`Failed to create test cohort: ${error.message}`);
+
+    const store = new SupabaseCohortStore(client);
+    await store.setStandupEnabled(cohortId, true);
+    expect(await store.isStandupEnabled(cohortId)).toBe(true);
+
+    await store.setStandupEnabled(cohortId, false);
+    expect(await store.isStandupEnabled(cohortId)).toBe(false);
+  });
+
+  it("reads isStandupEnabled as false for a cohort with no row at all", async () => {
+    cohortId = `__contract_test_cohort_missing_${randomUUID().slice(0, 8)}__`;
+    const store = new SupabaseCohortStore(client);
+    expect(await store.isStandupEnabled(cohortId)).toBe(false);
+  });
 });

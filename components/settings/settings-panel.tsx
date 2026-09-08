@@ -63,9 +63,9 @@ const THEME_OPTIONS = [
  *    whole cohort.
  *  - **Daily Standup (DSU)** — Preview (render-only) and Test (posts into
  *    the cohort's group) over the existing `src/jobs/standupPush.ts`, no
- *    new standup logic. No `standup_enabled` switch: this repo schedules no
- *    standup (`api/jobs/standup-push.ts` is deliberately absent from
- *    `vercel.json`), so the flag would gate nothing.
+ *    new standup logic. Issue #131 adds the Auto-standup switch: the daily
+ *    push is now scheduled by pg_cron at 00:05 UTC (8:05am Manila), gated
+ *    on `cohorts.standup_enabled`, and this switch is that flag.
  *
  * Still dropped, per decision 2: the bot-token field and the whole
  * `telegram_config` concept — the token lives in `BOT_TOKEN`, never
@@ -98,6 +98,8 @@ export function SettingsPanel() {
   const [previewStatus, setPreviewStatus] = useState<ActionStatus>("idle");
   const [testStatus, setTestStatus] = useState<ActionStatus>("idle");
   const [testResult, setTestResult] = useState<string | undefined>();
+  const [standupEnabled, setStandupEnabled] = useState(false);
+  const [toggleStatus, setToggleStatus] = useState<ActionStatus>("idle");
 
   async function fetchSettings() {
     setLoading(true);
@@ -106,6 +108,7 @@ export function SettingsPanel() {
     const data = await res.json();
     if (data.ok) {
       setGroupChatId(data.groupChatId ?? "");
+      setStandupEnabled(data.standupEnabled ?? false);
       setActivity(data.activity ?? []);
     }
     setLoading(false);
@@ -183,6 +186,24 @@ export function SettingsPanel() {
       setTestStatus("ok");
     } else {
       setTestStatus("error");
+    }
+  }
+
+  async function handleToggleStandup() {
+    const next = !standupEnabled;
+    setToggleStatus("pending");
+    const res = await fetch("/api/settings/standup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: next ? "enable" : "disable" }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      setStandupEnabled(next);
+      setToggleStatus("ok");
+      fetchSettings();
+    } else {
+      setToggleStatus("error");
     }
   }
 
@@ -390,9 +411,30 @@ export function SettingsPanel() {
             <span className="font-semibold text-foreground">Daily Standup (DSU)</span>
           </div>
 
-          <p className="text-xs text-muted-foreground">
-            The standup is triggered on demand, not on a schedule.
-          </p>
+          <div className="flex items-center justify-between gap-2.5 rounded-xl p-3" style={{ background: "var(--muted)" }}>
+            <div>
+              <p className="text-sm font-medium text-foreground">Auto-standup</p>
+              <p className="text-xs text-muted-foreground">
+                Posts to the group every day at 8:05am Manila
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant={standupEnabled ? "default" : "outline"}
+              size="sm"
+              disabled={toggleStatus === "pending"}
+              onClick={handleToggleStandup}
+              aria-pressed={standupEnabled}
+            >
+              {toggleStatus === "pending" && <Loader2 className="h-4 w-4 animate-spin" />}
+              {standupEnabled ? "On" : "Off"}
+            </Button>
+          </div>
+          {toggleStatus === "error" && (
+            <p className="flex items-center gap-1.5 text-xs text-destructive">
+              <XCircle className="h-3.5 w-3.5" /> Failed to update the switch
+            </p>
+          )}
 
           <div className="flex flex-wrap gap-2">
             <Button
