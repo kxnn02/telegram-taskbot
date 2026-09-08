@@ -91,3 +91,37 @@ describe("formatRoleAssignedReply", () => {
     expect(reply).toContain("✅ Task assigned to <b>1</b> member in <b>cohort-5</b>");
   });
 });
+
+// Issue: `@cohort5` should fan out to `cohort-5` (maintainer request,
+// 2026-09-08). The cohort id carries a hyphen the mention token cannot —
+// `MENTION_RE` (`addTaskParse.ts`) matches `@(\w+)`, and `\w` excludes `-`,
+// so `@cohort-5` never parses as a mention at all. Matching on the
+// punctuation-stripped form is what lets the typeable token reach the
+// cohort it names.
+describe("resolveRoleMembers — punctuation-insensitive cohort slugs", () => {
+  it("matches a hyphenated cohort id from a slug typed without the hyphen", () => {
+    const usernames = resolveRoleMembers(makeRoster(), "cohort5").sort();
+    expect(usernames).toEqual(["alice", "bob", "carla"]);
+  });
+
+  it("still matches the exact hyphenated id", () => {
+    const usernames = resolveRoleMembers(makeRoster(), "cohort-5").sort();
+    expect(usernames).toEqual(["alice", "bob", "carla"]);
+  });
+
+  it("matches a multi-part cohort id the same way", () => {
+    const roster = new Roster([
+      { username: "erin", cohortId: "cohort5-dryrun" },
+      { username: "alice", cohortId: COHORT },
+    ]);
+    expect(resolveRoleMembers(roster, "cohort5dryrun")).toEqual(["erin"]);
+  });
+
+  it("does not fan out on a slug that is only punctuation", () => {
+    expect(resolveRoleMembers(makeRoster(), "---")).toEqual([]);
+  });
+
+  it("still returns an empty list for an unrelated slug", () => {
+    expect(resolveRoleMembers(makeRoster(), "cohort9")).toEqual([]);
+  });
+});

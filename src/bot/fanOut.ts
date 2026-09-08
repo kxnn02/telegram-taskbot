@@ -20,6 +20,15 @@ export function resolveAllMembers(roster: Roster, cohortId: string): string[] {
     .map((entry) => entry.username);
 }
 
+/** A cohort id and the `@slug` someone types at it are compared with every
+ * separator dropped, so `@cohort5` reaches `cohort-5`. This is not
+ * cosmetic: `MENTION_RE` (`addTaskParse.ts`) matches `@(\w+)` and `\w`
+ * excludes `-`, so `@cohort-5` — the literal id — never parses as a
+ * mention at all. Without this, no typeable token names a cohort. */
+function canonicalizeSlug(slug: string): string {
+  return slug.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 /**
  * Devie's `resolveRoleMembers` (`route.ts:475-484`): every member whose
  * `role` matches `roleSlug`, case-insensitive. Issue #103 item 2 already
@@ -29,10 +38,11 @@ export function resolveAllMembers(roster: Roster, cohortId: string): string[] {
  * out to every member of that cohort.
  */
 export function resolveRoleMembers(roster: Roster, roleSlug: string): string[] {
-  const target = roleSlug.trim().toLowerCase();
+  const target = canonicalizeSlug(roleSlug);
+  if (target === "") return [];
   return roster
     .all()
-    .filter((entry) => entry.cohortId.toLowerCase() === target)
+    .filter((entry) => canonicalizeSlug(entry.cohortId) === target)
     .map((entry) => entry.username);
 }
 
