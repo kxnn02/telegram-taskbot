@@ -17,7 +17,8 @@
     "dev": "tsx src/bot/index.ts",
     "start": "node dist/bot/index.js",
     "webhook:register": "tsx scripts/registerWebhook.ts",
-    "check:migrations": "tsx scripts/checkMigrationsApplied.ts"
+    "check:migrations": "tsx scripts/checkMigrationsApplied.ts",
+    "check:env": "tsx scripts/checkRequiredEnv.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",
