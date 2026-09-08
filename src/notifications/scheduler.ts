@@ -1,13 +1,11 @@
 import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
 import type { OverdueNotificationStorePort } from "../storage/overdueNotificationStorePort.js";
-import type { CohortStorePort } from "../storage/cohortStorePort.js";
 import type { Roster } from "../domain/roster.js";
 import type { Caller } from "../domain/types.js";
 import type { TaskService } from "../service/taskService.js";
 import { DigestBuilder } from "./digestBuilder.js";
 import { findNewOverdueCrossings } from "./overdueCrossing.js";
 import { findDueTomorrow } from "./dueSoonReminder.js";
-import { formatGroupDailySummary } from "./digestFormat.js";
 
 /** All scheduled notifications run on Asia/Manila time (PRD §8/§12), not
  * server-local time. */
@@ -22,8 +20,8 @@ export interface NotifierBot {
      * (issue #107) so a real grammy `Bot` also satisfies
      * `jobs/standupPush.ts`'s `StandupPushBot`, which needs
      * `{ parse_mode: "HTML" }` for the standup push card, without this
-     * module's own DM/group-summary sends (which pass no third argument)
-     * changing at all. */
+     * module's own DM sends (which pass no third argument) changing at
+     * all. */
     sendMessage(
       chatId: number | string,
       text: string,
@@ -38,12 +36,6 @@ export interface SchedulerDeps {
   service: TaskService;
   roster: Roster;
   overdueNotifications: OverdueNotificationStorePort;
-  /** Per-cohort Telegram group chat id lookup (ADR-0006), replacing the old
-   * single global `GROUP_CHAT_ID` — the real cohort and the dry-run cohort
-   * each have their own group. Digests/reminders still run without one
-   * configured for a given cohort — only that cohort's group-chat post is
-   * skipped. */
-  cohorts: CohortStorePort;
 }
 
 /** A synthetic caller used only to reach TaskService.listAllTasks so the
@@ -145,8 +137,10 @@ async function memberCombinedDigest(
   return parts.length === 0 ? null : parts.join("\n\n");
 }
 
-/** Daily 10am standup (PRD §8): individual DMs (suppressed when nothing to
- * report) plus one counts-only group-chat summary. */
+/** Daily 10am standup (PRD §8): individual DMs, suppressed per-recipient
+ * when there's nothing to report. The group already has its own cohort-wide
+ * view — the 8:05am standup card — so this no longer posts anything to the
+ * group chat (#143 D1 / #144). */
 export async function runDailyDigest(
   deps: SchedulerDeps,
   digestBuilder: DigestBuilder,
@@ -167,20 +161,9 @@ export async function runDailyDigest(
         );
       }
     } catch (err) {
-      // Isolate one member's failure so the rest of the roster, and the
-      // group-chat summary below, still go out.
+      // Isolate one member's failure so the rest of the roster still gets
+      // notified.
       console.error(`runDailyDigest: member ${entry.username} failed`, err);
-    }
-  }
-
-  const groupChatId = await deps.cohorts.getGroupChatId(cohortId);
-  if (groupChatId) {
-    const counts = await digestBuilder.groupDailyCounts(cohortId);
-    const summary = formatGroupDailySummary(counts);
-    try {
-      await deps.bot.api.sendMessage(groupChatId, summary);
-    } catch {
-      // Best-effort, same as DM delivery.
     }
   }
 }

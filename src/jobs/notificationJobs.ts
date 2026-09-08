@@ -1,4 +1,5 @@
 import type { AlertThrottleStorePort } from "../storage/alertThrottleStorePort.js";
+import type { CohortStorePort } from "../storage/cohortStorePort.js";
 import {
   runDailyDigest,
   runDueSoonReminderCheck,
@@ -32,6 +33,10 @@ import { dailyDigestPeriodKey, weeklyDigestPeriodKey } from "./digestPeriodKey.j
  */
 export interface NotificationJobDeps extends SchedulerDeps {
   throttle: AlertThrottleStorePort;
+  /** Per-cohort Telegram group chat id / standup-enabled lookup (ADR-0006).
+   * `runDailyDigest` no longer reads it (#144), but the standup-push job and
+   * roster-reconciliation still do. */
+  cohorts: CohortStorePort;
 }
 
 export async function runOverdueCrossingJob(

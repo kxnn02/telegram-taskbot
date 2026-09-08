@@ -4,8 +4,6 @@ import { FixedClock } from "../domain/clock.js";
 import { Roster } from "../domain/roster.js";
 import type { Caller } from "../domain/types.js";
 import { TaskService } from "../service/taskService.js";
-import { formatGroupDailySummary } from "../notifications/digestFormat.js";
-import type { MemberDailyCounts } from "../notifications/digestFormat.js";
 import {
   buildStandup,
   buildStandupKeyboard,
@@ -259,15 +257,6 @@ describe("formatStandup (standup redesign)", () => {
 
     const report = await buildStandup(service, carla, NOW);
     expect(report.overdue).toBe(0);
-  });
-
-  it("is a distinct formatter from the digest's formatGroupDailySummary", () => {
-    expect(formatStandup).not.toBe(formatGroupDailySummary as unknown as typeof formatStandup);
-  });
-
-  it("standup's own detail shape carries a task title field the digest's MemberDailyCounts structurally has no room for", () => {
-    const digestShape: MemberDailyCounts = { username: "alice", onTrack: 1, overdue: 0, blocked: 0 };
-    expect(Object.keys(digestShape)).not.toContain("tasks");
   });
 });
 

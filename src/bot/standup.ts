@@ -28,13 +28,10 @@ export interface StandupDetailSection {
   members: StandupMemberGroup[];
 }
 
-/** `/standup`'s own report shape — deliberately distinct from
- * `InternDailyCounts` (`src/notifications/digestFormat.ts`): that type is
- * counts-only by construction so the automated daily/weekly group digest
- * can never leak a task title. `/standup` is *pulled*, not pushed — someone
- * explicitly ran the command — so it's allowed to carry titles, but only
- * because it's built on this separate type rather than by widening the
- * digest's.
+/** `/standup`'s own report shape — deliberately distinct from the
+ * notification digest's own types. `/standup` is *pulled*, not pushed —
+ * someone explicitly ran the command — so it's allowed to carry titles,
+ * built on this separate type rather than by widening a digest type.
  */
 export interface StandupReport {
   cohortId: string;
@@ -191,9 +188,9 @@ function standupHeaderLines(report: StandupReport): string[] {
 
 /** Renders the `/standup` report: cohort/date header, a status-count
  * overview, a detail section per non-done status that actually has tasks,
- * and a "done this week" list. Its own formatter — see `StandupReport` for
- * why it must not call the digest's `formatGroupDailySummary`. This is also
- * the `overview` filter's renderer (issue #103 item 3). */
+ * and a "done this week" list. Its own formatter, built on `StandupReport`
+ * rather than the digest's own shape. This is also the `overview` filter's
+ * renderer (issue #103 item 3). */
 export function formatStandup(report: StandupReport): string {
   const lines: string[] = [
     ...standupHeaderLines(report),

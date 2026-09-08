@@ -1,7 +1,6 @@
 ﻿import { describe, expect, it, vi } from "vitest";
 import { InMemoryOverdueNotificationStore } from "../storage/inMemoryOverdueNotificationStore.js";
 import { InMemoryRegistrationStore } from "../storage/inMemoryRegistrationStore.js";
-import { InMemoryCohortStore } from "../storage/inMemoryCohortStore.js";
 import { FixedClock } from "../domain/clock.js";
 import { Roster } from "../domain/roster.js";
 import type { Caller } from "../domain/types.js";
@@ -71,7 +70,6 @@ async function makeDeps(now: Date = NOW) {
     service,
     roster,
     overdueNotifications,
-    cohorts: new InMemoryCohortStore({ [COHORT]: "-100999" }),
   };
   return { deps, service, roster, bot, overdueNotifications, registrations };
 }
@@ -196,7 +194,7 @@ describe("runDueSoonReminderCheck", () => {
 });
 
 describe("runDailyDigest", () => {
-  it("DMs every member with something to report, and posts a counts-only group summary", async () => {
+  it("DMs every member with something to report", async () => {
     const { deps, service, bot } = await makeDeps();
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
@@ -210,10 +208,25 @@ describe("runDailyDigest", () => {
     // tier to restrict it to (ADR-0013), so bob/carla/dave all get one too.
     const dmCount = bot.sent.filter((m) => typeof m.chatId === "number").length;
     expect(dmCount).toBe(4);
+  });
 
-    const groupMessage = bot.sent.find((m) => m.chatId === "-100999");
-    expect(groupMessage).toBeDefined();
-    expect(groupMessage!.text.toLowerCase()).not.toContain("onboarding");
+  it("posts nothing to the group chat", async () => {
+    const { deps, service, bot } = await makeDeps();
+    const created = await assign(service);
+    if (!created.ok) throw new Error("setup failed");
+    await service.setStatus(alice, created.value.id, "in_review");
+
+    const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
+    await runDailyDigest(deps, digestBuilder, COHORT);
+
+    // A group-chat post would use a string chat id (e.g. "-100999"); DMs
+    // always use the numeric telegram id from sendDM. Every send here
+    // should be a DM.
+    expect(bot.sent.every((m) => typeof m.chatId === "number")).toBe(true);
+
+    // Member DMs still go out.
+    const dmCount = bot.sent.filter((m) => typeof m.chatId === "number").length;
+    expect(dmCount).toBe(4);
   });
 
   it("a member holding their own task sees it, not just the oversight view", async () => {
@@ -230,7 +243,7 @@ describe("runDailyDigest", () => {
     expect(daveDm).toBeDefined();
   });
 
-  it("a broken lookup for one member does not skip the rest of the roster, and the group summary still posts (issue #59/H3)", async () => {
+  it("a broken lookup for one member does not skip the rest of the roster (issue #59/H3)", async () => {
     const { deps, service, bot, registrations } = await makeDeps();
     const created = await assign(service);
     if (!created.ok) throw new Error("setup failed");
@@ -246,9 +259,6 @@ describe("runDailyDigest", () => {
     // order — alice herself is skipped since her own send fails.
     const dmCount = bot.sent.filter((m) => typeof m.chatId === "number").length;
     expect(dmCount).toBe(3);
-
-    const groupMessage = bot.sent.find((m) => m.chatId === "-100999");
-    expect(groupMessage).toBeDefined();
   });
 });
 
