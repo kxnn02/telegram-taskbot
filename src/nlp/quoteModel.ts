@@ -1,5 +1,5 @@
-import { GroqTextModel } from "./groqTextModel.js";
-import { ThrowingTextModel, type TextModel } from "./textModel.js";
+import { buildTextModel } from "./buildTextModel.js";
+import type { TextModel } from "./textModel.js";
 
 /**
  * The real model behind `dailyQuote`. Uses `GroqTextModel`, matching every
@@ -19,7 +19,5 @@ import { ThrowingTextModel, type TextModel } from "./textModel.js";
  * factory rather than a second copy.
  */
 export function buildQuoteModel(): TextModel {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) return new ThrowingTextModel(new Error("GROQ_API_KEY is not set."));
-  return new GroqTextModel(apiKey);
+  return buildTextModel();
 }
