@@ -75,14 +75,25 @@ Fill in `.env`:
 | Variable | Required | Purpose |
 |---|---|---|
 | `BOT_TOKEN` | yes | From `@BotFather` |
+| `TELEGRAM_WEBHOOK_SECRET` | yes | webhook secret-header check (ADR-0004) |
 | `SUPABASE_URL` | yes | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | Supabase service-role key (bypasses RLS; see ADR-0006) |
 | `ACTIVE_COHORT_ID` | yes | The single cohort this deployment serves — every live request (bot commands, dashboard login) binds to this id; see CONTEXT.md's cohort-binding note |
 | `GROUP_CHAT_ID` | no, unused | Superseded by the `cohorts` table (ADR-0006) as of Phase 3 — kept only as a historical placeholder |
 | `BOT_USERNAME` | yes, for the dashboard | Must match the bot behind `BOT_TOKEN` |
+| `SESSION_SECRET` | yes | dashboard session cookie (ADR-0008) |
+| `INTERNAL_JOB_SECRET` | yes | pg_net-triggered /api/jobs/* auth |
+| `MAINTAINER_USERNAME` | yes | self-DM-on-error target (ADR-0007) |
+| `CRON_SECRET` | yes | Vercel-Cron-triggered keep-alive and weekly-backup |
 | `DASHBOARD_PORT` | no (defaults to `3000`) | Port the dashboard listens on |
-| `GROQ_API_KEY` | only to exercise the real model | Used by `src/nlp/groqTextModel.ts` (issue #102) — the active `TextModel` implementation — for bulk-task extraction, status parsing, and intent routing via `qwen/qwen3.6-27b` on Groq's free tier. Get one at https://console.groq.com. The module's test suite runs against a fake `TextModel` and needs no key |
+| `GROQ_API_KEY` | yes | Used by `src/nlp/groqTextModel.ts` (issue #102) — the active `TextModel` implementation — for bulk-task extraction, status parsing, and intent routing via `qwen/qwen3.6-27b` on Groq's free tier. Get one at https://console.groq.com. The module's test suite runs against a fake `TextModel` and needs no key |
 | `ANTHROPIC_API_KEY` | no, unused | `src/nlp/anthropicTextModel.ts` (issue #102's original `claude-haiku-4-5` choice) is kept but not wired up — the account behind it has no billing credit |
+| `BACKUP_GITHUB_TOKEN` | yes, production only | weekly backup commits |
+| `BACKUP_GITHUB_REPO` | yes, production only | weekly backup destination |
+
+`src/config/requiredEnv.ts` is the authoritative list of variables a deployed environment must
+have; a name missing from a target environment fails the Vercel build rather than reaching a
+request.
 
 **Roster**: no config file, no upfront collection, and no in-product management command any more.
 Per [ADR-0013](./docs/adr/0013-remove-access-control-for-devie-parity.md), a roster row is created
