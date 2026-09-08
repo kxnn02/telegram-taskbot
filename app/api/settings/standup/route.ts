@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
 import { Bot } from "grammy";
+import { attachAutoRetry } from "../../../../src/bot/attachAutoRetry";
 import { getDashboardDeps } from "../../../../src/web/nextDashboardDeps";
 import { resolveCallerFromCookie, SESSION_COOKIE } from "../../../../src/web/requireDashboardSession";
 import { parseStandupRequest } from "../../../../src/web/settingsRequests";
@@ -56,6 +57,7 @@ export async function POST(request: NextRequest) {
   }
 
   const bot = new Bot(deps.botToken);
+  attachAutoRetry(bot);
   try {
     const result = await sendStandupPush(
       { service: deps.service, model, bot, cohorts: deps.cohorts },

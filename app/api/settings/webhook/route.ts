@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { Bot } from "grammy";
+import { attachAutoRetry } from "../../../../src/bot/attachAutoRetry";
 import { getDashboardDeps } from "../../../../src/web/nextDashboardDeps";
 import { resolveCallerFromCookie, SESSION_COOKIE } from "../../../../src/web/requireDashboardSession";
 import { buildWebhookStatusResponse, isMaintainer } from "../../../../src/web/settingsRequests";
@@ -33,6 +34,7 @@ export async function GET() {
 
   try {
     const bot = new Bot(deps.botToken);
+    attachAutoRetry(bot);
     const info = await bot.api.getWebhookInfo();
     return NextResponse.json({
       ok: true,
@@ -64,6 +66,7 @@ export async function POST() {
   }
 
   const bot = new Bot(deps.botToken);
+  attachAutoRetry(bot);
   let actualBotUsername: string;
   try {
     actualBotUsername = (await bot.api.getMe()).username;

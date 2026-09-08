@@ -1,4 +1,5 @@
 import { Bot, GrammyError } from "grammy";
+import { attachAutoRetry } from "./attachAutoRetry.js";
 import { normalizeUsername } from "../domain/roster.js";
 import { SystemClock } from "../domain/clock.js";
 import { TaskService } from "../service/taskService.js";
@@ -175,8 +176,18 @@ export async function registerBotCommands(bot: Bot): Promise<void> {
   await bot.api.setMyCommands([...BOT_COMMANDS]);
 }
 
+/** Builds the real production `Bot`, with auto-retry attached (see
+ * `attachAutoRetry.ts`) — never done to an injected `options.bot`, which
+ * every test uses to install its own fake transformer in place of a real
+ * network call. */
+function createProductionBot(token: string): Bot {
+  const bot = new Bot(token);
+  attachAutoRetry(bot);
+  return bot;
+}
+
 export function createBot(options: CreateBotOptions): CreatedBot {
-  const bot = options.bot ?? new Bot(options.token);
+  const bot = options.bot ?? createProductionBot(options.token);
   const roster = options.roster;
   const registrations = options.registrationStore;
   const clock = new SystemClock();

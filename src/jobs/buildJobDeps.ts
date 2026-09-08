@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { Bot } from "grammy";
+import { attachAutoRetry } from "../bot/attachAutoRetry.js";
 import { createSupabaseClient } from "../storage/supabaseClient.js";
 import { SupabaseTaskStore } from "../storage/supabaseTaskStore.js";
 import { SupabaseRegistrationStore } from "../storage/supabaseRegistrationStore.js";
@@ -82,6 +83,7 @@ export async function buildErrorReportingDeps(
   const token = process.env.BOT_TOKEN;
   if (!token) throw new Error("BOT_TOKEN is not set.");
   const bot = new Bot(token);
+  attachAutoRetry(bot);
   await bot.init();
   return { bot, ...buildRegistrationsAndThrottle(supabase) };
 }
@@ -93,6 +95,7 @@ export async function buildNotificationJobDeps(): Promise<NotificationJobDeps> {
   const supabase = createSupabaseClient();
   const roster = await loadRosterFromStore(new SupabaseRosterStore(supabase));
   const bot = new Bot(token);
+  attachAutoRetry(bot);
   await bot.init();
 
   const service = new TaskService(new SupabaseTaskStore(supabase), roster, new SystemClock());
@@ -123,6 +126,7 @@ export async function buildRosterReconciliationDeps(): Promise<RosterReconciliat
   const supabase = createSupabaseClient();
   const roster = await loadRosterFromStore(new SupabaseRosterStore(supabase));
   const bot = new Bot(token);
+  attachAutoRetry(bot);
   await bot.init();
 
   return {

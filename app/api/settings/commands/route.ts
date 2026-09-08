@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { Bot } from "grammy";
+import { attachAutoRetry } from "../../../../src/bot/attachAutoRetry";
 import { getDashboardDeps } from "../../../../src/web/nextDashboardDeps";
 import { resolveCallerFromCookie, SESSION_COOKIE } from "../../../../src/web/requireDashboardSession";
 import { registerBotCommands, BOT_COMMANDS } from "../../../../src/bot/createBot";
@@ -20,6 +21,7 @@ export async function POST() {
 
   try {
     const bot = new Bot(deps.botToken);
+    attachAutoRetry(bot);
     await registerBotCommands(bot);
     return NextResponse.json({ ok: true, count: BOT_COMMANDS.length });
   } catch (error) {
