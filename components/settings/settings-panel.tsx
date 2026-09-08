@@ -30,6 +30,24 @@ import type { AuditLog } from "@/src/domain/types";
 
 type ActionStatus = "idle" | "pending" | "ok" | "error";
 
+/**
+ * A non-2xx response from any `/api/settings*` route can arrive with no
+ * body at all (an uncaught server exception, a gateway timeout) — plain
+ * `res.json()` throws `SyntaxError: Unexpected end of JSON input` on that,
+ * and every handler below awaited it unguarded, so the thrown error skipped
+ * the `setXStatus("error")` line and left that button's spinner running
+ * forever (observed: Test Standup hitting a Telegram 429 with an empty
+ * body). Route to `{ ok: false }` instead of throwing.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function safeJson(res: Response): Promise<any> {
+  try {
+    return await res.json();
+  } catch {
+    return { ok: false, error: `Request failed (${res.status}).` };
+  }
+}
+
 interface WebhookStatus {
   url: string;
   pendingCount: number;
@@ -105,7 +123,7 @@ export function SettingsPanel() {
     setLoading(true);
     setLoadingActivity(true);
     const res = await fetch("/api/settings");
-    const data = await res.json();
+    const data = await safeJson(res);
     if (data.ok) {
       setGroupChatId(data.groupChatId ?? "");
       setStandupEnabled(data.standupEnabled ?? false);
@@ -119,7 +137,7 @@ export function SettingsPanel() {
     setCheckStatus("pending");
     setWebhookError(undefined);
     const res = await fetch("/api/settings/webhook");
-    const data = await res.json();
+    const data = await safeJson(res);
     if (data.ok) {
       setWebhook(data);
       setCheckStatus("ok");
@@ -137,7 +155,7 @@ export function SettingsPanel() {
   async function handleSyncCommands() {
     setSyncStatus("pending");
     const res = await fetch("/api/settings/commands", { method: "POST" });
-    const data = await res.json();
+    const data = await safeJson(res);
     setSyncStatus(data.ok ? "ok" : "error");
   }
 
@@ -146,7 +164,7 @@ export function SettingsPanel() {
     setRegisterStatus("pending");
     setRegisterError(undefined);
     const res = await fetch("/api/settings/webhook", { method: "POST" });
-    const data = await res.json();
+    const data = await safeJson(res);
     if (data.ok) {
       setRegisterStatus("ok");
       await fetchWebhookStatus();
@@ -163,7 +181,7 @@ export function SettingsPanel() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mode: "preview" }),
     });
-    const data = await res.json();
+    const data = await safeJson(res);
     if (data.ok) {
       setPreviewText(data.text);
       setPreviewStatus("ok");
@@ -180,7 +198,7 @@ export function SettingsPanel() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mode: "test" }),
     });
-    const data = await res.json();
+    const data = await safeJson(res);
     if (data.ok) {
       setTestResult(data.sent ? `Sent to ${groupChatId}` : "Not sent — no group chat configured.");
       setTestStatus("ok");
@@ -197,7 +215,7 @@ export function SettingsPanel() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mode: next ? "enable" : "disable" }),
     });
-    const data = await res.json();
+    const data = await safeJson(res);
     if (data.ok) {
       setStandupEnabled(next);
       setToggleStatus("ok");
@@ -215,7 +233,7 @@ export function SettingsPanel() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ groupChatId }),
     });
-    const data = await res.json();
+    const data = await safeJson(res);
     setActivity(data.activity ?? []);
     setSaveStatus(data.ok ? "ok" : "error");
     setSaving(false);

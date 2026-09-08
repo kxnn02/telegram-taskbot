@@ -13,7 +13,12 @@ import { buildStandupPushText, sendStandupPush } from "../../../../src/jobs/stan
  * the card text without sending; `test` posts it into the cohort's group
  * exactly like the standup-push job's own `GET`/`POST` split, and
  * deliberately ignores `standup_enabled` — the whole point of the Test
- * button is to try a standup before turning the schedule on.
+ * button is to try a standup before turning the schedule on. A `sendMessage`
+ * failure (e.g. Telegram 429 rate-limiting a chat that was just posted to)
+ * is caught here and reported as `{ok:false}`/502, the same shape
+ * `webhook/route.ts` already uses for its own Telegram calls — an uncaught
+ * throw here is a bare 500 with no JSON body, which the dashboard's fetch
+ * can't parse.
  * `enable`/`disable` flip that flag through `SettingsService`, which is
  * `audit_logs`' second writer alongside `saveGroupChatId`.
  */
@@ -51,10 +56,17 @@ export async function POST(request: NextRequest) {
   }
 
   const bot = new Bot(deps.botToken);
-  const result = await sendStandupPush(
-    { service: deps.service, model, bot, cohorts: deps.cohorts },
-    caller.cohortId,
-    now,
-  );
-  return NextResponse.json({ ok: true, sent: result.sent });
+  try {
+    const result = await sendStandupPush(
+      { service: deps.service, model, bot, cohorts: deps.cohorts },
+      caller.cohortId,
+      now,
+    );
+    return NextResponse.json({ ok: true, sent: result.sent });
+  } catch (error) {
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "Failed to reach Telegram." },
+      { status: 502 },
+    );
+  }
 }
