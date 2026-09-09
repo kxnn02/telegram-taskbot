@@ -1,609 +1,239 @@
 # Context
 
-Why this project is built the way it is. See `PRD.md` for the current product spec (the original
-v1 spec is archived at `docs/PRD-v1-original.md`, for comparison); this file covers technical
-decisions and the reasoning behind them, for anyone (human or agent) picking up the codebase
-later.
+How this codebase is shaped and why — for whoever picks it up next, human or agent.
 
-> **Re-platform complete, live in production — read `docs/adr/` for the decisions behind it.**
-> v1 shipped feature-complete but was never deployed; the project has since been re-platformed
-> onto Vercel + Supabase
-> ([ADR-0001](./docs/adr/0001-replatform-to-vercel-supabase.md),
-> [ADR-0002](./docs/adr/0002-authorization-stays-in-taskservice.md),
-> [ADR-0003](./docs/adr/0003-roster-moves-to-a-supabase-table.md),
-> [ADR-0004](./docs/adr/0004-webhook-transport-and-dry-run-strategy.md) — webhook + dedup + dry
-> run, [ADR-0005](./docs/adr/0005-storage-port-testing-and-cicd.md) — storage port, testing, CI/CD,
-> [ADR-0006](./docs/adr/0006-database-schema-and-concurrency.md) — schema + concurrency,
-> [ADR-0007](./docs/adr/0007-scheduled-jobs-and-operational-tasks.md) — jobs, keep-alive, backups,
-> [ADR-0008](./docs/adr/0008-dashboard-sessions-and-mutations.md) — sessions + mutation style).
-> Superseded sections below are marked inline and kept as the historical record of v1's design.
-> The full spec and phased implementation plan were tracked as GitHub issues
-> [#11](https://github.com/kxnn02/telegram-taskbot/issues/11) and
-> [#17](https://github.com/kxnn02/telegram-taskbot/issues/17) — both closed as of 2026-09-02, once
-> the production cutover (webhook repointed to the live Cohort 5 group, scheduled jobs repointed
-> at production) was verified live.
->
-> **A second, independent redesign has also shipped**
-> ([ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md)): the bot's commands are now
-> direct one-liners and its six gated statuses are replaced by six free-set ones, matching
-> **Devie**, another DevCon bot this cohort's higher-ups already use. This deleted the
-> submit → review → approve workflow, opened task creation and read access to every roster
-> member, and turned `blocked` from a flag into a status. It shipped **before** the production
-> cutover, since it was blocking Phase 6.3 in
-> [#17](https://github.com/kxnn02/telegram-taskbot/issues/17). Tracked as
-> [#27](https://github.com/kxnn02/telegram-taskbot/issues/27) (closed), stages
-> [#28](https://github.com/kxnn02/telegram-taskbot/issues/28)-[#35](https://github.com/kxnn02/telegram-taskbot/issues/35).
->
-> **A third change has also shipped**
-> ([ADR-0010](./docs/adr/0010-group-gated-registration-and-roster-management.md), spec
-> [#83](https://github.com/kxnn02/telegram-taskbot/issues/83), merged via PR #93): roster
-> registration moved from a hand-edited config file to group-gated self-registration via `/start`,
-> plus an in-product `/roster` command for group-admin-gated roster management. See the "Roster
-> registration" entry below.
->
-> **A fourth change restores the pre-production gate the cutover removed**
-> ([ADR-0011](./docs/adr/0011-post-cutover-dry-run-loop.md)): the dry run gets its own Telegram
-> bot, so its webhook and production's can be live at the same time — before this, one bot token
-> meant one webhook, and production owning it left nothing between a merge and the live cohort but
-> `Typecheck + fast suite`. `dry-run` becomes a force-pushed deploy target rather than a merge
-> stage, and webhook registration becomes a guarded script
-> (`npm run webhook:register`, `src/ops/webhookRegistration.ts`) instead of a remembered
-> `curl`. The operational steps live in
-> [`docs/runbooks/dry-run-loop.md`](./docs/runbooks/dry-run-loop.md).
->
-> **A fifth change closes the other gap ADR-0011 left open**
-> ([ADR-0012](./docs/adr/0012-migrations-applied-before-merge.md)): a `Migrations applied to
-> production` CI job (`npm run check:migrations`,
-> `scripts/checkMigrationsApplied.ts`/`src/migrations/migrationDrift.ts`) fails a PR when
-> `supabase/migrations/` has a migration that has never been applied to production. Migrations must
-> now be pushed to production before the code that needs them merges — safe only because every
-> migration in this project is additive. See
-> [`docs/runbooks/migrations.md`](./docs/runbooks/migrations.md).
->
-> **A sixth change ports DevieBot's dashboard as a real kanban board, settings, team, and
-> activity-log pages, on a Tailwind v4 + shadcn/ui toolchain, with light/dark theming**
-> (issue [#105](https://github.com/kxnn02/telegram-taskbot/issues/105), now closed, part of the
-> larger Cohort 4 carbon-copy port — see `RESUME-cohort4-port.md`), shipped in five sub-stages:
->
-> - **5a** — `app/globals.css`, `components.json`, `components/ui/`, and `lib/utils.ts` bring in
->   Tailwind v4 and shadcn/ui. The Tailwind theme's `@theme` block maps the *same* DEVCON design
->   tokens `src/web/styles.ts` already defines (colors, radii, Proxima Nova) rather than
->   introducing a second palette — this stage shipped no visible change to any existing page. See
->   `app/globals.css`'s doc comment for the exact mapping and for why Tailwind's reset/defaults
->   (loaded in a CSS cascade layer) can't override the existing hand-rolled stylesheet (rendered as
->   plain, un-layered CSS).
-> - **5b** — the kanban board (`app/dashboard/board`, `components/kanban/`): columns per status,
->   drag-and-drop via dnd-kit writing `order_index`, the task dialog, and tags (`tags`/`task_tags`,
->   created empty by #101, get their first and only consumer here).
-> - **5c** — the settings page (`app/dashboard/settings`, `components/settings/`), minus Devie's
->   bot-token field (the token lives in `BOT_TOKEN`, never rendered) — and `audit_logs`' one and
->   only writer, `SettingsService.saveGroupChatId`, which writes an `ok`/`error` row after every
->   group-chat-id save.
-> - **5d** — the team page (`app/dashboard/team`, `components/team/`), fully editable with no role
->   column or permission tier — #106 deleted roles and every access-control gate, so there is
->   nothing left to enforce.
-> - **5e** — `next-themes` light/dark switching (a toggle in the dashboard topbar, `.dark` class on
->   `<html>`) with dark variants of the *same* DEVCON tokens (not Devie's own dark palette) added
->   to both `src/web/styles.ts`'s `TOKENS` and `app/globals.css`'s shadcn `.dark` block; and a
->   dedicated, keyset-paginated activity-log page (`app/dashboard/activity`, `/api/activity`,
->   `ActivityLogService`, `src/web/activityLogView.ts`) over `audit_logs` — separate from the
->   settings page's own inline, capped-at-50 preview (`SettingsService.listRecentActivity`,
->   unchanged).
->
-> **A seventh change removes access control entirely**
-> ([ADR-0013](./docs/adr/0013-remove-access-control-for-devie-parity.md), issue
-> [#106](https://github.com/kxnn02/telegram-taskbot/issues/106), the last stage of the Cohort 4
-> carbon-copy port). Intern/Higher-up is gone — anyone who messages the bot is auto-registered on
-> first contact, matching Devie's own `syncMember` exactly, and nothing checks a permission
-> afterward. This supersedes ADR-0010 in full (see its own line above) and the role-gated parts of
-> ADR-0002; `/roster`, `/edit`, `/whoami`, `/dashboard`, `/cancel`, and the wizard system are all
-> deleted outright, with no redirect. Cohort scoping is the one thing that survives, since it's
-> tenancy, not access control. See the "Architectural decisions" entries below for what this did
-> to the roster-registration and `/edit`/`/blocked` sections.
->
-> **An eighth change rounds out the Cohort 4 port**: `/addtask` gained a `!priority` flag, `@all`
-> and cohort-id fan-out, and bulk-paste task extraction (issues
-> [#101](https://github.com/kxnn02/telegram-taskbot/issues/101),
-> [#104](https://github.com/kxnn02/telegram-taskbot/issues/104)); and `/standup` gained Devie's
-> character — a daily quote, a greeting, and emoji priority/status badges, plus a separate,
-> secret-gated push endpoint (`api/jobs/standup-push.ts`) that can post the same card into the
-> group on demand (issue
-> [#107](https://github.com/kxnn02/telegram-taskbot/issues/107)) — **superseded below**, that push
-> endpoint now also runs on a schedule. See the "Priority, order_index, tags and audit_logs" entry
-> below for the schema side of the first, and `src/bot/standupQuote.ts` / `src/jobs/standupPush.ts`
-> for the second.
->
-> **A ninth change, Devie parity pass 2, closes seven gaps a 2026-09-07 line-by-line re-read
-> against Devie found** ([ADR-0014](./docs/adr/0014-devie-parity-pass-2.md), spec
-> [#124](https://github.com/kxnn02/telegram-taskbot/issues/124), stages
-> [#125](https://github.com/kxnn02/telegram-taskbot/issues/125)-[#131](https://github.com/kxnn02/telegram-taskbot/issues/131),
-> all closed 2026-09-08):
->
-> - **S1** (#125) — `/done`, `/complete`, and `/update`'s single-ref path resolves a task by
->   title-keyword substring match when the ref isn't a number (`findTaskByRef`,
->   `src/bot/taskLookup.ts`), with a "which one?" list on multiple matches.
-> - **S2** (#126) — `/addtask`'s single-task path defaults to the next Tue/Thu onsite day
->   (`getNextOnsiteDay`) instead of the coming Friday; `cleanTaskTitle` (ported by #102, previously
->   unwired) now runs whenever no explicit `!priority` flag is given, so natural-language priority
->   in a title is honored; `/update` falls back to a Claude-assisted status guess (`parseStatus`)
->   on an unrecognized status word instead of rejecting it.
-> - **S3** (#127) — every bot reply adopts Devie's exact wording and HTML formatting; `/start`
->   becomes a pure alias for `/help`; the five duplicated `esc()` copies consolidate into
->   `src/bot/html.ts`.
-> - **S4** (#128) — Devie's Overview page is built at `/dashboard`; `/` redirects to it (was a 404).
-> - **S5** (#129) — the pre-port dashboard (`/`, `/stats`, `/tasks/new`, `/tasks/[id]/edit`) is
->   deleted now that S4 gives `/` somewhere to redirect to.
-> - **S6** (#130) — the settings page gains Appearance, Bot Connection, and Daily Standup
->   (Preview/Test, no schedule yet) sections.
-> - **S7** (#131) — the daily standup actually runs on a schedule: `cohorts.standup_enabled`
->   (default `false`) plus a `pg_cron` job (`job-standup-push`, `5 0 * * *` / 00:05 UTC), gated
->   inside `handleStandupPushEndpoint`'s `POST` branch only — never in `sendStandupPush` itself,
->   which the settings page's Test button reuses and must ignore the flag. `pg_cron` was chosen
->   over Vercel Cron (can't send the custom auth header; the one scheduling path never proven to
->   fire, #43) and over Devie's own cron-job.org (an unnecessary third-party dependency when
->   `pg_cron`/`call_job_endpoint` already does the exact same job for four other endpoints). This is
->   the one deliberate schema-touching exception to #124's "no migrations in this pass" rule. S7's
->   PR also shipped `attachAutoRetry()` (`src/bot/attachAutoRetry.ts`, wrapping grammy's official
->   `@grammyjs/auto-retry`) across every place this repo constructs a real `Bot` — nothing
->   previously retried a rate-limited or transient Telegram API call, which is what turned routine
->   dry-run testing into a stuck "Failed to send" once a test group's flood limit tripped — plus a
->   fix for that failure surfacing as a bare 500 and a forever-hung spinner on the settings page
->   (uncaught error + unguarded `res.json()`).
->
-> See ADR-0014 for the full context and the alternatives rejected on the scheduler choice.
+This file describes **only the system as it stands today**. It is not a history: superseded
+design notes live in [`docs/context-archive-v1.md`](./docs/context-archive-v1.md), the decisions
+themselves in [`docs/adr/`](./docs/adr/) (with an index at
+[`docs/adr/README.md`](./docs/adr/README.md)), and what shipped when in
+[`CHANGELOG.md`](./CHANGELOG.md). For what the product is meant to do, read [`PRD.md`](./PRD.md).
+
+## How it runs
+
+Three entry points, one set of rules behind them:
+
+```
+Telegram ──webhook──> api/telegram/webhook.ts ─┐
+                                               ├─> src/service/*Service.ts ──> src/storage/ ──> Supabase
+Browser ───────────> app/ (Next.js) ───────────┤        (all business rules)      (one port per table)
+                                               │
+Supabase pg_cron ──> api/jobs/* ───────────────┘
+```
+
+Nothing is long-lived. Every request is a Vercel Function invocation, which is why scheduling
+lives in the database (`pg_cron` calling HTTP endpoints) rather than in a process
+([ADR-0007](./docs/adr/0007-scheduled-jobs-and-operational-tasks.md)).
+
+Two deployments run at once, on two separate Telegram bots: `main` → production → the live Cohort
+5 group, and the `dry-run` branch → its own bot → a dump group
+([ADR-0011](./docs/adr/0011-post-cutover-dry-run-loop.md)). They share one Supabase project and
+are kept apart **only** by `ACTIVE_COHORT_ID`. Operational steps:
+[`docs/runbooks/dry-run-loop.md`](./docs/runbooks/dry-run-loop.md).
 
 ## Glossary
 
-- **Caller** — the identity (username, role, cohortId) of whoever is making a request, resolved
-  from a Telegram user id via registration. Used throughout `taskService.ts` as the actor for
-  every business rule (permission checks, ownership).
-- **Roster** — the list of who belongs to a cohort and in what role (`Intern` or `HigherUp`).
-  Membership is roster-based, not inferred from who's present in the group chat. A roster entry is
-  no longer collected upfront via a config file — as of ADR-0010, `/start` creates
-  it itself, behind a check that the caller is a member of the cohort's Telegram group.
-- **Registration** — the one-time link between a Telegram user id and a roster username, created
-  by `/start`. As of ADR-0010, `/start` also creates the roster row itself on
-  first run — registration and roster-entry creation happen together rather than registration
-  matching against a pre-existing row. A roster entry can still exist before someone has
-  registered (e.g. seeded directly); an unregistered roster member is told to `/start` first.
-- **Overdue-crossing** — the moment a task's due date passes while it's still open (not `done` —
-  see `isOverdue`, `src/domain/overdue.ts`; ADR-0009 dropped the old Approved/Cancelled wording
-  along with those statuses). Notified exactly once via `overdue_notifications` bookkeeping, not
-  re-sent on every subsequent overdue check.
-- **Counts-only** — the digest/group-summary convention of reporting numbers (e.g. "3 due today,
-  1 overdue") without task titles, descriptions, or per-task detail. See the privacy decision
-  below.
+- **Caller** — who is making a request (username + cohortId), resolved from a Telegram user id.
+  Every service method takes one as the actor. It no longer carries a role; there are none.
+- **Roster** — who belongs to a cohort. A row is `(username, cohort_id)` and is created
+  automatically the first time someone messages the bot. Nothing to seed, nothing to approve.
+- **Registration** — the link between a Telegram user id and a roster username, needed before the
+  bot can DM someone (Telegram won't let a bot open a DM first).
+- **Cohort** — the tenancy boundary, and the only boundary there is. One deployment serves exactly
+  one cohort.
+- **Overdue** — a derived flag, not a status: an open (not `done`) task past its due date. See
+  `src/domain/overdue.ts`. Notified exactly once, tracked in `overdue_notifications`.
+- **Bucket** — the standup's grouping: **Overdue**, **Doing**, or **For approval**. Every open
+  task falls in exactly one (`src/bot/standupBuckets.ts`).
 
-## Architectural decisions
+## Decisions that still hold
 
 ### The service layer is the one seam
 
-`src/service/taskService.ts` holds every business rule (permissions, status transitions,
-validation) and is the only thing that talks to `src/db/*Repository.ts`. The bot layer
-(`src/bot/`), the notification scheduler (`src/notifications/`), and the dashboard (`src/web/`)
-all call into this service layer — none of them query the repositories directly, and none of
-them re-implement a rule the service layer already owns. This was chosen so business logic has
-exactly one place to change, and so the bot and dashboard can never drift into disagreeing about
-what a given task's state means. When adding a dashboard read (issue #3) needed data not already
-exposed, the fix was to add a method to `taskService.ts`, not to query the DB from `src/web/`.
-
-### node:sqlite instead of better-sqlite3
-
-> **Superseded by [ADR-0001](./docs/adr/0001-replatform-to-vercel-supabase.md).** SQLite is being
-> replaced by Supabase Postgres. The reasoning below stands as the record of why v1 looks the way
-> it does — and note what it missed: choosing a *file*-backed, *synchronous* driver silently
-> decided the hosting question (a persistent disk, an always-on process) years before anyone asked
-> it. That, not the driver, was the error.
-
-The PRD didn't mandate a specific SQLite driver. `better-sqlite3` needs a native compile
-toolchain that wasn't available in the build environment used for the initial implementation, so
-`node:sqlite`'s built-in `DatabaseSync` is used instead. This is a real, deliberate substitution,
-not an oversight — revisit only if a feature genuinely needs something `node:sqlite` lacks.
-
-### Group chat command support (reversed mid-project)
-
-The original PRD design was DM-only: all commands and wizards happened in a private chat with
-the bot, and the group chat only ever received a bot-posted daily summary (deliberately
-send-only, to avoid leaking task detail into a semi-public space). After early testing, the
-design was reversed: commands (including the assign/edit wizards) now also work when typed
-directly in the cohort's group chat, not just in DM.
-
-This requires disabling Telegram's **privacy mode** for the bot (`@BotFather` → `/setprivacy` →
-Disable) — without that, a bot in a group only receives messages that start with `/`, are a
-reply to it, or `@`-mention it, which would silently break the wizards' free-text follow-up
-steps in a group. With privacy mode off, the bot sees every message in the group, which is why
-`createBot.ts`'s wizard fallback ("Not sure what you mean") only fires in DMs — firing it on
-every plain-text group message would spam ordinary chatter. Issue #52 extended the same
-don't-spam-the-group rule to two holes that were left open when it was first applied: an
-unrecognized slash command in a group now only draws a reply when it isn't explicitly addressed
-to a different bot (`/cmd@other_bot`), and a bare `@bot` mention with no recognised intent
-phrase now only draws a reply when the mention leads the message — an embedded, glancing mention
-(`thanks @bot !`) stays silent, same as unmentioned chatter.
-
-**Accepted tradeoff**: task titles, descriptions, and notes now post publicly into the group
-chat whenever a command is run there (e.g. `/task 3`, `/note 3 ...`). This was an explicit,
-informed choice, not an oversight — interns/higher-ups can still use DM for anything they want
-kept private, and the group chat's *proactive* daily/weekly digest still stays counts-only (see
-below) since that restraint was never about read access.
-
-### Digests stay counts-only even with full group read access
-
-> **Unaffected by [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md).** This decision
-> survives the command/status redesign untouched — ADR-0009's own "Consequences" section says so
-> explicitly. Called out here, visibly, rather than left to be inferred from the absence of a
-> supersede banner.
-
-The daily/weekly group digest (`src/notifications/digestFormat.ts`) reports only per-intern
-counts (on-track / overdue / blocked), never task titles or descriptions — even though the bot
-can now read (and post detail into, via commands) the full group chat. The reasoning in the PRD
-was about avoiding an involuntary public callout of what someone is behind on, which is a
-different concern from read access; a command a person explicitly runs in the group is a choice
-they made, but an automated daily post naming a struggling intern's actual task isn't. This is
-enforced two ways, not just by convention: the digest's internal per-intern data type has no
-field that could hold a task title (so leaking one is a type error, not just a style violation),
-and there's a test asserting the rendered text can't contain one.
-
-### Dashboard: Telegram Login Widget, not a custom auth system
-
-The PRD specifies Telegram's official Login Widget (a signed-payload HMAC flow, verified against
-the bot token) rather than a separate password system, since the target audience already has the
-one credential that matters (their Telegram account) and a second login system would be pure
-overhead for ~8 people. Authorization is layered on top: a successful Telegram login only grants
-a dashboard session if that username is on the roster with role `HigherUp` — a valid Telegram
-login from an intern, or from someone not on the roster at all, is rejected.
-
-The Login Widget choice itself is **unaffected** by the re-platform — `telegramAuth.ts`'s HMAC
-verification is pure and carries across, and it stays strictly better than the shared admin
-password Cohort 4's dashboard uses, since it is per-person and roster-authorized.
-
-> **Resolved, implemented ([ADR-0008](./docs/adr/0008-dashboard-sessions-and-mutations.md), issue
-> #16 / Phase 5).** Sessions are a signed, stateless cookie (`src/web/sessionCookie.ts`) reusing
-> `telegramAuth.ts`'s HMAC-SHA256-plus-timing-safe-compare pattern with its own `SESSION_SECRET` —
-> the old in-memory `Map` (`src/web/sessionStore.ts`) is gone. Username/role/cohortId and an
-> expiry live inside the cookie itself, so no session table or server-side revocation exists;
-> `/logout` just clears the cookie (nothing left to destroy server-side). Dashboard mutations in
-> the Next.js rewrite (Phase 6 / issue #17, closed) use REST-style API routes, not Server
-> Actions — see ADR-0008 for why.
-
-Session cookies are still marked `Secure`, so they only persist over real HTTPS, not plain
-`http://localhost` — see the README's local-testing section for the tunnel workaround.
-
-### Scheduling: node-cron in-process, not an external job system
-
-> **Superseded, implemented ([ADR-0001](./docs/adr/0001-replatform-to-vercel-supabase.md) /
-> [ADR-0007](./docs/adr/0007-scheduled-jobs-and-operational-tasks.md), issue #15).** Scheduling
-> now runs on Supabase `pg_cron` + `pg_net` calling the four `/api/jobs/*` notification-job
-> endpoints (`src/jobs/notificationJobs.ts` wraps the same `runOverdueCrossingCheck`/
-> `runDueSoonReminderCheck`/`runDailyDigest`/`runWeeklyDigest` bodies below, unchanged, scoped to
-> one cohort per call), plus two pure-SQL `pg_cron` cleanup jobs (wizard-state, dedup-table) and
-> two Vercel-Cron jobs (`keep-alive`, `weekly-backup`) that must survive a paused Supabase project.
-> `startScheduler`/`node-cron` are gone entirely — see ADR-0007's "Implementation notes" for the
-> judgment calls made along the way (single-cohort binding, the two-header-scheme split, the
-> error-DM throttle window).
-
-Due-date reminders, overdue-crossing checks, and the daily/weekly digests run as `node-cron` jobs
-inside the same long-lived bot process, all resolved against Asia/Manila time. For an ~8-person
-cohort, an external job queue or scheduler service would be pure infrastructure overhead — a
-single in-process scheduler is simpler to reason about and sufficient at this scale. This does
-mean the bot process needs to actually stay running for reminders/digests to fire; see the
-README's deploy notes once the project moves off local `npm run dev`.
-
-### /edit is single-field, /assign stays a fixed 4-step chain
-
-> **Further superseded by [ADR-0013](./docs/adr/0013-remove-access-control-for-devie-parity.md).**
-> `/edit` and the wizard system described below (both the `/assign` and `/edit` chains, and the
-> `awaiting_field_choice` menu) are deleted outright, not merely made a fallback — there is no
-> "field-choice menu" or "bare command opens a form" path left at all. Kept below only as the
-> record of what the wizard system looked like before it was removed.
-
-> **Superseded by [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md).** `/assign` is
-> replaced by a one-line `/addtask`, and `/edit` gains a direct
-> `/edit <ref> <field> <value>` form. Both wizards described below survive, but as the
-> *fallback* taken when the command is sent bare — not as the primary path. The reasoning below
-> stands as the record of why the four-step chain was chosen, and note what it missed: four
-> required fields only forced a four-step chain because the description was mandatory, which
-> ADR-0009 relaxes.
-
-`/edit <id>` now opens with an inline-keyboard menu ("Which field?") instead of walking all four
-fields with `"-"` to skip — issue #5. `WizardState.step` gained `awaiting_field_choice` as the
-starting step for kind `"edit"` (kind `"assign"` still starts at `awaiting_assignee`); the field
-tapped is recorded as `WizardData.editField` and drives which single shared step handler
-(`awaiting_assignee`/`title`/`description`/`due_date`) runs before going straight to
-`finishWizard`. The due-date field still routes through `awaiting_due_date_confirm` for both
-wizards — that Yes/No step was never edit-only. This also fixed a pre-existing bug where
-`WizardManager.start()` set kind `"edit"`'s initial step to `awaiting_title` while the command
-handler actually prompted for assignee first — dead code (`WizardData.fieldsToCollect`, never
-read anywhere) was removed rather than reconciled.
-
-### Bot-layer dispatch tests: real grammy `Bot`, no network
-
-`createBot.test.ts` drives the actual command/callback dispatch (not just pure formatting, like
-`format.test.ts`) via `bot.handleUpdate()` on hand-built `Update` objects, against a real
-`TaskService`/`node:sqlite`-memory/`Roster` stack. `createBot()` accepts optional `bot`/`roster`
-injection for this: a `new Bot(token, { botInfo })` sidesteps the real `getMe` network call, and
-`bot.api.config.use(transformer)` intercepts every outgoing API call instead of hitting Telegram.
-One gotcha: synthetic `/command` messages need a `bot_command` entity (grammy's command filter
-reads entities, not just leading `/` in the text) or every command silently misses and falls
-through to the "not sure what you mean" fallback.
-
-### `/blocked` overloads the existing command name (issue #6)
-
-> **Further superseded by [ADR-0013](./docs/adr/0013-remove-access-control-for-devie-parity.md).**
-> There is no `/blocked` command at all any more, in either its list-view or set-flag form.
-> Blocking a task is just `/update <ref> blocked`, same as setting any other status, optionally
-> with a `note:<text>` rider; listing blocked tasks means reading `/tasks` or `/standup`'s
-> "Backlog"/detail sections. Kept below as the record of the overload this replaced.
-
-> **Partly superseded by [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md).** The
-> dual-purpose overload survives exactly as described below. What changes underneath it is that
-> `blocked` becomes a *status* rather than an orthogonal boolean flag, so `/blocked <id> <reason>`
-> now sets a status and stashes the prior one in `previous_status`. A second route to the same
-> state also appears — `/update <ref> blocked` — which is why ADR-0009 makes the reason optional.
-
-Issue #6 asked for a new read-only `/blocked` (no arguments) list command, mirroring
-`/backlog`/`/pending`. But `/blocked <task_id> <reason>` already existed (PRD §5, intern-facing:
-flags a task as blocked). Rather than invent a different name for the list view — which the
-ticket didn't ask for and which would fragment the "blocked" vocabulary the cohort already uses —
-`bot.command("blocked", ...)` in `createBot.ts` now dispatches on argument presence: no arguments
-lists (delegates to `TaskService.listBlocked`); `<task_id> <reason>` still sets the flag via
-`TaskService.setBlocked`, unchanged. Both are documented as one entry in `USER_GUIDE.md`'s intern
-table with a note explaining the split, plus the plain list entry in the "Everyone can" table.
-
-This also required widening `TaskService.listBlocked`, which previously rejected any non-
-`HigherUp` caller outright (it only existed to feed the higher-up daily digest). It now follows
-the same scope-by-role shape as `listBacklog`: cohort-wide for a higher-up, filtered to the
-caller's own tasks for an intern — never rejected, matching the ticket's "intern sees only their
-own blocked tasks" requirement. `formatBlocked` (already used by the weekly/daily digest) is
-reused as-is for the command reply, unchanged, consistent with `/backlog`/`/pending` always
-showing the assignee regardless of caller role.
-
-### `/alltasks` and `/mytasks` paginate via a page-number argument (issue #7)
-
-> **Partly superseded by [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md).**
-> `/alltasks` is renamed `/tasks` and gains `@username` and role filters. The page-number
-> argument convention below is kept and extended to the renamed command — but note the new
-> parsing ambiguity it creates, since `/tasks 2` must still mean page 2 while `/tasks @jean` and
-> `/tasks intern` are filters.
-
-Both list commands now cap a reply at 10 tasks per page (`PAGE_SIZE` in `src/bot/format.ts`),
-with `/alltasks 2` / `/mytasks 2` requesting the next page. A command-argument page number was
-chosen over inline Next/Previous buttons, unlike the Approve/Revise buttons or issue #5's
-`/edit` field-choice menu: those buttons attach to a message meant for one specific person to act
-on once, but `/alltasks` and `/mytasks` can be run by anyone in the group chat, their output is
-plain broadcastable text, and a page number keeps each reply self-contained and re-requestable on
-its own — no dependency on a particular message staying around and editable. This also matches
-the ticket's steer toward the simpler option absent a clear reason for buttons.
-
-Pagination is display-only: `TaskService.listAllTasks`/`listMyTasks` are unchanged and still
-return the full cohort/role-scoped result set (so cohort-scoping and role-based filtering are
-untouched), and only `format.ts` slices a page out of that list before rendering. `/alltasks`'s
-existing per-assignee grouping is preserved by grouping only the tasks within the requested
-page, not across the whole result set. A result set of 10 or fewer renders with no pagination
-footer at all, unchanged from before this issue; a page argument that isn't a positive integer
-(e.g. `/mytasks abc`) is rejected with a usage message, while a page number past the last page is
-clamped to the last page rather than treated as an error, since that's a page that used to exist
-and simply ran out.
-
-### Assignee typo suggestion uses Levenshtein distance <=2, cohort-scoped (issue #8)
-
-The `/assign` and `/edit` wizards' "who is this task for?" step already rejected an unknown
-username outright; issue #8 asked for a "did you mean @y?" hint when the typed username is a
-close typo of an actual intern, to cut down on wizard restarts. The matching itself is a small
-pure function, `suggestClosestUsername` (`src/bot/usernameSuggest.ts`, backed by a plain
-`levenshteinDistance` implementation), independently unit-tested with no roster/DB/bot
-dependency — it just takes the typed text and a list of candidate usernames.
-
-Threshold: a Levenshtein distance of **1–2** is treated as "close enough". Cohort usernames are
-short (first names/handles), so a single dropped, added, swapped, or substituted character (or
-two of those combined) covers the realistic typo shapes without the threshold growing wide
-enough to start matching unrelated names in an ~8-person roster. Two more rules keep the
-suggestion honest rather than a guess: an input matching a candidate exactly returns no
-suggestion (nothing to suggest), and if two or more candidates tie for the closest distance, the
-function returns `undefined` rather than picking one — the ticket explicitly required no
-suggestion over an ambiguous one.
-
-The wizard step handler in `createBot.ts` (the shared `awaiting_assignee` step used by both
-`/assign` and `/edit`'s assignee-change field) builds the candidate list from
-`roster.all()` filtered to `role === "Intern"` and the **caller's own** `cohortId` before calling
-`suggestClosestUsername` — so a suggestion can only ever point at an intern in the caller's
-current cohort, never a different cohort or a higher-up, matching the ticket's constraint. The
-suggestion is appended to the existing rejection text ("did you mean @y?"); the wizard's control
-flow is unchanged — it still just waits for the next message (a corrected username or
-`/cancel`), same as before. There is no auto-accept: the caller must type the suggested username
-themselves for it to take effect.
-
-### "Mark unblocked" inline button reuses `clearBlocked` as-is, no new rule (issue #9)
-
-> **Superseded by [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md).** The button is
-> removed along with the Approve/Revise buttons it was modelled on — all three encoded the
-> higher-up review gate that ADR-0009 deletes. `clearBlocked` itself survives, reached by
-> `/unblock <ref>`, and now restores `previous_status` rather than clearing a boolean. The
-> one-entry-point-per-rule principle below is unaffected and still worth keeping.
-
-Issue #9 asked for a one-tap alternative to typing `/unblocked <task_id>` on the blocked-flag
-notification a higher-up already receives (PRD §8). The button (`unblock:<id>` callback data,
-attached via the same `InlineKeyboard` pattern as the Approve/Revise buttons) does not add any
-new business logic: its handler in `createBot.ts` calls `TaskService.clearBlocked` — the exact
-same method `/unblocked` already calls — so the two entry points can never disagree about what
-clearing a blocked flag means or when it's allowed.
-
-Permission gating mirrors the existing Approve/Revise callback precedent exactly: the callback
-handler checks the resolved caller is a registered `HigherUp` before calling the service, the
-same shape as the `decision:(approve|revise)` handler, even though `clearBlocked` itself also
-permits the assignee intern to self-clear (used by the typed `/unblocked` command). This isn't a
-gap — the button only ever reaches a higher-up in the first place, since it's attached to a
-notification that's only ever sent to the assigning higher-up; an intern can still self-clear via
-the typed command, unchanged.
-
-**Race / already-unblocked edge case**: tapping the button after the flag was already cleared —
-by the typed command, by someone else's tap, or on a different device — is not treated specially.
-`clearBlocked` already returns a clear failure (`"Task N isn't currently marked blocked."`) when
-called on a task that isn't blocked, and the callback handler edits the notification message to
-show that error text in place, the same as any other failed decision (e.g. re-tapping
-Approve/Revise on an already-decided task). No optimistic-locking or "someone already handled
-this" special-casing was added — the existing status-check-first behavior the PRD already
-requires for `/submit`/`/approve`/`/revise`/`/canceltask` (§4) covers this uniformly, and the
-notification message simply reflects whatever the service says happened (or didn't).
-
-### Contract-test isolation: unique cohorts + cascading delete, not transaction rollback (issue #13)
-
-ADR-0005 proposed running each contract test inside a database transaction rolled back at the
-end, so the shared Supabase project (also used for real cohort data and the future dry-run
-cohort) sees zero permanent footprint from CI. That's not achievable as written: `SupabaseTaskStore`
-talks to Postgres over PostgREST, and every `supabase-js` call is its own independent HTTP
-request/connection — there's no way for a test's setup code to open a transaction on one
-connection and have the adapter's own requests execute inside it, the way an in-process `pg`
-client passed a single connection could.
-
-What's actually implemented instead, in `supabaseTaskStore.live.test.ts`: each test run generates
-a uniquely-prefixed pair of test cohort ids (`__contract_test_<runId>_<n>__`), inserts them into
-`cohorts` in `beforeEach`, and deletes them in `afterEach`. A migration
-(`20260831070000_cascade_deletes.sql`) added `ON DELETE CASCADE` from `cohorts` down through
-`cohort_counters`/`tasks`/`notes`, so deleting the one cohort row wipes everything a test wrote
-under it in a single delete, regardless of what that test did — the same "zero permanent
-footprint on the shared project" property ADR-0005 was actually after, just achieved by scoped
-deletion instead of literal rollback. Verified directly: after a full contract-suite run against
-the real project, a follow-up query for `__contract_test*` cohorts returns nothing.
-
-This also means the contract suite isn't testing genuine cross-invocation isolation (two contract
-tests could in principle interleave against the *same* cohort if run concurrently) — it doesn't
-need to, since each test gets cohort ids nobody else is using. Real concurrent-write safety
-(the row_version check) is exercised directly, deliberately, by the "stale rowVersion" test.
-
-**Residual gap, and the sweep that backstops it**: `afterEach`-based cleanup only runs on the
-happy path — a crashed test process (or a killed CI job) skips it, leaving that one run's test
-cohort (and everything cascaded under it) sitting in the shared project indefinitely. Since this
-is the same shared project real cohort and dry-run data live in, that's a real gap, not a
-theoretical one, even though any single leftover is small and clearly marked by the
-`__contract_test_` prefix. `sweepStaleTestCohorts` (`src/storage/sweepStaleTestCohorts.ts`) closes
-it: it finds any cohort matching that prefix older than an hour — far longer than the live suite
-ever legitimately takes to run — and deletes it, cascading the same way `afterEach` does. It runs
-as a step before the live suite in CI's `contract` job (catches yesterday's crash before today's
-run adds more), and again on its own daily schedule (`.github/workflows/sweep-test-cohorts.yml`)
-so cleanup doesn't depend on how often `main` gets pushed to.
-
-### Caller resolution is bound to one cohort per deployment (Phase 3 review finding)
-
-The dry-run cohort (ADR-0004) intentionally reuses the same real Telegram accounts as the real
-cohort — `kxnn02`/`chiaia_0702` exist as roster entries under both `cohort-5` and
-`cohort5-dryrun`. `Roster.find(username)` (no `cohortId` argument) resolves this ambiguity
-deterministically but arbitrarily: whichever cohort's entry was inserted first. A code-review
-pass on the Phase 3 webhook work caught that `resolveCaller` (`callerResolution.ts`) — used by
-`/start` and every `withCaller`-wrapped bot command, in DM or group chat — called `roster.find`
-with no cohort context at all. Since the seed script inserts the real cohort before the dry-run
-cohort, every dry-run command from either test account would have silently resolved against the
-real `cohort-5`, not the isolated `cohort5-dryrun` — exactly the cross-cohort contamination the
-dry run's cohort-scoping was supposed to prevent, since `TaskService` scopes every read/write off
-the resolved `caller.cohortId`. The same pattern existed in `dashboardServer.ts`'s Telegram-login
-lookup.
-
-Fixed by recognizing that every real deployment only ever serves one cohort — there's a Vercel
-webhook function per branch (real vs. dry-run), and a dashboard process per deployment, never one
-instance serving both. `createBot.ts` and `createDashboardServer` now take a required
-`activeCohortId`, threaded from the existing (previously unused) `ACTIVE_COHORT_ID` env var, and
-every live-request call site (`resolveCaller`, `/start`'s roster lookup, the dashboard's
-Telegram-login lookup) passes it explicitly to `Roster.find(username, cohortId)` rather than
-falling through to the ambiguous no-cohort-arg overload. That overload still exists — it's used
-by call sites that genuinely don't have a resolved cohort in hand yet (none remain reachable from
-a live request as of this fix; it's kept for the rare legitimate case and for tests) — but no
-production request path is allowed to hit it. Regression coverage: `callerResolution.test.ts`
-(unit-level), `dashboardServer.test.ts` (full HTTP-level login + read), and
-`createBot.test.ts`'s "Cohort binding..." describe block (real `bot.handleUpdate` dispatch,
-proving `/start` and a data-read command both stay scoped to the deployment's bound cohort even
-when two separate bot instances share an identical ambiguous roster).
-
-### `/addtask` only reads a due date after an explicit `by` (issue #49/#51, finding F2/D2)
-
-`parseAddTaskArgs` used to hand the whole argument string to `parseDueDate` (chrono) and split
-the title off wherever chrono found *any* date-like phrase. That looks smarter than requiring the
-`by` keyword — natural-language dates work anywhere in the sentence — but chrono readily matches
-ordinary words that aren't dates in this context at all: month names (`fix bug in march module`),
-month abbreviations (`review the sept deck`), weekday abbreviations (`call sat about the API`),
-and time-of-day phrases (`deploy to prod at 5`). Every one of those got silently truncated to a
-mangled title with an invented due date, and the one-liner path has no confirm step, so it landed
-without the user ever seeing it.
-
-The fix anchors on `by` (#27's grammar already documented `/addtask <title> by <date>` — this
-restores that spec rather than changing it): every ` by ` occurrence is a candidate split point,
-walked last-to-first so `fix the bug found by QA by next Friday` splits on the second `by`. A
-candidate is only accepted when the text after it is *entirely* consumed by chrono's match (plus
-optional trailing punctuation) — otherwise the earlier `by` is tried, and if none qualify the
-whole string stays the title with no due date (the caller's default due date applies instead —
-the coming Friday at the time this shipped, the next Tue/Thu onsite day as of ADR-0014's S2). Do
-not "simplify" this back to a whole-string chrono scan; that's the exact bug this fixed. See `addTaskParse.ts`'s doc comment and `addTaskParse.test.ts` for the validated
-input/output table.
-
-### Wizard chat scoping stored as a `WizardData` field, not a `wizard_state` column (issue #52/#53, finding F3)
-
-`WizardState` used to record no chat, so `bot.on("message:text")` looked up in-progress wizard
-state by Telegram user id alone — any text that person sent in *any* chat was treated as the
-next answer to their form. Starting `/addtask` in a DM, then sending an ordinary sentence in the
-cohort group, made the bot answer in the group as though that sentence were the assignee.
-
-The fix adds an optional `chatId` to `WizardData` (`src/bot/wizard.ts`) rather than a new column
-on the `wizard_state` table: `SupabaseWizardStateStore` already maps the whole `WizardData` object
-into that table's `data` jsonb column (ADR-0006), so a new field round-trips for free — no SQL
-migration needed. `chatId` is set when a bare `/addtask` or bare `/edit` starts a wizard, and
-checked everywhere wizard input is accepted: the free-text step handler, the mid-wizard command
-auto-cancel, and the `editfield:`/`duedate:` callback handlers. A mismatched chat is treated as if
-no wizard existed (free text) or answered with "That form was started in another chat." (a
-callback) — the form itself is left untouched in its own chat. `chatId === undefined` matches any
-chat, so wizard rows already in the database when this deploys keep working instead of becoming
-permanently unusable.
-
-Bare `/addtask` run directly in a group is unaffected: the wizard still runs publicly there and
-still expects its next answer from that same group, per the existing group-chat-support decision.
-
-### Roster registration moves from a config file to group-gated `/start` (ADR-0010)
-
-> **Superseded in full by [ADR-0013](./docs/adr/0013-remove-access-control-for-devie-parity.md).**
-> Every mechanism described below — the group-membership check, the role-picking buttons,
-> `/roster`, group-admin-gated roster edits, and the zero-higher-ups recovery path — is deleted.
-> `/start` now just auto-registers the sender and says hello; there is no role to pick and no
-> roster command left to administer one. Kept below as the record of the design ADR-0013 replaced.
-
-Role assignment used to mean editing a gitignored roster file and re-seeding Supabase by hand —
-nobody in the cohort could do it. As of ADR-0010 (implemented, spec #83, tickets #85-#91, merged
-via PR #93, live in production since 2026-09-02), `/start` checks that the caller is a member of
-the cohort's Telegram group, then lets them self-declare Intern or Higher-up and writes the
-roster row itself; roster management (changing a role, removing a member) stays out of
-self-declared reach by gating it on live Telegram group-admin status instead of the roster role,
-via the `/roster` command. See the ADR for the full design, including why the Bot API can't
-enumerate group members and why invite links and admin-derived roles were rejected.
-
-**Bootstrap note**: the very first registrant(s) in a freshly cut-over cohort will have no
-Higher-up yet, so the self-promotion guard that normally blocks re-declaring a role is inactive
-until one exists — anyone can re-run `/start` and tap the other role button to correct
-themselves. Once a cohort has at least one Higher-up, that recovery path closes for everyone with
-an existing roster row, and role changes must go through `/roster role @user <role>` instead.
-
-### Priority, order_index, tags and audit_logs land as additive schema (issue #101)
-
-The Cohort 4 port's stage 1 (`20260905134102_task_priority_tags_and_audit.sql`) adds `tasks.priority`
-(text + CHECK, `low`/`medium`/`high`/`urgent`, default `medium` — same pattern as `status`, not a
-Postgres enum, per ADR-0006) and `tasks.order_index` (integer, default 0), plus three new tables:
-cohort-scoped `tags` (`id`, `cohort_id`, `name`, `color`, unique on `(cohort_id, name)` — unlike
-Devie's global tags, since this bot is multi-cohort), `task_tags` (join table, cascades on both
-`tags` and `tasks`), and `audit_logs` (`cohort_id`, `action`, `status`, `message`, `meta` jsonb).
-All three get RLS enabled with zero policies, matching every other table.
-
-This stage is schema-only: `Task.priority`/`orderIndex` are set at creation (`TaskService.assignTask`,
-defaulting to `medium`) and by `TaskService.setPriority` (no authorization check, same as
-`setStatus`), and the bot renders priority as an emoji badge (`format.ts`'s `PRIORITY_BADGE` —
-`🔴` urgent, `🟠` high, nothing for medium/low, copying Devie's bot rendering rather than the
-dashboard's word labels). `order_index`, `tags`, `task_tags` and `audit_logs` exist but nothing
-reads or writes them yet — issue #105 builds the tag UI and audit-log view over them, and the
-dashboard board's drag-ordering over `order_index`.
-
-`taskRef.ts`'s `parseTaskRef` now also accepts the hyphenated `T-001` form (`T-23`, `t-023`,
-`T-001`, alongside the existing `23`/`t23`), and a new `formatTaskRef` renders an id that way
-(zero-padded to 3 digits, unpadded past 999). `/addtask` accepts an optional `!priority` flag
-(e.g. `!urgent`) parsed the same way as the existing `@mention`/`by <date>` clauses — this specific
-`!`-prefixed syntax is a judgment call made in the absence of a verified source for Devie's actual
-argument grammar, not a confirmed carbon copy of it.
-
-## Out of scope (deferred to v2)
-
-Mini App UI, file attachments, CSV export, recurring tasks, and standup response-collection were
-deliberately deferred — still true today (`PRD.md` §11). The original reasoning (timeline pressure
-ahead of the cohort's "before Thursday" launch target) is in `docs/PRD-v1-original.md` §11.
+`src/service/taskService.ts` holds every business rule — validation, status changes, ownership —
+and the `src/storage/*StorePort` implementations are the only things that touch the database. The
+bot, the dashboard, and the scheduled jobs all call into the service layer; none of them query
+storage directly and none re-implement a rule it owns.
+
+This is the load-bearing convention of the codebase. When a dashboard page needs data that isn't
+exposed yet, the fix is a new service method, never a query from `src/web/`.
+
+### There is no access control — only cohort tenancy
+
+[ADR-0013](./docs/adr/0013-remove-access-control-for-devie-parity.md) deleted roles and
+permissions outright, to match Devie. Anyone who messages the bot is registered on first contact,
+and any registered member can do anything to any task in their cohort. There is no approval gate,
+no confirmation step, and no permission check left to maintain.
+
+Cohort scoping survives because it is tenancy, not permission. Re-adding access control would be
+a new proposal, not a bug fix.
+
+### One cohort per deployment, bound by `ACTIVE_COHORT_ID`
+
+`Roster.find(username)` without a cohort resolves ambiguously — the same Telegram account exists
+under both the real and the dry-run cohort, and it would pick whichever row was inserted first.
+Every live request path therefore passes `ACTIVE_COHORT_ID` explicitly
+(`resolveCaller`, `/start`'s roster lookup, the dashboard's Telegram-login lookup).
+
+The no-cohort overload still exists for tests and for callers that genuinely have no cohort in
+hand yet, but **no production request path may reach it**. Regression coverage:
+`callerResolution.test.ts`, and `createBot.test.ts`'s "Cohort binding" block, which drives two
+bot instances sharing an ambiguous roster.
+
+### Commands work in the group chat, and that leaks task detail on purpose
+
+The original design was DM-only. It was reversed after early testing: every command works in the
+cohort's group chat too. That requires Telegram's privacy mode **off** (`@BotFather` →
+`/setprivacy` → Disable), so the bot receives every group message, not just ones starting with
+`/`.
+
+**Accepted tradeoff**: a command run in the group posts that task's title and notes publicly.
+Anyone who wants privacy can DM the bot. Because the bot sees everything, the "not sure what you
+mean" fallback fires only in DMs, and two narrower rules keep it quiet in groups: an unrecognized
+slash command draws a reply only when it isn't addressed to another bot (`/cmd@other_bot`), and a
+bare mention only when the mention *leads* the message (`thanks @bot !` stays silent).
+
+### One home per piece of information
+
+Settled by issue #143 after the cohort was told the same three overdue tasks three times every
+morning. The rule:
+
+> **Personal ("what do I have to do?") goes to a DM. Cohort-wide ("how are we doing?") goes to
+> the group, once, in the morning standup card. No message carries both.**
+
+What that produces, all Asia/Manila:
+
+| When | Channel | Message |
+|---|---|---|
+| 8:05am daily | group | Standup card — everyone's open work, by person. Gated by `cohorts.standup_enabled` |
+| 8:10am Mondays | DM | What *you* completed in the trailing 7 days |
+| 9:00am daily | DM | Due-tomorrow reminder, assignee only |
+| 10:00am daily | DM | Your own open tasks. Suppressed when you have none |
+| 12:00pm daily | DM | Roster reconciliation, only when someone has left the group |
+| hourly | DM | Overdue crossing, once per task, assignee + assigner |
+| on status change | DM | Assignee + assigner, minus whoever made the change |
+
+Two consequences worth stating plainly. The daily digest **no longer posts to the group at all**,
+and the weekly digest deliberately omits your open tasks — it would repeat the same member's 10am
+digest two hours later on the same Monday, which is the duplication this spec exists to remove.
+
+This replaced an earlier "group digests are counts-only" privacy guarantee. That guarantee is
+gone: the standup card names task titles per person. It was traded, knowingly, for the cohort
+having one shared morning view — the reasoning it replaced is in the archive.
+
+### The standup groups by person, not by status
+
+Issue #165. Every open task is sorted into exactly one bucket, under a heading per member
+(`src/bot/standupBuckets.ts`, shared by the scheduled HTML card and the plain-text `/standup`
+reply). `done` and non-overdue `backlog` tasks appear only in the summary counts.
+
+Two orderings, deliberately different: `bucketOf` **classifies** by overdue → for-approval →
+doing, first match wins (so an overdue in-review task counts as overdue, not as awaiting
+approval), while `STANDUP_BUCKET_ORDER` **renders** as Overdue, Doing, For approval.
+
+⚠️ **This is a deliberate divergence from Devie**, which groups by status. `buildStandupOverviewCard`
+otherwise carbon-copies Devie's layout, so a future parity pass must not "restore" the status-first
+grouping this replaced. The dead status-first code was deleted (#169) rather than left to rot.
+
+### The dashboard reuses Telegram as its login
+
+Telegram's official Login Widget — a signed payload verified against the bot token
+(`src/web/telegramAuth.ts`) — not a password system. The audience already has the one credential
+that matters, and a second login for ~8 people would be pure overhead. Logging in now requires
+only an existing roster row; there is no tier above that
+([ADR-0013](./docs/adr/0013-remove-access-control-for-devie-parity.md)).
+
+Sessions are a **signed, stateless cookie** (`src/web/sessionCookie.ts`), reusing the same
+HMAC-plus-timing-safe-compare pattern with its own `SESSION_SECRET`. Username, cohort and expiry
+live inside the cookie, so there is no session table and no server-side revocation — `/logout`
+just clears it ([ADR-0008](./docs/adr/0008-dashboard-sessions-and-mutations.md)). The cookie is
+`Secure`, which is why local login needs an HTTPS tunnel (see the README).
+
+Mutations are REST-style API routes under `app/api/`, not Server Actions.
+
+### Missing environment variables fail the build, not every request
+
+On 2026-09-07 the bot returned 500 to every Telegram update for 17 hours: `GROQ_API_KEY` was
+absent and the webhook's eager dependency wiring had no failure path. Two fixes
+([ADR-0015](./docs/adr/0015-required-environment-variables-are-asserted-at-build-time.md)):
+language features now fail on use rather than at construction, and
+[`src/config/requiredEnv.ts`](./src/config/requiredEnv.ts) is a manifest the Vercel build asserts
+(`npm run check:env`, wired into `vercel.json`'s build command).
+
+That manifest is deliberately **not** derived from `.env.example`, which also documents
+local-only, script-only and historical names. A variable earns a place in it only if a request
+served by `api/**` or `app/**` fails without it.
+
+### Migrations reach production before the code that needs them
+
+CI fails a PR when `supabase/migrations/` holds a migration that has never been applied to
+production ([ADR-0012](./docs/adr/0012-migrations-applied-before-merge.md), `npm run
+check:migrations`). This is only safe because every migration in this project is additive — keep
+it that way. Runbook: [`docs/runbooks/migrations.md`](./docs/runbooks/migrations.md).
+
+## Traps — things that look wrong and must not be "fixed"
+
+- **`/addtask` only reads a due date after an explicit `by`.** Handing the whole string to chrono
+  looks smarter, but chrono happily matches ordinary words: `fix bug in march module`, `review the
+  sept deck`, `call sat about the API`, `deploy to prod at 5` all got silently truncated into a
+  mangled title with an invented due date — and the one-liner path has no confirmation step, so it
+  landed unseen. Every ` by ` is a candidate split point, walked last-to-first, and accepted only
+  when chrono consumes *all* the text after it. Do not simplify this back to a whole-string scan.
+  See `src/bot/addTaskParse.ts` and its validated input/output table.
+- **`/done` sets In review, not Done.** `/complete` and `/update <ref> done` set Done. The word
+  means two different things depending on whether it's the command or the argument. Copied from
+  Devie on purpose; documented as a warning in `USER_GUIDE.md` rather than fixed.
+- **`sendStandupPush` ignores `standup_enabled` on purpose.** The on/off switch is checked in
+  `handleStandupPushEndpoint`'s `POST` branch only, because the settings page's Test button reuses
+  the same function and must work while the schedule is off.
+- **The update-dedup key is global across bots, and that's accepted.** `processed_telegram_updates`
+  dedups on Telegram's per-bot `update_id` while production and dry-run share one Supabase project,
+  so a collision is possible in principle. Measured as distant and accepted (#164) rather than
+  adding a discriminator column to the hottest code path.
+- **A notification is only marked sent if it actually sent.** Overdue-crossing used to record a
+  task as notified even when nobody could be DM'd, permanently losing the one-shot alert (#162);
+  roster reconciliation used to spend its 24h throttle claim before sending, suppressing an
+  undeliverable warning for a day (#163). Both now write the bookkeeping after a successful send.
+
+## Data model notes
+
+- **Statuses are a text column with a `CHECK`**, not a Postgres enum — cheaper to extend
+  ([ADR-0006](./docs/adr/0006-database-schema-and-concurrency.md)). Same for `priority`
+  (`low`/`medium`/`high`/`urgent`, default `medium`).
+- **Concurrency is an optimistic `row_version` check** on `tasks`. Two concurrent writers to the
+  same task get a clear failure; there's no conflict-resolution UI beyond that.
+- **`tags` are cohort-scoped**, unlike Devie's global tags, because this bot is multi-cohort. With
+  `task_tags` and `order_index` (the board's drag ordering) they are consumed only by the
+  dashboard's kanban board.
+- **`audit_logs` has exactly one writer** — `SettingsService.saveGroupChatId` — read by the
+  activity page (keyset-paginated) and the settings page's own capped preview.
+- **Every table has RLS enabled with zero policies.** The service-role key bypasses it; the
+  policies' absence is the deny-by-default backstop, not an oversight.
+- **`job_runs`** records the outcome of every scheduled job, added because a silent cron failure
+  was otherwise invisible (#43, still open for the two Vercel Cron jobs).
+
+## Testing conventions
+
+- **`npm test` never touches the network.** In-memory store implementations back everything; the
+  language parser runs against a fake `TextModel`.
+- **Bot dispatch is tested through a real grammy `Bot`** (`createBot.test.ts`), driving
+  `bot.handleUpdate()` on hand-built `Update` objects with the API transport intercepted. One
+  gotcha: a synthetic `/command` message needs a `bot_command` entity, or grammy's command filter
+  misses it and everything falls through to the fallback handler.
+- **Contract tests run against the real Supabase project** (`npm run test:live`), each run using
+  uniquely-prefixed throwaway cohort ids (`__contract_test_<runId>_<n>__`) deleted in `afterEach`.
+  `ON DELETE CASCADE` from `cohorts` downward means one delete wipes everything the test wrote.
+  Because `afterEach` doesn't run on a crashed process, `sweepStaleTestCohorts` deletes any such
+  cohort older than an hour — once before the live suite in CI, and again on a daily schedule.
+- **View logic is pure and separately tested.** `src/web/*View.ts` / `*Data.ts` take data and a
+  `now`, and return what to render — no I/O, no `new Date()` inside.
+- **Small parsers are their own modules with their own tests** — `addTaskParse`, `mentionParse`,
+  `statusParse`, `taskRef`, `taskLookup`, `usernameSuggest`, `standupBuckets`. Assignee typo
+  suggestions, for instance, use Levenshtein distance 1–2, cohort-scoped, and deliberately return
+  nothing on a tie rather than guessing between two names.
+
+## Out of scope
+
+A Telegram Mini App, file attachments, CSV export, recurring tasks, overdue-escalation nagging,
+and standup response-collection are all deliberately deferred — see `PRD.md` §11. The original
+reasoning (timeline pressure before the cohort's launch) is in
+[`docs/PRD-v1-original.md`](./docs/PRD-v1-original.md) §11.
