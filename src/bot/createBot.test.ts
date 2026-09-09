@@ -656,7 +656,10 @@ describe("standup filters (issue #103 item 3)", () => {
     await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/standup"));
 
     const call = lastCall(testBot.calls, "sendMessage")!;
-    expect(call.payload.text).toContain("📊 Overview");
+    // #165 S3: the message body is now the person-first summary line, not
+    // a "📊 Overview" count block — that label survives only as the first
+    // filter button's text, asserted via the keyboard below.
+    expect(call.payload.text).toContain("⚠️ 0 overdue · 🔄 0 doing · 👀 0 for approval");
     expect(keyboardOf(call).inline_keyboard[0]!.map((b) => b.callback_data)).toEqual([
       "standup|overview|0",
       "standup|active|0",

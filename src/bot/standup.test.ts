@@ -14,6 +14,7 @@ import {
   STANDUP_FILTER_STATUSES,
   VALID_STANDUP_FILTERS,
 } from "./standup.js";
+import { standupSummaryLine } from "./standupBuckets.js";
 
 const COHORT = "cohort-5";
 const NOW = new Date("2026-09-01T02:00:00.000Z"); // Tuesday
@@ -145,16 +146,17 @@ describe("formatStandup (standup redesign)", () => {
     expect(text).toContain("Tuesday, September 1, 2026");
   });
 
-  it("renders an overview line for every status, even ones at zero", async () => {
+  // Adjusted for #165: the seven-line count block is gone, replaced by
+  // standupSummaryLine's one-line, five-segment summary — every segment
+  // still renders at zero.
+  it("renders the summary line with every segment at zero on an empty cohort", async () => {
     const { service } = makeService();
     const report = await buildStandup(service, carla, NOW);
     const text = formatStandup(report);
-    expect(text).toMatch(/In progress: 0/);
-    expect(text).toMatch(/In review: 0/);
-    expect(text).toMatch(/To do: 0/);
-    expect(text).toMatch(/Backlog: 0/);
-    expect(text).toMatch(/Blocked: 0/);
-    expect(text).toMatch(/Done: 0/);
+    expect(text).toContain(standupSummaryLine(report.tasks));
+    expect(text).toContain(
+      "⚠️ 0 overdue · 🔄 0 doing · 👀 0 for approval · 📦 0 backlog · ✅ 0 done",
+    );
   });
 
   it("includes task titles in the detail section, unlike the counts-only digest", async () => {
@@ -206,7 +208,11 @@ describe("formatStandup (standup redesign)", () => {
     expect(text).toContain("Wednesday, September 2, 2026");
   });
 
-  it("renders the overdue count after Blocked and before the first detail section (H17)", async () => {
+  // Adjusted for #165: there is no separate "Overdue:" line or per-status
+  // detail sections anymore, so the ordering this test pinned (H17) is now
+  // expressed as "the overdue count is in the summary line, which sits
+  // right after the header and before the per-member Overdue buckets".
+  it("counts overdue tasks in the summary line, ahead of the per-member buckets (H17)", async () => {
     const { service } = makeService();
     await service.assignTask(carla, {
       assigneeUsername: "alice",
@@ -228,21 +234,20 @@ describe("formatStandup (standup redesign)", () => {
     const report = await buildStandup(service, carla, NOW);
     expect(report.overdue).toBe(2);
     const text = formatStandup(report);
-    expect(text).toContain("⚠️ Overdue: 2");
+    expect(text).toContain("⚠️ 2 overdue");
 
-    const blockedIdx = text.indexOf("🚧 Blocked:");
-    const overdueIdx = text.indexOf("⚠️ Overdue:");
-    const firstDetailIdx = text.indexOf("📝 To do (");
-    expect(overdueIdx).toBeGreaterThan(blockedIdx);
-    expect(overdueIdx).toBeLessThan(firstDetailIdx);
+    const summaryIdx = text.indexOf(standupSummaryLine(report.tasks));
+    const firstBucketIdx = text.indexOf("⚠️ Overdue (");
+    expect(summaryIdx).toBeGreaterThanOrEqual(0);
+    expect(firstBucketIdx).toBeGreaterThan(summaryIdx);
   });
 
-  it("renders Overdue: 0 when nothing is overdue (H17)", async () => {
+  it("renders 0 overdue in the summary line when nothing is overdue (H17)", async () => {
     const { service } = makeService();
     const report = await buildStandup(service, carla, NOW);
     expect(report.overdue).toBe(0);
     const text = formatStandup(report);
-    expect(text).toContain("⚠️ Overdue: 0");
+    expect(text).toContain("⚠️ 0 overdue");
   });
 
   it("does not count a past-due done task as overdue (H17)", async () => {
@@ -257,6 +262,214 @@ describe("formatStandup (standup redesign)", () => {
 
     const report = await buildStandup(service, carla, NOW);
     expect(report.overdue).toBe(0);
+  });
+});
+
+describe("formatStandup (person-first layout, #165 S3)", () => {
+  it("the summary line replaces the count block", async () => {
+    const { service } = makeService();
+    await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "Write the onboarding doc",
+      dueDate: "2026-09-05",
+    });
+    const report = await buildStandup(service, carla, NOW);
+    const text = formatStandup(report);
+
+    expect(text).toContain(standupSummaryLine(report.tasks));
+    expect(text).not.toContain("📊 Overview");
+    expect(text).not.toContain("🔄 In progress:");
+    expect(text).not.toContain("👀 In review:");
+    expect(text).not.toContain("📝 To do:");
+    expect(text).not.toContain("📦 Backlog:");
+    expect(text).not.toContain("✅ Done:");
+    expect(text).not.toContain("🚧 Blocked:");
+    expect(text).not.toContain("⚠️ Overdue:");
+  });
+
+  it("the summary line sits immediately after the two header lines, no blank line between", async () => {
+    const { service } = makeService();
+    const report = await buildStandup(service, carla, NOW);
+    const text = formatStandup(report);
+    const lines = text.split("\n");
+    const dateLineIdx = lines.indexOf(lines.find((l) => l.includes("Tuesday, September 1"))!);
+    expect(lines[dateLineIdx + 1]).toBe(standupSummaryLine(report.tasks));
+  });
+
+  it("is person-first: each member gets exactly one heading, alphabetically ordered", async () => {
+    const { service } = makeService();
+    await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "Alice's task",
+      dueDate: "2026-09-05",
+    });
+    const bobTask = await service.assignTask(carla, {
+      assigneeUsername: "bob",
+      title: "Bob's task",
+      dueDate: "2026-09-05",
+    });
+    if (!bobTask.ok) throw new Error("setup failed");
+    await service.setStatus(carla, bobTask.value.id, "in_review");
+
+    const report = await buildStandup(service, carla, NOW);
+    const text = formatStandup(report);
+
+    expect(text.split("👤 @alice").length - 1).toBe(1);
+    expect(text.split("👤 @bob").length - 1).toBe(1);
+    expect(text.indexOf("👤 @alice")).toBeLessThan(text.indexOf("👤 @bob"));
+  });
+
+  it("the old @username: heading form is gone", async () => {
+    const { service } = makeService();
+    await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "Alice's task",
+      dueDate: "2026-09-05",
+    });
+    const report = await buildStandup(service, carla, NOW);
+    const text = formatStandup(report);
+    expect(text).not.toContain("@alice:");
+  });
+
+  it("renders bucket headings with counts, in overdue -> doing -> for_approval order", async () => {
+    const { service } = makeService();
+    const overdueTask = await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "Overdue thing",
+      dueDate: "2026-08-01",
+    });
+    if (!overdueTask.ok) throw new Error("setup failed");
+    await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "Doing thing one",
+      dueDate: "2026-09-10",
+    });
+    const doingTwo = await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "Doing thing two",
+      dueDate: "2026-09-11",
+    });
+    if (!doingTwo.ok) throw new Error("setup failed");
+    await service.setStatus(carla, doingTwo.value.id, "in_progress");
+    const reviewTask = await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "For approval thing",
+      dueDate: "2026-09-12",
+    });
+    if (!reviewTask.ok) throw new Error("setup failed");
+    await service.setStatus(carla, reviewTask.value.id, "in_review");
+
+    const report = await buildStandup(service, carla, NOW);
+    const text = formatStandup(report);
+
+    expect(text).toContain("⚠️ Overdue (1)");
+    expect(text).toContain("🔄 Doing (2)");
+    expect(text).toContain("👀 For approval (1)");
+
+    const overdueIdx = text.indexOf("⚠️ Overdue (");
+    const doingIdx = text.indexOf("🔄 Doing (");
+    const approvalIdx = text.indexOf("👀 For approval (");
+    expect(overdueIdx).toBeLessThan(doingIdx);
+    expect(doingIdx).toBeLessThan(approvalIdx);
+  });
+
+  it("no HTML tags anywhere in the output", async () => {
+    const { service } = makeService();
+    const created = await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "Blocked thing",
+      dueDate: "2026-09-05",
+    });
+    if (!created.ok) throw new Error("setup failed");
+    await service.setStatus(carla, created.value.id, "blocked");
+
+    const report = await buildStandup(service, carla, NOW);
+    const text = formatStandup(report);
+    expect(text).not.toContain("<b>");
+    expect(text).not.toContain("<i>");
+    expect(text).not.toContain("<code>");
+  });
+
+  it("task lines keep formatTaskLine's shape with the two-space prefix", async () => {
+    const { service } = makeService();
+    const created = await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "Some task",
+      dueDate: "2026-09-05",
+    });
+    if (!created.ok) throw new Error("setup failed");
+
+    const report = await buildStandup(service, carla, NOW);
+    const text = formatStandup(report);
+    const taskLine = text.split("\n").find((l) => l.includes("Some task"));
+    expect(taskLine).toBeDefined();
+    expect(taskLine).toMatch(/^ {2}- #\d+/);
+    expect(taskLine).toContain(`#${created.value.id}`);
+    expect(taskLine).toContain("(due ");
+  });
+
+  it("empty cohort renders the no-open-tasks line alongside the existing header and done sections", async () => {
+    const { service } = makeService();
+    const report = await buildStandup(service, carla, NOW);
+    const text = formatStandup(report);
+    expect(text).toContain("No open tasks right now.");
+    expect(text).toContain("Cohort 5");
+    expect(text).toContain("Tuesday, September 1, 2026");
+    expect(text).toContain("✅ Done this week (0)");
+    expect(text).toContain("No tasks completed this week yet.");
+  });
+
+  it("formatStandupFiltered(report, 'overview') is exactly formatStandup(report)", async () => {
+    const { service } = makeService();
+    await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "Write the docs",
+      dueDate: "2026-09-05",
+    });
+    const report = await buildStandup(service, carla, NOW);
+    expect(formatStandupFiltered(report, "overview")).toBe(formatStandup(report));
+  });
+
+  it("the other four filter tabs keep the @username: heading form, untouched (#165 D5)", async () => {
+    const { service } = makeService();
+    const active = await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "Active thing",
+      dueDate: "2026-09-05",
+    });
+    if (!active.ok) throw new Error("setup failed");
+    await service.setStatus(carla, active.value.id, "in_progress");
+    const parked = await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "Parked thing",
+      dueDate: "2026-09-05",
+    });
+    if (!parked.ok) throw new Error("setup failed");
+    await service.setStatus(carla, parked.value.id, "backlog");
+    const reviewed = await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "Reviewed thing",
+      dueDate: "2026-09-05",
+    });
+    if (!reviewed.ok) throw new Error("setup failed");
+    await service.setStatus(carla, reviewed.value.id, "in_review");
+    const done = await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "Done thing",
+      dueDate: "2026-09-05",
+    });
+    if (!done.ok) throw new Error("setup failed");
+    await service.setStatus(carla, done.value.id, "done");
+
+    const report = await buildStandup(service, carla, NOW);
+    expect(formatStandupFiltered(report, "active")).toContain("@alice:");
+    expect(formatStandupFiltered(report, "active")).toContain("🔄 Active (");
+    expect(formatStandupFiltered(report, "backlog")).toContain("@alice:");
+    expect(formatStandupFiltered(report, "backlog")).toContain("📦 Backlog (");
+    expect(formatStandupFiltered(report, "review")).toContain("@alice:");
+    expect(formatStandupFiltered(report, "review")).toContain("👀 For Review (");
+    expect(formatStandupFiltered(report, "done")).toContain("@alice:");
+    expect(formatStandupFiltered(report, "done")).toContain("✅ Done this week (");
   });
 });
 

@@ -1,7 +1,8 @@
 import type { TaskService, TaskWithFlags } from "../service/taskService.js";
 import type { Caller, TaskStatus } from "../domain/types.js";
-import { formatTaskLine, statusLabel, STATUS_EMOJI } from "./format.js";
+import { formatTaskLine } from "./format.js";
 import { MANILA_ZONE } from "../domain/overdue.js";
+import { renderMemberBucketsPlain, standupSummaryLine } from "./standupBuckets.js";
 
 const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
 
@@ -186,36 +187,19 @@ function standupHeaderLines(report: StandupReport): string[] {
   ];
 }
 
-/** Renders the `/standup` report: cohort/date header, a status-count
- * overview, a detail section per non-done status that actually has tasks,
- * and a "done this week" list. Its own formatter, built on `StandupReport`
- * rather than the digest's own shape. This is also the `overview` filter's
- * renderer (issue #103 item 3). */
+/** Renders the `/standup` report: cohort/date header, the one-line
+ * Overdue/Doing/For approval/Backlog/Done summary, the person-first
+ * Overdue/Doing/For approval breakdown, and a "done this week" list. Its
+ * own formatter, built on `StandupReport` rather than the digest's own
+ * shape. This is also the `overview` filter's renderer (issue #103 item 3).
+ * Person-first layout per #165; the plain-text mirror of the scheduled
+ * HTML card's `buildStandupOverviewCard` (#165 S2). */
 export function formatStandup(report: StandupReport): string {
   const lines: string[] = [
     ...standupHeaderLines(report),
-    "",
-    "📊 Overview",
-    `🔄 In progress: ${report.counts.in_progress}`,
-    `👀 In review: ${report.counts.in_review}`,
-    `📝 To do: ${report.counts.todo}`,
-    `📦 Backlog: ${report.counts.backlog}`,
-    `✅ Done: ${report.counts.done}`,
-    `🚧 Blocked: ${report.counts.blocked}`,
-    `⚠️ Overdue: ${report.overdue}`,
+    standupSummaryLine(report.tasks),
+    ...renderMemberBucketsPlain(report.tasks),
   ];
-
-  for (const section of report.details) {
-    const total = section.members.reduce((n, m) => n + m.tasks.length, 0);
-    lines.push(
-      "",
-      `${STATUS_EMOJI[section.status]} ${statusLabel(section.status)} (${total})`,
-    );
-    for (const member of section.members) {
-      lines.push(`@${member.username}:`);
-      for (const t of member.tasks) lines.push("  - " + formatTaskLine(t));
-    }
-  }
 
   lines.push("", `✅ Done this week (${report.doneThisWeek.length})`);
   if (report.doneThisWeek.length === 0) {
