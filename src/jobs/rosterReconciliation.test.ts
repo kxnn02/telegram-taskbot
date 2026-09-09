@@ -160,6 +160,74 @@ describe("runRosterReconciliationJob", () => {
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
+  it("does not claim a throttle key when every remaining member is unreachable (issue #163)", async () => {
+    const throttle = new InMemoryAlertThrottleStore();
+    const { deps, sendMessage } = makeDeps({
+      api: makeMembershipApi({ 1: { status: "left" } }),
+      throttle,
+    });
+    await deps.registrations.register(1, "alice");
+    // bob and carol never registered — the DM warning about alice can't
+    // reach anyone.
+
+    await runRosterReconciliationJob(deps, "cohort-5");
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    const key = `roster-reconciliation:cohort-5:alice`;
+    expect(await throttle.claimWithWindow(key, ROSTER_RECONCILIATION_THROTTLE_WINDOW_MS)).toBe(
+      true,
+    );
+  });
+
+  it("retries an undeliverable warning on the next run and delivers it once a remaining member registers (issue #163)", async () => {
+    const throttle = new InMemoryAlertThrottleStore();
+    const { deps, sendMessage } = makeDeps({
+      api: makeMembershipApi({ 1: { status: "left" } }),
+      throttle,
+    });
+    await deps.registrations.register(1, "alice");
+
+    await runRosterReconciliationJob(deps, "cohort-5");
+    expect(sendMessage).not.toHaveBeenCalled();
+
+    await deps.registrations.register(2, "bob");
+    await runRosterReconciliationJob(deps, "cohort-5");
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage.mock.calls[0]![0]).toBe(2);
+  });
+
+  it("claims both keys when two absent members are reported in one run and the send succeeds (issue #163)", async () => {
+    const roster = new Roster([
+      { username: "alice", cohortId: "cohort-5" },
+      { username: "bob", cohortId: "cohort-5" },
+      { username: "carol", cohortId: "cohort-5" },
+      { username: "dave", cohortId: "cohort-5" },
+    ]);
+    const throttle = new InMemoryAlertThrottleStore();
+    const sendMessage = vi.fn();
+    const registrations = new InMemoryRegistrationStore();
+    await registrations.register(1, "alice");
+    await registrations.register(2, "bob");
+    await registrations.register(3, "carol");
+    await registrations.register(4, "dave");
+    const deps: RosterReconciliationDeps = {
+      bot: { api: { sendMessage } },
+      api: makeMembershipApi({ 1: { status: "left" }, 2: { status: "left" } }),
+      registrations,
+      roster,
+      cohorts: new InMemoryCohortStore({ "cohort-5": "-100999" }),
+      throttle,
+    };
+
+    await runRosterReconciliationJob(deps, "cohort-5");
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+
+    sendMessage.mockClear();
+    await runRosterReconciliationJob(deps, "cohort-5");
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
   it("routes a job failure through notifyJobFailure", async () => {
     const { deps } = makeDeps({
       cohorts: new InMemoryCohortStore({}), // unavailable -> throws

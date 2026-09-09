@@ -55,6 +55,13 @@ export interface RosterReconciliationDeps {
  * already throttles repeat reports of the same problem — reusing that path
  * is exactly how this gets reported "once as a job problem" instead of on
  * every run.
+ *
+ * Unlike the daily/weekly digests (#62's "Do not do this", ADR-0007), this
+ * job never posts to the group chat — it only DMs individuals — so a
+ * `pg_net` retry double-sending a DM is strictly better than a silently
+ * dropped departure warning (issue #163). That's why it's safe here, and
+ * not for the digests, to only spend a member's throttle claim once a
+ * warning about them was actually delivered.
  */
 export async function runRosterReconciliationJob(
   deps: RosterReconciliationDeps,
@@ -82,6 +89,30 @@ export async function runRosterReconciliationJob(
 
   if (absentUsernames.length === 0) return;
 
+  const remaining = entries.filter((entry) => !absentUsernames.includes(entry.username));
+
+  // `AlertThrottleStorePort` has no peek-only read — `claimWithWindow` is
+  // an atomic check-and-set, so calling it to decide "should this be
+  // reported today" always spends the claim, even if nobody ends up
+  // reachable (issue #163). Read-only registration lookups don't have that
+  // problem, so check reachability first: if nobody in `remaining` has
+  // ever registered, the warning cannot possibly be delivered and the
+  // throttle store is never touched, so the next run retries with a clean
+  // slate instead of finding the claim already spent.
+  let anyoneReachable = false;
+  for (const member of remaining) {
+    if (await deps.registrations.findTelegramId(member.username)) {
+      anyoneReachable = true;
+      break;
+    }
+  }
+  if (!anyoneReachable) {
+    console.error(
+      `runRosterReconciliationJob: cohort "${cohortId}" has no reachable remaining member to warn about: ${absentUsernames.join(", ")}`,
+    );
+    return;
+  }
+
   const toReport: string[] = [];
   for (const username of absentUsernames) {
     const key = `roster-reconciliation:${cohortId}:${username}`;
@@ -91,7 +122,6 @@ export async function runRosterReconciliationJob(
   if (toReport.length === 0) return;
 
   const text = `Roster reconciliation: the following member(s) appear to have left the cohort group and no longer show as present: ${toReport.join(", ")}. They still hold roster access — review and remove them manually if they've actually left.`;
-  const remaining = entries.filter((entry) => !absentUsernames.includes(entry.username));
   for (const member of remaining) {
     await sendDM(deps.bot, deps.registrations, member.username, text);
   }
