@@ -89,6 +89,21 @@ function makeThrowingRegistrations(
   return store;
 }
 
+/** Wraps a real registration store so lookups for `unreachableUsernames`
+ * resolve to `undefined`, mirroring a roster member who never ran /start —
+ * `sendDM` returns `false` rather than throwing for this case (#62). */
+function makeUnreachableRegistrations(
+  store: InMemoryRegistrationStore,
+  unreachableUsernames: string[],
+): InMemoryRegistrationStore {
+  const original = store.findTelegramId.bind(store);
+  vi.spyOn(store, "findTelegramId").mockImplementation(async (username: string) => {
+    if (unreachableUsernames.includes(username)) return undefined;
+    return original(username);
+  });
+  return store;
+}
+
 function assign(
   service: TaskService,
   overrides: Partial<{
@@ -161,6 +176,64 @@ describe("runOverdueCrossingCheck", () => {
 
     await runOverdueCrossingCheck(deps, COHORT, past);
 
+    expect(await overdueNotifications.hasNotified(COHORT, second.value.id)).toBe(true);
+  });
+
+  it("does not mark a task notified when neither the assignee nor the assigner is reachable (issue #162)", async () => {
+    const past = new Date("2026-09-20T02:00:00.000Z");
+    const { deps, service, bot, overdueNotifications, registrations } = await makeDeps(past);
+    const created = await assign(service, { assigneeUsername: "alice" }); // assigner is carla
+    if (!created.ok) throw new Error("setup failed");
+    makeUnreachableRegistrations(registrations, ["alice", "carla"]);
+
+    await runOverdueCrossingCheck(deps, COHORT, past);
+
+    expect(bot.sent).toHaveLength(0);
+    expect(await overdueNotifications.hasNotified(COHORT, created.value.id)).toBe(false);
+  });
+
+  it("marks a task notified when the assignee is unreachable but the assigner receives the DM (issue #162)", async () => {
+    const past = new Date("2026-09-20T02:00:00.000Z");
+    const { deps, service, bot, overdueNotifications, registrations } = await makeDeps(past);
+    const created = await assign(service, { assigneeUsername: "alice" }); // assigner is carla
+    if (!created.ok) throw new Error("setup failed");
+    makeUnreachableRegistrations(registrations, ["alice"]);
+
+    await runOverdueCrossingCheck(deps, COHORT, past);
+
+    expect(bot.sent).toHaveLength(1);
+    expect(await overdueNotifications.hasNotified(COHORT, created.value.id)).toBe(true);
+  });
+
+  it("retries an unmarked task on a later call and notifies once a recipient becomes reachable (issue #162)", async () => {
+    const past = new Date("2026-09-20T02:00:00.000Z");
+    const { deps, service, bot, overdueNotifications, registrations } = await makeDeps(past);
+    const created = await assign(service, { assigneeUsername: "alice" }); // assigner is carla
+    if (!created.ok) throw new Error("setup failed");
+    const spy = makeUnreachableRegistrations(registrations, ["alice", "carla"]);
+
+    await runOverdueCrossingCheck(deps, COHORT, past);
+    expect(await overdueNotifications.hasNotified(COHORT, created.value.id)).toBe(false);
+
+    vi.mocked(spy.findTelegramId).mockRestore();
+    bot.sent.length = 0;
+    await runOverdueCrossingCheck(deps, COHORT, past);
+
+    expect(bot.sent).toHaveLength(2);
+    expect(await overdueNotifications.hasNotified(COHORT, created.value.id)).toBe(true);
+  });
+
+  it("still notifies and marks a second task when the first has no reachable recipient (issue #162)", async () => {
+    const past = new Date("2026-09-20T02:00:00.000Z");
+    const { deps, service, bot, overdueNotifications, registrations } = await makeDeps(past);
+    const first = await assign(service, { assigneeUsername: "alice" }); // assigner carla
+    const second = await assign(service, { assigneeUsername: "bob" }); // assigner carla
+    if (!first.ok || !second.ok) throw new Error("setup failed");
+    makeUnreachableRegistrations(registrations, ["alice", "carla"]);
+
+    await runOverdueCrossingCheck(deps, COHORT, past);
+
+    expect(await overdueNotifications.hasNotified(COHORT, first.value.id)).toBe(false);
     expect(await overdueNotifications.hasNotified(COHORT, second.value.id)).toBe(true);
   });
 });

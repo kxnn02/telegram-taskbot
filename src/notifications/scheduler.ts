@@ -85,8 +85,22 @@ export async function runOverdueCrossingCheck(
   for (const task of crossings) {
     try {
       const text = `Task ${task.id} ("${task.title}") is now overdue — it was due ${task.dueDate} and hasn't been submitted.`;
-      await sendDM(deps.bot, deps.registrations, task.assigneeUsername, text);
-      await sendDM(deps.bot, deps.registrations, task.assignedByUsername, text);
+      const assigneeSent = await sendDM(deps.bot, deps.registrations, task.assigneeUsername, text);
+      const assignerSent = await sendDM(deps.bot, deps.registrations, task.assignedByUsername, text);
+      if (!assigneeSent && !assignerSent) {
+        // Nobody could be reached — leave the task unmarked so it's
+        // re-checked (and, once someone registers, finally notified) on
+        // every later run instead of losing the one-shot alert forever
+        // (issue #162). Accepted consequence: a task whose assignee and
+        // assigner both never register stays unmarked and is re-checked
+        // every hour indefinitely — that's two registration lookups per
+        // task per hour, and findNewOverdueCrossings already drops the
+        // task on its own once it's completed or its due date moves.
+        console.error(
+          `runOverdueCrossingCheck: task ${task.id} has no reachable recipient (assignee ${task.assigneeUsername}, assigner ${task.assignedByUsername})`,
+        );
+        continue;
+      }
       await deps.overdueNotifications.markNotified(task.cohortId, task.id);
     } catch (err) {
       // Isolate one task's failure so the rest of the crossings still get
