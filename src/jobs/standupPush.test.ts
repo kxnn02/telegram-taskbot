@@ -45,7 +45,7 @@ describe("buildStandupPushText", () => {
     const text = await buildStandupPushText({ service, model }, COHORT, NOW);
     expect(model.requests).toHaveLength(1);
     expect(text).toContain('<i>"Ship it."</i>');
-    expect(text).toContain("📊 <b>Overview</b>");
+    expect(text).toContain("📋 <b>");
   });
 
   it("renders correctly with no model available (ThrowingTextModel) — no quote, nothing else broken", async () => {
@@ -53,7 +53,7 @@ describe("buildStandupPushText", () => {
     const service = makeService();
     const text = await buildStandupPushText({ service, model }, COHORT, NOW);
     expect(text).not.toMatch(/<i>"/);
-    expect(text).toContain("📊 <b>Overview</b>");
+    expect(text).toContain("📋 <b>");
     expect(text).toContain("Consistency compounds.</i>");
   });
 });
