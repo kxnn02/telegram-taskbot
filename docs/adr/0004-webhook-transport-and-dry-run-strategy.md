@@ -72,6 +72,19 @@ free-tier 2-project cap (see ADR-0001) eating the account's entire allowance for
 projects. Mitigation: cohort-scoping in the code must be airtight before the dry run begins —
 the existing `sameCohort` checks are the load-bearing safety net.
 
+**Dedup key is global across bots, not per-bot** (raised in issue #164): `processed_telegram_updates`
+dedups solely on Telegram's `update_id` (`SupabaseProcessedUpdatesStore.claim`), but `update_id` is
+allocated per-bot by Telegram, not globally. Because this ADR puts every bot sharing this Supabase
+project's `TELEGRAM_BOT_TOKEN`-derived webhook traffic through the same table — currently the
+production bot and the dry-run bot from [ADR-0011](./0011-post-cutover-dry-run-loop.md) — two bots
+landing on the same numeric `update_id` would have one silently discard the other's update as
+"already processed," with no error and no log beyond a 200. Measured 2026-09-08: three distinct
+`update_id` ranges exist in the table, hundreds of millions apart and each advancing only single
+digits per day, so a collision is not close. Accepted as-is rather than adding a bot/cohort
+discriminator column: the fix would touch the hottest path in the system (every incoming Telegram
+update) to guard a hazard that has never fired. Revisit if a third long-lived bot is ever added to
+this shared project — the measured ranges show one may already have come and gone.
+
 ## Alternatives rejected
 
 - **A second Telegram bot for the dry run.** Unnecessary — `createBot.ts` doesn't lock itself to
