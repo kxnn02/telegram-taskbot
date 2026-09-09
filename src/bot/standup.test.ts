@@ -59,7 +59,7 @@ describe("buildStandup (standup redesign — summary + detail)", () => {
     expect(report.counts.done).toBe(0);
   });
 
-  it("groups each non-done status's tasks by assignee, skipping members with none in that status", async () => {
+  it("carries each task's assignee and status on report.tasks, for the caller's own grouping", async () => {
     const { service } = makeService();
     await service.assignTask(carla, {
       assigneeUsername: "alice",
@@ -68,14 +68,14 @@ describe("buildStandup (standup redesign — summary + detail)", () => {
     });
 
     const report = await buildStandup(service, carla, NOW);
-    const todoSection = report.details.find((d) => d.status === "todo");
-    expect(todoSection?.members.map((m) => m.username)).toEqual(["alice"]);
+    const todoTasks = report.tasks.filter((t) => t.status === "todo");
+    expect(todoTasks.map((t) => t.assigneeUsername)).toEqual(["alice"]);
 
-    const reviewSection = report.details.find((d) => d.status === "in_review");
-    expect(reviewSection).toBeUndefined();
+    const reviewTasks = report.tasks.filter((t) => t.status === "in_review");
+    expect(reviewTasks).toEqual([]);
   });
 
-  it("carries task titles in the detail groups, unlike the counts-only digest", async () => {
+  it("carries task titles on report.tasks, unlike the counts-only digest", async () => {
     const { service } = makeService();
     await service.assignTask(carla, {
       assigneeUsername: "alice",
@@ -84,10 +84,14 @@ describe("buildStandup (standup redesign — summary + detail)", () => {
     });
 
     const report = await buildStandup(service, carla, NOW);
-    const todoSection = report.details.find((d) => d.status === "todo");
-    expect(todoSection?.members[0]?.tasks.map((t) => t.title)).toEqual([
-      "Write the onboarding doc",
-    ]);
+    const todoTasks = report.tasks.filter((t) => t.status === "todo");
+    expect(todoTasks.map((t) => t.title)).toEqual(["Write the onboarding doc"]);
+  });
+
+  it("does not compute a details field — no renderer reads it anymore (#165)", async () => {
+    const { service } = makeService();
+    const report = await buildStandup(service, carla, NOW);
+    expect("details" in report).toBe(false);
   });
 
   it("lists tasks marked done within the past 7 days under doneThisWeek", async () => {

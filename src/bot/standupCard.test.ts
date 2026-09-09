@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TaskWithFlags } from "../service/taskService.js";
-import { greeting, groupByMember, renderByMember, taskLine } from "./standupCard.js";
+import { greeting, groupByMember, taskLine } from "./standupCard.js";
 import { esc } from "./html.js";
 
 // Issue #107: presentation helpers for the standup's "character" — the
@@ -178,7 +178,7 @@ describe("taskLine", () => {
   });
 });
 
-describe("groupByMember / renderByMember", () => {
+describe("groupByMember", () => {
   it("groups alphabetically by assignee username", () => {
     const tasks = [
       baseTask({ id: 1, assigneeUsername: "carla" }),
@@ -196,16 +196,5 @@ describe("groupByMember / renderByMember", () => {
 
   it("nobody yields no groups", () => {
     expect(groupByMember([])).toEqual([]);
-  });
-
-  it("renderByMember renders a 👤 heading per member then one taskLine per task", () => {
-    const tasks = [
-      baseTask({ id: 1, assigneeUsername: "alice", title: "Alice task" }),
-      baseTask({ id: 2, assigneeUsername: "bob", title: "Bob task" }),
-    ];
-    const text = renderByMember(tasks, { showCode: false, showStatus: false, showDue: false });
-    expect(text).toBe(
-      "\n👤 <b>@alice</b>\n▸ Alice task\n\n👤 <b>@bob</b>\n▸ Bob task",
-    );
   });
 });
