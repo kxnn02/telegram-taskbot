@@ -1,9 +1,9 @@
 import { DateTime } from "luxon";
 import type { StandupReport } from "./standup.js";
 import { formatCohortName, formatReportDate } from "./standup.js";
-import { greeting, renderByMember } from "./standupCard.js";
+import { greeting } from "./standupCard.js";
 import { esc } from "./html.js";
-import { STATUS_EMOJI, statusLabel } from "./format.js";
+import { standupSummaryLine, renderMemberBucketsHtml } from "./standupBuckets.js";
 import { getWeekBounds, formatWeekLabel } from "../date/weekBounds.js";
 import { MANILA_ZONE } from "../domain/overdue.js";
 import type { TaskWithFlags } from "../service/taskService.js";
@@ -18,6 +18,13 @@ import type { TaskWithFlags } from "../service/taskService.js";
  * here — the caller is responsible for calling `dailyQuote` (deviation #4;
  * see `standupPush.ts`), which is also what keeps this function itself
  * synchronous and trivially testable with no model at all.
+ *
+ * Issue #165 (S2): the header is followed by `standupSummaryLine` and the
+ * three person-first buckets from `standupBuckets.ts` (Overdue / Doing /
+ * For approval), not a per-status count block and detail loop. This is a
+ * deliberate divergence from Devie's own `buildStandupPage("overview", ...)`,
+ * which this file otherwise carbon-copies — a future parity pass must not
+ * "restore" the status-first grouping this replaced.
  *
  * This is the **only** place the quote and the books-reminder line appear —
  * the plain-text `/standup` command's `formatStandup`/`formatStandupFiltered`
@@ -63,24 +70,10 @@ export function buildStandupOverviewCard(
     "",
     `📋 <b>${esc(formatCohortName(report.cohortId))} — Daily Stand Up</b>`,
     `<i>${esc(formatReportDate(report.today))}</i>`,
-    "",
-    "📊 <b>Overview</b>",
-    `🔄 In progress: ${report.counts.in_progress}`,
-    `👀 In review: ${report.counts.in_review}`,
-    `📝 To do: ${report.counts.todo}`,
-    `📦 Backlog: ${report.counts.backlog}`,
-    `✅ Done: ${report.counts.done}`,
-    `🚧 Blocked: ${report.counts.blocked}`,
-    `⚠️ Overdue: ${report.overdue}`,
+    standupSummaryLine(report.tasks),
   ];
 
-  for (const section of report.details) {
-    const total = section.members.reduce((n, m) => n + m.tasks.length, 0);
-    lines.push("", `${STATUS_EMOJI[section.status]} <b>${esc(statusLabel(section.status))} (${total})</b>`);
-    const tasks = section.members.flatMap((m) => m.tasks);
-    const rendered = renderByMember(tasks);
-    if (rendered) lines.push(...rendered.split("\n").filter((l, i) => !(i === 0 && l === "")));
-  }
+  lines.push(...renderMemberBucketsHtml(report.tasks));
 
   const bounds = getWeekBounds(manilaISODate(opts.now));
   const thisWeekLabel = formatWeekLabel(bounds.thisWeekStart, bounds.thisWeekEnd);
