@@ -1,8 +1,89 @@
 # Changelog
 
-A running log of what's shipped, for interns, higher-ups, and anyone else following along. Not a
-technical changelog — see `git log` or the GitHub issues for that level of detail. See
-`PRD.md` for the full design and `CONTEXT.md` for why things were built the way they were.
+What's shipped, newest first — written for everyone in the cohort, not just developers. For
+code-level detail see `git log` or the GitHub issues; for current behaviour see
+[`USER_GUIDE.md`](./USER_GUIDE.md) and [`PRD.md`](./PRD.md).
+
+**Reading older entries**: each one was accurate on its date, and later entries supersede earlier
+ones without editing them. If an old entry and the user guide disagree, the guide is right.
+
+## 2026-09-09 — The standup is now organised by person, and the bot is called Devie
+
+- **The morning standup groups by person, not by status** ([#165](https://github.com/kxnn02/telegram-taskbot/issues/165)).
+  Instead of a section per status, the card now has a heading per member with their open tasks
+  sorted into three buckets: ⚠️ **Overdue**, 🔄 **Doing**, and 👀 **For approval**. The summary
+  line above it still carries the counts. `/standup` typed on demand shows the same layout.
+  The point is that you can find your own name once and see everything you owe, rather than
+  scanning five status sections for it.
+- **The production bot is now named "Devie"**, with Devie's profile picture
+  ([#170](https://github.com/kxnn02/telegram-taskbot/issues/170)). Its handle is unchanged
+  (`@devcon_cohort5_taskbot`) — that's how to tell it apart from the original Devie, which now
+  looks identical. The dry-run bot was deliberately left with its own name so the two can't be
+  confused.
+- **Two notification bugs that silently lost messages** are fixed. An overdue alert is
+  sent once and once only, and it used to be marked "sent" even when nobody could actually be
+  DM'd — losing that one-shot warning forever
+  ([#162](https://github.com/kxnn02/telegram-taskbot/issues/162)). Separately, the daily
+  roster check spent its once-per-day allowance *before* trying to send, so a warning that
+  failed to deliver was suppressed for another 24 hours
+  ([#163](https://github.com/kxnn02/telegram-taskbot/issues/163)).
+
+## 2026-09-08 — Notifications: one home for each piece of information
+
+Every morning the cohort was being told the same three overdue tasks **three times** — once in
+the group's standup card, once in a group status post, and once in a DM. Worse, the DM everyone
+received was the old management-oversight report: the interns were getting the cohort-wide view
+and the higher-ups were getting nothing, because none of them had ever DM'd the bot. Found while
+verifying production readiness right after the daily standup was switched on.
+
+The rule now ([#143](https://github.com/kxnn02/telegram-taskbot/issues/143)): **personal
+information goes to a DM, cohort-wide information goes to the group once, and nothing appears in
+both.**
+
+- **The 10:00am group post is gone** ([#144](https://github.com/kxnn02/telegram-taskbot/issues/144)).
+  The group already has the 8:05am standup card; it doesn't need a second, thinner version of the
+  same thing two hours later.
+- **Your daily digest DM is now about you** ([#145](https://github.com/kxnn02/telegram-taskbot/issues/145)) —
+  your own open tasks, nothing about anyone else's. It's skipped entirely when you have none.
+- **Blocked reasons show up on the standup card** ([#146](https://github.com/kxnn02/telegram-taskbot/issues/146)).
+  The sentence you typed when you got stuck was the one useful thing in the deleted oversight
+  block, so it moved onto the card rather than being lost with it.
+- **The weekly digest is now personal too, and moved off the collision** ([#147](https://github.com/kxnn02/telegram-taskbot/issues/147)).
+  Mondays used to fire the weekly and daily digests in the same minute. The weekly one now sends
+  at 8:10am and carries what *you* completed in the last 7 days — not your open tasks, which your
+  10:00am digest already lists.
+
+This replaces the "group digests are counts-only" promise made in the earlier entries below. The
+standup card does name task titles per person — a deliberate trade for the cohort having one
+shared morning view.
+
+## 2026-09-08 — A missing setting now fails the deploy instead of taking the bot down
+
+On 2026-09-07 the bot returned an error to **every** Telegram message for 17 hours. One
+environment variable (`GROQ_API_KEY`, used by the language features) was missing, and the code
+loaded all its dependencies up front with no path for one of them failing — so a setting needed
+by one feature broke every command
+([#142](https://github.com/kxnn02/telegram-taskbot/issues/142)).
+
+Three fixes, so this class of outage can't repeat
+([ADR-0015](./docs/adr/0015-required-environment-variables-are-asserted-at-build-time.md)):
+
+- **The language features now fail when used, not when loaded** ([#155](https://github.com/kxnn02/telegram-taskbot/issues/155)) —
+  a missing key degrades bulk-paste and status guessing instead of 500ing `/help`.
+- **A missing required setting now fails the build** ([#156](https://github.com/kxnn02/telegram-taskbot/issues/156)).
+  The deploy stops before it can go live, naming what's absent, rather than shipping and breaking
+  at runtime.
+- **The list of required settings is written down** ([#157](https://github.com/kxnn02/telegram-taskbot/issues/157)),
+  in one file the build reads directly, so it can't drift from what's documented.
+
+Two other pieces of hardening shipped alongside:
+
+- **The production and dry-run loops can no longer cross** ([#148](https://github.com/kxnn02/telegram-taskbot/issues/148)).
+  The webhook tooling read one variable as "the production bot" when it actually meant "whichever
+  bot this instance is", which is how a local dashboard's Test button could have posted into the
+  live cohort group.
+- **Scheduled jobs now record whether they ran** ([#43](https://github.com/kxnn02/telegram-taskbot/issues/43)).
+  A silent cron failure was previously invisible after Vercel's short log window expired.
 
 ## 2026-09-08 — Devie parity pass 2 complete: task-ref keywords, onsite defaults, Devie's reply style, a ported dashboard, and a scheduled standup
 

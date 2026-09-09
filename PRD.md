@@ -1,16 +1,11 @@
 # PRD: DevCon PH Cohort 5 Task Bot
 
-> **Current spec.** This describes the bot as it actually behaves today — live in production,
-> re-platformed onto Vercel + Supabase, and rebuilt to be a carbon copy of **Devie**, another
-> DevCon bot the cohort already uses daily. For the original v1 design this replaced, see
-> [`docs/PRD-v1-original.md`](./docs/PRD-v1-original.md). For the decisions that connect the two,
-> see `CONTEXT.md` and [`docs/adr/`](./docs/adr/) — most significantly
-> [ADR-0009](./docs/adr/0009-devie-parity-command-redesign.md) (direct one-line commands, free-set
-> statuses), [ADR-0013](./docs/adr/0013-remove-access-control-for-devie-parity.md) (every role
-> and permission check removed), and
-> [ADR-0014](./docs/adr/0014-devie-parity-pass-2.md) (task-ref keyword lookup, onsite-day
-> defaults, Devie's reply formatting, the ported dashboard's Overview/settings pages, and the
-> scheduled daily standup).
+> **Current spec** — what the bot does today, live in production. It is a deliberate copy of
+> **Devie**, another DevCon bot the cohort already uses daily.
+>
+> For how it's built, see [`CONTEXT.md`](./CONTEXT.md); for why, [`docs/adr/`](./docs/adr/). The
+> v1 design this replaced is archived at
+> [`docs/PRD-v1-original.md`](./docs/PRD-v1-original.md).
 
 ## 1. Overview
 
@@ -113,8 +108,10 @@ one is for.
   instead of being rejected outright.
 - **`/done`** / **`/complete`** (or **`/completed`**) — fixed-status shortcuts onto the same
   mechanism as `/update`, both accepting the same bulk-ref grammar.
-- **`/standup`** — an on-demand report for the whole cohort, with buttons to switch between
-  Overview, Active, Backlog, Done, and In review.
+- **`/standup`** — an on-demand report for the whole cohort, grouped by person into Overdue /
+  Doing / For approval buckets, with buttons to switch between Overview, Active, Backlog, Done,
+  and In review. Same content as the scheduled morning card (§8), and unaffected by that card's
+  on/off switch.
 
 No wizards, no multi-step forms, no inline confirmation buttons for anything other than
 `/tasks`/`/standup`'s paging and filters.
@@ -154,25 +151,30 @@ them proactively.
 
 ## 8. Notifications (proactive, via DM and group)
 
-- **On any status change** (via `/update`, `/done`, `/complete`/`/completed`, single or bulk) —
-  both the assignee and whoever originally assigned the task get a DM naming the new status,
-  except whoever made the change. A bulk update collapses this to **one summary DM per
-  recipient**, not one per task.
-- **Due-date reminder** → about a day before the due date.
-- **Overdue crossing** → a single, one-time notification the moment an open task crosses its due
-  date, sent to both the assignee and the assigner.
-- **Weekly digest** (Mondays) and **daily standup digest** — both DM'd individually and posted as
-  a group summary. The group summary is deliberately **counts-only** — never task titles or
-  descriptions — to give the cohort shared visibility without turning into a public callout of
-  who's behind. This restraint holds even though the bot can read (and post detail into, via
-  commands) the full group chat — it was never about read access, only about not automating a
-  callout.
-- **Standup, with character**: `/standup` (and a separate, secret-gated push endpoint) render a
-  daily quote, a greeting, and emoji priority/status badges alongside the counts — matching
-  Devie's own standup presentation. The push endpoint now also runs on a schedule (Supabase
-  `pg_cron`, 00:05 UTC / 8:05am Asia/Manila daily), gated by an Auto-standup on/off switch on the
-  dashboard's settings page (default off); the on-demand `/standup` command is unaffected by the
-  switch either way.
+**One home per piece of information** (issue #143): personal — "what do I have to do?" — goes to
+a DM; cohort-wide — "how are we doing?" — goes to the group, once, in the morning standup card.
+No message carries both. Everything below follows from that rule.
+
+| When (Asia/Manila) | Channel | What |
+|---|---|---|
+| On any status change | DM | Assignee **and** assigner, minus whoever made the change. A bulk update collapses to one summary DM per recipient, not one per task |
+| 8:05am daily | **Group** | The standup card — see below |
+| 8:10am Mondays | DM | What that member completed in the trailing 7 days. Suppressed when nothing was |
+| 9:00am daily | DM | Due-tomorrow reminder, assignee only |
+| 10:00am daily | DM | That member's own open tasks, and nothing about anyone else's. Suppressed when empty |
+| 12:00pm daily | DM | Roster reconciliation, only when someone has left the group |
+| Hourly | DM | Overdue crossing — one time only, to assignee and assigner |
+
+**The standup card** is the cohort's one shared view: a greeting, a daily quote, emoji
+priority/status badges, and every open task grouped **by person** into three buckets — Overdue,
+Doing, For approval (issue #165) — with the reason shown on any blocked task. It runs on Supabase
+`pg_cron` and is gated by an Auto-standup on/off switch on the dashboard's settings page (default
+off). The on-demand `/standup` command renders the same thing and ignores the switch.
+
+**Superseded**: earlier versions posted a counts-only daily digest to the group and gave every
+member a cohort-wide oversight block in their DM. Both are gone — the card names task titles per
+person, which trades away the old "never automate a public callout" restraint in exchange for the
+cohort having a single shared morning view. See `CONTEXT.md` for the reasoning.
 
 No standup response-collection (a "what did you do yesterday" prompt-and-reply flow) and no
 overdue-nagging loop — unchanged from the original design's deferrals (§11). All scheduled
@@ -184,11 +186,19 @@ notifications run on **Asia/Manila time**.
 - **Auth**: Telegram Login Widget (official, free) — no separate password system. Logging in
   still requires an existing roster row (i.e., having messaged the bot at least once); nothing
   distinguishes members further once logged in.
-- **Features**: an Overview landing page at `/dashboard` (the app's `/` redirects there), a kanban
-  board (drag-and-drop, tags), full task list/oversight filterable by status or member, task
-  creation and editing, a settings page (Appearance, Bot Connection, Daily Standup — including the
-  Auto-standup on/off switch), a team page, a paginated activity-log view, light/dark theming, and
-  a stats view (tasks completed per member, completion rate).
+- **Pages** — five, plus login. The app's `/` redirects to the first.
+
+  | Page | Contents |
+  |---|---|
+  | Overview (`/dashboard`) | Seven cohort-wide counts: total, completed (with rate), in progress, in review, blocked, urgent, overdue |
+  | Board | Kanban columns per status, drag-and-drop ordering, tags, and the create/edit task dialog |
+  | Team | Every cohort member, editable, with total/new-this-week/new-this-month counts |
+  | Activity | Keyset-paginated audit log |
+  | Settings | Appearance, Bot Connection, and Daily Standup (including the Auto-standup switch) |
+
+- **Task editing lives on the Board's dialog** — it is the only way to change a task's
+  description, title, due date, or assignee, since the bot's commands don't touch those fields.
+- **Theming**: light/dark toggle over the same DEVCON design tokens used everywhere else.
 
 ## 10. Reusability
 

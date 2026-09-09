@@ -1,7 +1,8 @@
 # ADR-0011: Post-cutover dry-run loop on a second bot
 
-- **Status**: Accepted; code and docs implemented, awaiting the one-time manual setup in
-  `docs/runbooks/dry-run-loop.md` (BotFather bot, dump-group id, Vercel branch env vars)
+- **Status**: Accepted, implemented — the one-time setup in `docs/runbooks/dry-run-loop.md`
+  (BotFather bot, dump-group id, Vercel branch env vars) was completed 2026-09-04; the loop has
+  gated every change since, with both webhooks live simultaneously
 - **Date**: 2026-09-03
 - **Depends on**: ADR-0004, ADR-0005
 
