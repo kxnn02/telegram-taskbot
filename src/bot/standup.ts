@@ -6,27 +6,9 @@ import { renderMemberBucketsPlain, standupSummaryLine } from "./standupBuckets.j
 
 const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
 
-/** Order the five non-done statuses appear in both the overview and the
- * detail sections below. The old cohort's standup bot only ever detailed
- * the review queue, so a blocked or in-progress task stayed invisible
- * behind a bare count — every status that can hold open work gets the same
- * per-member breakdown here instead. */
-const DETAIL_STATUS_ORDER: TaskStatus[] = [
-  "in_progress",
-  "in_review",
-  "todo",
-  "backlog",
-  "blocked",
-];
-
 export interface StandupMemberGroup {
   username: string;
   tasks: TaskWithFlags[];
-}
-
-export interface StandupDetailSection {
-  status: TaskStatus;
-  members: StandupMemberGroup[];
 }
 
 /** `/standup`'s own report shape — deliberately distinct from the
@@ -39,7 +21,6 @@ export interface StandupReport {
   today: Date;
   counts: Record<TaskStatus, number>;
   overdue: number;
-  details: StandupDetailSection[];
   doneThisWeek: TaskWithFlags[];
   /** Every task in the caller's cohort, as fetched. Added by issue #103
    * item 3 so the filter views can group across statuses (Devie's "Active"
@@ -116,10 +97,10 @@ function groupByAssignee(tasks: TaskWithFlags[]): StandupMemberGroup[] {
     }));
 }
 
-/** Cohort-wide status counts and per-status/per-member detail, built from
- * every task in the caller's cohort — including `done` ones, so the
- * overview's `done` count and the `doneThisWeek` list both have data to
- * draw from. */
+/** Cohort-wide status counts, built from every task in the caller's cohort —
+ * including `done` ones, so the overview's `done` count and the
+ * `doneThisWeek` list both have data to draw from. Person-first grouping is
+ * computed from `report.tasks` by `standupBuckets.ts` (#165), not here. */
 export async function buildStandup(
   service: TaskService,
   caller: Caller,
@@ -140,18 +121,13 @@ export async function buildStandup(
 
   const overdue = tasks.filter((t) => t.overdue).length;
 
-  const details = DETAIL_STATUS_ORDER.map((status) => ({
-    status,
-    members: groupByAssignee(tasks.filter((t) => t.status === status)),
-  })).filter((section) => section.members.length > 0);
-
   const doneThisWeek = tasks
     .filter(
       (t) => t.status === "done" && now.getTime() - Date.parse(t.updatedAt) <= MS_PER_WEEK,
     )
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
-  return { cohortId: caller.cohortId, today: now, counts, overdue, details, doneThisWeek, tasks };
+  return { cohortId: caller.cohortId, today: now, counts, overdue, doneThisWeek, tasks };
 }
 
 /** "cohort-5" -> "Cohort 5". Roster cohort ids are lowercase hyphenated

@@ -15,10 +15,9 @@ import { esc } from "./html.js";
  * requirement is interpreted as scoped to the new push card, not a rewrite
  * of the already-tested in-chat command).
  *
- * `esc`, `taskLine` and the member grouping below are Devie's own
+ * `esc`, `taskLine` and `groupByMember` below are Devie's own
  * `lib/standup.ts` helpers (`esc` @ line 59, `taskLine` @ line 95,
- * `groupByMember`/`renderByMember` @ lines 110/124), carbon-copied per this
- * ticket's rules 1-3.
+ * `groupByMember` @ line 110), carbon-copied per this ticket's rules 1-3.
  */
 
 /** Devie's three Manila-hour greeting bands (`lib/standup.ts:134`), copied
@@ -91,17 +90,4 @@ export function groupByMember(tasks: TaskWithFlags[]): MemberGroup[] {
   return [...byUsername.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([username, memberTasks]) => ({ username, tasks: memberTasks }));
-}
-
-/** Devie's `renderByMember(tasks, opts)` (`lib/standup.ts:124`): a blank
- * line, then `👤 <b>Name</b>`, then one `taskLine` per task — repeated per
- * member. Uses `@username` rather than Devie's display name, matching every
- * other rendering in this bot (identity here *is* the roster username). */
-export function renderByMember(tasks: TaskWithFlags[], opts: TaskLineOptions = {}): string {
-  const lines: string[] = [];
-  for (const group of groupByMember(tasks)) {
-    lines.push("", `👤 <b>@${esc(group.username)}</b>`);
-    for (const t of group.tasks) lines.push(taskLine(t, opts));
-  }
-  return lines.join("\n");
 }
