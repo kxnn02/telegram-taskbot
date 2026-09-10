@@ -20,10 +20,10 @@ describe("CERT_TIPS", () => {
     );
   });
 
-  it("no rendered tip (HTML, including attribution) exceeds 220 characters", () => {
+  it("no rendered tip (HTML, including attribution and header) exceeds 240 characters", () => {
     for (const tip of CERT_TIPS) {
       const html = renderCertTipHtml(tip);
-      expect(html.length).toBeLessThanOrEqual(220);
+      expect(html.length).toBeLessThanOrEqual(240);
     }
   });
 });
@@ -76,13 +76,13 @@ describe("renderCertTipHtml / renderCertTipPlain", () => {
 
   it("renders the HTML variant with the expected shape", () => {
     expect(renderCertTipHtml(tip)).toBe(
-      "💡 <b>Trust your prep and stop putting it off.</b> Don't let anxiety delay you.\n— <i>Kim Fajardo</i>",
+      "🎓 CCA-F Cert Tip\n💡 <b>Trust your prep and stop putting it off.</b> Don't let anxiety delay you.\n— <i>Kim Fajardo</i>",
     );
   });
 
   it("renders the plain variant with the expected shape", () => {
     expect(renderCertTipPlain(tip)).toBe(
-      "💡 Trust your prep and stop putting it off. Don't let anxiety delay you.\n— Kim Fajardo",
+      "🎓 CCA-F Cert Tip\n💡 Trust your prep and stop putting it off. Don't let anxiety delay you.\n— Kim Fajardo",
     );
   });
 
@@ -97,7 +97,9 @@ describe("renderCertTipHtml / renderCertTipPlain", () => {
 
   it("emits no trailing space after the lead when body is empty", () => {
     const noBody = { id: 3, lead: "Just a lead.", body: "", from: "Someone" };
-    expect(renderCertTipHtml(noBody)).toBe("💡 <b>Just a lead.</b>\n— <i>Someone</i>");
-    expect(renderCertTipPlain(noBody)).toBe("💡 Just a lead.\n— Someone");
+    expect(renderCertTipHtml(noBody)).toBe(
+      "🎓 CCA-F Cert Tip\n💡 <b>Just a lead.</b>\n— <i>Someone</i>",
+    );
+    expect(renderCertTipPlain(noBody)).toBe("🎓 CCA-F Cert Tip\n💡 Just a lead.\n— Someone");
   });
 });

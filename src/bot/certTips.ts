@@ -247,12 +247,14 @@ export function selectCertTipForDate(now: Date): CertTip {
 /** Mirrors `renderMemberBucketsHtml`/`renderMemberBucketsPlain` (this
  * codebase's existing HTML/plain rendering-pair pattern, `standupBuckets.ts`):
  * one function per surface, both driven off the same data. */
+const CERT_TIP_HEADER = "🎓 CCA-F Cert Tip";
+
 export function renderCertTipHtml(tip: CertTip): string {
   const bodyPart = tip.body ? ` ${esc(tip.body)}` : "";
-  return `💡 <b>${esc(tip.lead)}</b>${bodyPart}\n— <i>${esc(tip.from)}</i>`;
+  return `${CERT_TIP_HEADER}\n💡 <b>${esc(tip.lead)}</b>${bodyPart}\n— <i>${esc(tip.from)}</i>`;
 }
 
 export function renderCertTipPlain(tip: CertTip): string {
   const bodyPart = tip.body ? ` ${tip.body}` : "";
-  return `💡 ${tip.lead}${bodyPart}\n— ${tip.from}`;
+  return `${CERT_TIP_HEADER}\n💡 ${tip.lead}${bodyPart}\n— ${tip.from}`;
 }
