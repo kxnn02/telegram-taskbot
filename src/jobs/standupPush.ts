@@ -6,6 +6,7 @@ import { buildStandup } from "../bot/standup.js";
 import { buildStandupOverviewCard } from "../bot/standupOverviewCard.js";
 import { dailyQuote } from "../bot/standupQuote.js";
 import { chunkMessage } from "../bot/format.js";
+import { renderCertTipHtml, selectCertTipForDate } from "../bot/certTips.js";
 
 /**
  * Issue #107, item 5: the standup push endpoint — Devie's
@@ -68,7 +69,8 @@ export async function buildStandupPushText(
 ): Promise<string> {
   const report = await buildStandup(deps.service, pushCaller(cohortId), now);
   const quote = await dailyQuote(deps.model);
-  return buildStandupOverviewCard(report, { now, quote });
+  const certTip = renderCertTipHtml(selectCertTipForDate(now));
+  return buildStandupOverviewCard(report, { now, quote, certTip });
 }
 
 export interface StandupPushSendDeps extends StandupPushCoreDeps {

@@ -54,9 +54,11 @@ import {
 import {
   buildStandup,
   buildStandupKeyboard,
+  formatStandup,
   formatStandupFiltered,
   parseStandupCallback,
 } from "./standup.js";
+import { renderCertTipPlain, selectCertTipForDate } from "./certTips.js";
 import {
   buildTasksPage,
   fetchTaskPages,
@@ -354,13 +356,20 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   // `/standup` gains Devie's five filter buttons (#103 item 3). It stays
   // plain text — only `/tasks` copies Devie's HTML — so the keyboard is the
   // whole change here; the overview body is the existing `formatStandup`.
+  //
+  // Issue #180: the initial `/standup` reply calls `formatStandup` directly
+  // (not `formatStandupFiltered`) so it alone can pass today's plain-text
+  // cert tip. Tapping a filter button — including Overview — re-renders
+  // through `formatStandupFiltered` below with no tip, per spec.
   bot.command(
     "standup",
     withCaller(async (ctx, caller) => {
-      const report = await buildStandup(service, caller, clock.now());
+      const now = clock.now();
+      const report = await buildStandup(service, caller, now);
+      const certTipPlain = renderCertTipPlain(selectCertTipForDate(now));
       await sendCard(
         ctx,
-        formatStandupFiltered(report, "overview"),
+        formatStandup(report, certTipPlain),
         buildStandupKeyboard(report, "overview"),
         false,
       );

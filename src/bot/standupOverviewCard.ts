@@ -26,9 +26,12 @@ import type { TaskWithFlags } from "../service/taskService.js";
  * which this file otherwise carbon-copies — a future parity pass must not
  * "restore" the status-first grouping this replaced.
  *
- * This is the **only** place the quote and the books-reminder line appear —
- * the plain-text `/standup` command's `formatStandup`/`formatStandupFiltered`
- * (issue #103) are untouched, including their own `overview` filter.
+ * Issue #180: the books-reminder line is gone, replaced by a rotating
+ * certification tip (`certTips.ts`) that always closes the card, quote or no
+ * quote. The quote is still only ever rendered here in the pushed card —
+ * `/standup`'s `formatStandup` never calls the model — but the tip itself is
+ * no longer exclusive to this card: `formatStandup`'s unfiltered view also
+ * appends its own plain-text render of the same day's tip.
  */
 
 export interface StandupOverviewCardOptions {
@@ -37,6 +40,11 @@ export interface StandupOverviewCardOptions {
    * model was unavailable/failed/returned nothing — in which case the quote
    * is omitted entirely, with no stray blank line left behind. */
   quote: string;
+  /** Already-rendered HTML certification tip (`renderCertTipHtml`, selected
+   * by `selectCertTipForDate`) — the caller renders it, same deviation as
+   * `quote` above (issue #180). Always present; unlike the quote, static
+   * content can't fail, so there's no empty-string fallback path here. */
+  certTip: string;
 }
 
 function manilaISODate(date: Date): string {
@@ -54,12 +62,6 @@ function doneInRange(tasks: TaskWithFlags[], startISO: string, endISO: string): 
     return day >= startISO && day <= endISO;
   });
 }
-
-/** Devie's line 261, copied verbatim — including the reference to a Cohort
- * 4 program element (see this ticket's PR body for the flag the ticket
- * itself asks to raise rather than silently reword). */
-const BOOKS_REMINDER_LINE =
-  "📚 <b>Reminder:</b> <i>Read and finish your assigned books, cohorts! Consistency compounds.</i>";
 
 export function buildStandupOverviewCard(
   report: StandupReport,
@@ -95,11 +97,11 @@ export function buildStandupOverviewCard(
     for (const t of doneLastWeek) lines.push(`▸ ${esc(t.title)} (@${esc(t.assigneeUsername)})`);
   }
 
-  lines.push("", BOOKS_REMINDER_LINE);
-
   if (opts.quote) {
     lines.push("", opts.quote);
   }
+
+  lines.push("", opts.certTip);
 
   return lines.join("\n");
 }

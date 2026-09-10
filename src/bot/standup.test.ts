@@ -15,6 +15,7 @@ import {
   VALID_STANDUP_FILTERS,
 } from "./standup.js";
 import { standupSummaryLine } from "./standupBuckets.js";
+import { renderCertTipPlain, selectCertTipForDate } from "./certTips.js";
 
 const COHORT = "cohort-5";
 const NOW = new Date("2026-09-01T02:00:00.000Z"); // Tuesday
@@ -706,5 +707,35 @@ describe("formatStandupFiltered (issue #103 item 3)", () => {
     for (const filter of VALID_STANDUP_FILTERS) {
       expect(formatStandupFiltered(report, filter)).not.toContain("Secret task");
     }
+  });
+
+  it("carries no cert tip, for every one of the five filters (issue #180)", async () => {
+    const { service } = makeService();
+    await seed(service, "Queued", "todo");
+    const report = await buildStandup(service, carla, NOW);
+    const tip = renderCertTipPlain(selectCertTipForDate(NOW));
+    for (const filter of VALID_STANDUP_FILTERS) {
+      expect(formatStandupFiltered(report, filter)).not.toContain(tip);
+      expect(formatStandupFiltered(report, filter)).not.toContain("💡");
+    }
+  });
+});
+
+describe("formatStandup — cert tip (issue #180)", () => {
+  it("ends with the plain-text cert tip when one is passed in", async () => {
+    const { service } = makeService();
+    const report = await buildStandup(service, carla, NOW);
+    const tip = renderCertTipPlain(selectCertTipForDate(NOW));
+
+    const text = formatStandup(report, tip);
+
+    expect(text.endsWith(tip)).toBe(true);
+  });
+
+  it("carries no tip when none is passed in", async () => {
+    const { service } = makeService();
+    const report = await buildStandup(service, carla, NOW);
+
+    expect(formatStandup(report)).not.toContain("💡");
   });
 });
