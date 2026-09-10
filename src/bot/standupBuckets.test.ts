@@ -9,6 +9,9 @@ import {
   renderMemberBucketsHtml,
   renderMemberBucketsPlain,
   standupSummaryLine,
+  reviewQueue,
+  renderReviewQueueHtml,
+  renderReviewQueuePlain,
 } from "./standupBuckets.js";
 
 // Issue #166 (S1 of #165): the shared Overdue / Doing / For approval bucket
@@ -257,5 +260,175 @@ describe("renderMemberBucketsPlain", () => {
 
   it("empty input -> the no-open-tasks plain line", () => {
     expect(renderMemberBucketsPlain([])).toEqual(["", NO_OPEN_TASKS_PLAIN]);
+  });
+});
+
+describe("reviewQueue", () => {
+  it("includes an overdue in_review task (the critical trap)", () => {
+    const tasks = [
+      baseTask({
+        id: 99,
+        title: "Critical review",
+        status: "in_review",
+        overdue: true,
+        daysOverdue: 3,
+        dueDate: "2026-09-05",
+      }),
+    ];
+    expect(reviewQueue(tasks)).toHaveLength(1);
+    expect(reviewQueue(tasks)[0]!.id).toBe(99);
+  });
+
+  it("excludes backlog, todo, in_progress, blocked, done", () => {
+    const tasks = [
+      baseTask({ id: 1, status: "backlog", overdue: false }),
+      baseTask({ id: 2, status: "todo", overdue: false }),
+      baseTask({ id: 3, status: "in_progress", overdue: false }),
+      baseTask({ id: 4, status: "blocked", overdue: false }),
+      baseTask({ id: 5, status: "done", overdue: false }),
+    ];
+    expect(reviewQueue(tasks)).toEqual([]);
+  });
+
+  it("sorts by due date then id", () => {
+    const tasks = [
+      baseTask({ id: 9, status: "in_review", dueDate: "2026-09-15", overdue: false }),
+      baseTask({ id: 5, status: "in_review", dueDate: "2026-09-10", overdue: false }),
+      baseTask({ id: 3, status: "in_review", dueDate: "2026-09-10", overdue: false }),
+    ];
+    const result = reviewQueue(tasks);
+    expect(result.map((t) => t.id)).toEqual([3, 5, 9]);
+  });
+
+  it("empty input -> empty output", () => {
+    expect(reviewQueue([])).toEqual([]);
+  });
+});
+
+describe("renderReviewQueueHtml", () => {
+  it("renders the header with task count", () => {
+    const tasks = [
+      baseTask({ id: 1, status: "in_review", overdue: false }),
+      baseTask({ id: 2, status: "in_review", overdue: false }),
+    ];
+    const lines = renderReviewQueueHtml(tasks);
+    expect(lines[0]).toBe("");
+    expect(lines[1]).toBe("👀 <b>For Review and Approval — Dom / Jedd</b>");
+  });
+
+  it("renders one task with showStatus=false", () => {
+    const tasks = [
+      baseTask({
+        id: 14,
+        title: "Module 3 slide deck",
+        status: "in_review",
+        overdue: false,
+        priority: "urgent",
+        dueDate: "2026-09-12",
+      }),
+    ];
+    const lines = renderReviewQueueHtml(tasks);
+    expect(lines[2]).toContain("T-014");
+    expect(lines[2]).toContain("Module 3 slide deck");
+    expect(lines[2]).toContain("@alice");
+    expect(lines[2]).not.toContain("👀");
+  });
+
+  it("renders overdue task with ⚠️", () => {
+    const tasks = [
+      baseTask({
+        id: 1,
+        status: "in_review",
+        overdue: true,
+        dueDate: "2026-09-05",
+      }),
+    ];
+    const lines = renderReviewQueueHtml(tasks);
+    expect(lines[2]).toContain("⚠️");
+  });
+
+  it("HTML-escapes title and username", () => {
+    const tasks = [
+      baseTask({
+        id: 1,
+        title: "Test <b>bold</b> & amp",
+        assigneeUsername: "a<b",
+        status: "in_review",
+        overdue: false,
+      }),
+    ];
+    const lines = renderReviewQueueHtml(tasks);
+    expect(lines[2]).toContain(esc("Test <b>bold</b> & amp"));
+    expect(lines[2]).toContain(esc("a<b"));
+  });
+
+  it("empty state: renders header with (0) and empty message", () => {
+    const lines = renderReviewQueueHtml([]);
+    expect(lines[0]).toBe("");
+    expect(lines[1]).toBe("👀 <b>For Review and Approval — Dom / Jedd</b>");
+    expect(lines[2]).toBe("<i>Nothing waiting for review right now.</i>");
+  });
+});
+
+describe("renderReviewQueuePlain", () => {
+  it("renders the header with task count", () => {
+    const tasks = [
+      baseTask({ id: 1, status: "in_review", overdue: false }),
+      baseTask({ id: 2, status: "in_review", overdue: false }),
+    ];
+    const lines = renderReviewQueuePlain(tasks);
+    expect(lines[0]).toBe("");
+    expect(lines[1]).toBe("👀 For Review and Approval — Dom / Jedd");
+  });
+
+  it("renders one task with due date and assignee", () => {
+    const tasks = [
+      baseTask({
+        id: 5,
+        title: "Fix something",
+        status: "in_review",
+        overdue: false,
+        dueDate: "2026-09-12",
+        assigneeUsername: "alice",
+      }),
+    ];
+    const lines = renderReviewQueuePlain(tasks);
+    expect(lines[2]).toBe("  - #5 Fix something (@alice) — due 2026-09-12");
+  });
+
+  it("renders overdue task with [⚠️ OVERDUE Xd]", () => {
+    const tasks = [
+      baseTask({
+        id: 1,
+        title: "Overdue review",
+        status: "in_review",
+        overdue: true,
+        daysOverdue: 2,
+        dueDate: "2026-09-05",
+      }),
+    ];
+    const lines = renderReviewQueuePlain(tasks);
+    expect(lines[2]).toContain("[⚠️ OVERDUE 2d]");
+  });
+
+  it("does not HTML-escape in plain output", () => {
+    const tasks = [
+      baseTask({
+        id: 1,
+        title: "Test <b>bold</b> & amp",
+        status: "in_review",
+        overdue: false,
+      }),
+    ];
+    const lines = renderReviewQueuePlain(tasks);
+    expect(lines[2]).toContain("Test <b>bold</b> & amp");
+    expect(lines[2]).not.toContain("&lt;");
+  });
+
+  it("empty state: renders header with (0) and empty message", () => {
+    const lines = renderReviewQueuePlain([]);
+    expect(lines[0]).toBe("");
+    expect(lines[1]).toBe("👀 For Review and Approval — Dom / Jedd");
+    expect(lines[2]).toBe("Nothing waiting for review right now.");
   });
 });

@@ -739,3 +739,106 @@ describe("formatStandup — cert tip (issue #180)", () => {
     expect(formatStandup(report)).not.toContain("💡");
   });
 });
+
+describe("formatStandup — review and approval section (issue #186)", () => {
+  async function seedReview(service: TaskService, title: string) {
+    const created = await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title,
+      dueDate: "2026-09-12",
+    });
+    if (!created.ok) throw new Error("setup failed");
+    await service.setStatus(carla, created.value.id, "in_review");
+    return created.value.id;
+  }
+
+  it("contains the review section after Done this week and before the cert tip", async () => {
+    const { service } = makeService();
+    await seedReview(service, "Task for review");
+    const report = await buildStandup(service, carla, NOW);
+    const tip = renderCertTipPlain(selectCertTipForDate(NOW));
+    const text = formatStandup(report, tip);
+
+    const doneIdx = text.indexOf("✅ Done this week");
+    const reviewIdx = text.indexOf("👀 For Review and Approval");
+    const tipIdx = text.indexOf(tip);
+    expect(doneIdx).toBeGreaterThan(-1);
+    expect(reviewIdx).toBeGreaterThan(doneIdx);
+    expect(tipIdx).toBeGreaterThan(reviewIdx);
+  });
+
+  it("contains the review section even without a cert tip", async () => {
+    const { service } = makeService();
+    await seedReview(service, "Task for review");
+    const report = await buildStandup(service, carla, NOW);
+    const text = formatStandup(report);
+
+    const doneIdx = text.indexOf("✅ Done this week");
+    const reviewIdx = text.indexOf("👀 For Review and Approval");
+    expect(doneIdx).toBeGreaterThan(-1);
+    expect(reviewIdx).toBeGreaterThan(doneIdx);
+  });
+
+  it("shows (0) and empty message when no tasks are in review", async () => {
+    const { service } = makeService();
+    const report = await buildStandup(service, carla, NOW);
+    const text = formatStandup(report);
+
+    expect(text).toContain("👀 For Review and Approval — Dom / Jedd");
+    expect(text).toContain("Nothing waiting for review right now.");
+  });
+
+  it("carries no HTML tags in the plain output", async () => {
+    const { service } = makeService();
+    await seedReview(service, "Task for review");
+    const report = await buildStandup(service, carla, NOW);
+    const text = formatStandup(report);
+
+    expect(text).not.toContain("<b>");
+    expect(text).not.toContain("<i>");
+    expect(text).not.toContain("<code>");
+  });
+
+  it("review section does not appear in active filter", async () => {
+    const { service } = makeService();
+    await seedReview(service, "Task for review");
+    const report = await buildStandup(service, carla, NOW);
+    const text = formatStandupFiltered(report, "active");
+
+    expect(text).not.toContain("👀 For Review and Approval");
+  });
+
+  it("review section does not appear in backlog filter", async () => {
+    const { service } = makeService();
+    await seedReview(service, "Task for review");
+    const report = await buildStandup(service, carla, NOW);
+    const text = formatStandupFiltered(report, "backlog");
+
+    expect(text).not.toContain("👀 For Review and Approval");
+  });
+
+  it("review section does not appear in review filter", async () => {
+    const { service } = makeService();
+    await seedReview(service, "Task for review");
+    const report = await buildStandup(service, carla, NOW);
+    const text = formatStandupFiltered(report, "review");
+
+    expect(text).not.toContain("👀 For Review and Approval");
+  });
+
+  it("review section does not appear in done filter", async () => {
+    const { service } = makeService();
+    await seedReview(service, "Task for review");
+    const report = await buildStandup(service, carla, NOW);
+    const text = formatStandupFiltered(report, "done");
+
+    expect(text).not.toContain("👀 For Review and Approval");
+  });
+
+  it("overview filter still equals formatStandup (unchanged)", async () => {
+    const { service } = makeService();
+    await seedReview(service, "Task for review");
+    const report = await buildStandup(service, carla, NOW);
+    expect(formatStandupFiltered(report, "overview")).toBe(formatStandup(report));
+  });
+});
