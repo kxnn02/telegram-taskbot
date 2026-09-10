@@ -113,8 +113,16 @@ What that produces, all Asia/Manila:
 | on status change | DM | Assignee + assigner, minus whoever made the change |
 
 The certification tip is the one exception to "no message carries both": the pulled `/standup`
-command's unfiltered view also repeats that day's tip as its last line (plain text, no quote) —
-issue #180. It stays out of every filtered view (tapping a filter button drops it).
+command's unfiltered view also repeats a tip as its last line (plain text, no quote) — issue #180.
+It stays out of every filtered view (tapping a filter button drops it).
+
+⚠️ **`/standup`'s tip selection deliberately diverges from #180** (issue #184): the scheduled daily
+push and the dashboard's Preview/Test buttons still use #180's `selectCertTipForDate` (date-seeded,
+deterministic — same tip all day, so Preview always matches what actually sends), but the on-demand
+`/standup` command now calls `selectRandomCertTip` instead, tracked per cohort in
+`cohort_cert_tip_history` so it never repeats the immediately-previous tip. Do not "fix" `/standup`
+back onto `selectCertTipForDate` — that would restore same-tip-all-day behavior a later request
+explicitly asked to remove.
 
 Two consequences worth stating plainly. The daily digest **no longer posts to the group at all**,
 and the weekly digest deliberately omits your open tasks — it would repeat the same member's 10am
