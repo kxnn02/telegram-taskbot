@@ -669,6 +669,36 @@ describe("standup filters (issue #103 item 3)", () => {
     ]);
   });
 
+  it("/standup chunks a card over Telegram's limit into multiple ordered sendMessage calls, with the keyboard only on the last (issue #179)", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const caller = { username: "alice", cohortId: COHORT };
+    for (let i = 0; i < 100; i++) {
+      const created = await testBot.service.assignTask(caller, {
+        assigneeUsername: "alice",
+        title: `A fairly long task title for entry number ${i} so the card grows large`,
+        dueDate: "2026-09-10",
+      });
+      if (!created.ok) throw new Error("setup failed");
+    }
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/standup"));
+
+    const sendCalls = testBot.calls.filter((c) => c.method === "sendMessage");
+    expect(sendCalls.length).toBeGreaterThan(1);
+    for (const call of sendCalls) {
+      const text = call.payload.text as string;
+      expect(text.length).toBeLessThanOrEqual(4000);
+    }
+    // The keyboard is one card's controls, not a per-chunk feature: only
+    // the last chunk should carry it.
+    for (const call of sendCalls.slice(0, -1)) {
+      expect(call.payload.reply_markup).toBeUndefined();
+    }
+    expect(sendCalls[sendCalls.length - 1]!.payload.reply_markup).toBeDefined();
+  });
+
   it("a filter press edits the standup in place", async () => {
     const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
     const testBot = makeTestBot(roster);

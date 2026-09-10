@@ -292,10 +292,20 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     keyboard: InlineKeyboardMarkup,
     html: boolean,
   ): Promise<void> {
-    await ctx.reply(text, {
-      ...(html ? { parse_mode: "HTML" as const } : {}),
-      reply_markup: keyboard,
-    });
+    // Issue #179: same unguarded-send problem as the standup group push —
+    // an in-chat card can exceed Telegram's 4096-char hard limit. Split via
+    // `chunkMessage` and keep the card under the limit unchanged (one chunk,
+    // one `ctx.reply` call, byte-identical text). The keyboard belongs to
+    // the last chunk only, since it is the one card's controls, not a
+    // per-chunk feature.
+    const chunks = chunkMessage(text);
+    for (let i = 0; i < chunks.length; i++) {
+      const isLast = i === chunks.length - 1;
+      await ctx.reply(chunks[i]!, {
+        ...(html ? { parse_mode: "HTML" as const } : {}),
+        ...(isLast ? { reply_markup: keyboard } : {}),
+      });
+    }
   }
 
   /** Edits a card in place, falling back to a fresh message if the edit is

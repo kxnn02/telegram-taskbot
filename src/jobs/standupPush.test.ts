@@ -76,6 +76,48 @@ describe("sendStandupPush", () => {
     expect(sendMessage.mock.calls[0]![2]).toEqual({ parse_mode: "HTML" });
   });
 
+  it("chunks a card over Telegram's limit into multiple ordered sendMessage calls, none over 4000 chars, none HTML on a tag boundary (issue #179)", async () => {
+    const model = new FakeTextModel(['"Ship it." — Someone, A Book']);
+    const roster = new Roster([{ username: "carla", cohortId: COHORT }]);
+    const store = new InMemoryTaskStore();
+    const service = new TaskService(store, roster, new FixedClock(NOW));
+    const caller = { username: "carla", cohortId: COHORT };
+    for (let i = 0; i < 80; i++) {
+      const created = await service.assignTask(caller, {
+        assigneeUsername: "carla",
+        title: `A fairly long task title for entry number ${i} so the card grows large`,
+        dueDate: "2026-09-10",
+      });
+      if (!created.ok) throw new Error("setup failed");
+    }
+    const sendMessage = vi.fn(
+      async (_chatId: number | string, _text: string, _other?: { parse_mode?: "HTML" }) => ({}),
+    );
+    const bot = { api: { sendMessage } };
+    const cohorts = fakeCohorts("-100123");
+
+    const result = await sendStandupPush({ service, model, bot, cohorts }, COHORT, NOW);
+
+    expect(result.sent).toBe(true);
+    expect(sendMessage.mock.calls.length).toBeGreaterThan(1);
+    for (const call of sendMessage.mock.calls) {
+      const text = call[1];
+      expect(text.length).toBeLessThanOrEqual(4000);
+      expect(call[2]).toEqual({ parse_mode: "HTML" });
+      // No chunk boundary falls inside an HTML tag: a tag never ends
+      // without its closing `>` inside the same chunk.
+      const openTagStarts = (text.match(/</g) ?? []).length;
+      const openTagEnds = (text.match(/>/g) ?? []).length;
+      expect(openTagStarts).toBe(openTagEnds);
+    }
+    // Sent in order: the header line lands in the first chunk, and the
+    // quote (rendered last by `buildStandupOverviewCard`) lands in the
+    // final chunk — never the reverse.
+    const texts = sendMessage.mock.calls.map((c) => c[1]);
+    expect(texts[0]).toContain("📋 <b>");
+    expect(texts[texts.length - 1]).toContain('<i>"Ship it."</i>');
+  });
+
   it("does not send, and reports sent:false, when the cohort has no group chat configured", async () => {
     const model = new FakeTextModel(['"Ship it." — Someone, A Book']);
     const service = makeService();
