@@ -3,7 +3,7 @@ import type { StandupReport } from "./standup.js";
 import { formatCohortName, formatReportDate } from "./standup.js";
 import { greeting } from "./standupCard.js";
 import { esc } from "./html.js";
-import { standupSummaryLine, renderMemberBucketsHtml } from "./standupBuckets.js";
+import { standupSummaryLine, renderMemberBucketsHtml, renderReviewQueueHtml } from "./standupBuckets.js";
 import { getWeekBounds, formatWeekLabel } from "../date/weekBounds.js";
 import { MANILA_ZONE } from "../domain/overdue.js";
 import type { TaskWithFlags } from "../service/taskService.js";
@@ -96,6 +96,8 @@ export function buildStandupOverviewCard(
   } else {
     for (const t of doneLastWeek) lines.push(`▸ ${esc(t.title)} (@${esc(t.assigneeUsername)})`);
   }
+
+  lines.push(...renderReviewQueueHtml(report.tasks));
 
   if (opts.quote) {
     lines.push("", opts.quote);

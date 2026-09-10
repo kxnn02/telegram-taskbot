@@ -2,7 +2,7 @@ import type { TaskService, TaskWithFlags } from "../service/taskService.js";
 import type { Caller, TaskStatus } from "../domain/types.js";
 import { formatTaskLine } from "./format.js";
 import { MANILA_ZONE } from "../domain/overdue.js";
-import { renderMemberBucketsPlain, standupSummaryLine } from "./standupBuckets.js";
+import { renderMemberBucketsPlain, standupSummaryLine, renderReviewQueuePlain } from "./standupBuckets.js";
 
 const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
 
@@ -194,6 +194,8 @@ export function formatStandup(report: StandupReport, certTipPlain?: string): str
       lines.push(`- #${t.id} ${t.title} (@${t.assigneeUsername})`);
     }
   }
+
+  lines.push(...renderReviewQueuePlain(report.tasks));
 
   if (certTipPlain) {
     lines.push("", certTipPlain);
