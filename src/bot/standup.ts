@@ -167,10 +167,19 @@ function standupHeaderLines(report: StandupReport): string[] {
  * Overdue/Doing/For approval/Backlog/Done summary, the person-first
  * Overdue/Doing/For approval breakdown, and a "done this week" list. Its
  * own formatter, built on `StandupReport` rather than the digest's own
- * shape. This is also the `overview` filter's renderer (issue #103 item 3).
- * Person-first layout per #165; the plain-text mirror of the scheduled
- * HTML card's `buildStandupOverviewCard` (#165 S2). */
-export function formatStandup(report: StandupReport): string {
+ * shape. Person-first layout per #165; the plain-text mirror of the scheduled
+ * HTML card's `buildStandupOverviewCard` (#165 S2).
+ *
+ * Issue #180: `certTipPlain`, when given, is appended as the last line,
+ * preceded by a blank line — the caller renders it (`renderCertTipPlain`,
+ * same pre-rendered pattern as the pushed card's `certTip`/`quote`), so this
+ * function stays synchronous. Only the unfiltered `/standup` command passes
+ * one; `formatStandupFiltered`'s `overview` branch calls this with no tip at
+ * all, since tapping a filter button — including the Overview button itself
+ * — drops the tip. There is no quote here: unlike the pushed card, `/standup`
+ * never calls the model, so it always returns instantly from cached data.
+ */
+export function formatStandup(report: StandupReport, certTipPlain?: string): string {
   const lines: string[] = [
     ...standupHeaderLines(report),
     standupSummaryLine(report.tasks),
@@ -184,6 +193,10 @@ export function formatStandup(report: StandupReport): string {
     for (const t of report.doneThisWeek) {
       lines.push(`- #${t.id} ${t.title} (@${t.assigneeUsername})`);
     }
+  }
+
+  if (certTipPlain) {
+    lines.push("", certTipPlain);
   }
 
   return lines.join("\n");

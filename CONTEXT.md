@@ -104,13 +104,17 @@ What that produces, all Asia/Manila:
 
 | When | Channel | Message |
 |---|---|---|
-| 8:05am daily | group | Standup card — everyone's open work, by person. Gated by `cohorts.standup_enabled` |
+| 8:05am daily | group | Standup card — everyone's open work, by person, an AI daily quote, and a rotating CCA-F certification tip. Gated by `cohorts.standup_enabled` |
 | 8:10am Mondays | DM | What *you* completed in the trailing 7 days |
 | 9:00am daily | DM | Due-tomorrow reminder, assignee only |
 | 10:00am daily | DM | Your own open tasks. Suppressed when you have none |
 | 12:00pm daily | DM | Roster reconciliation, only when someone has left the group |
 | hourly | DM | Overdue crossing, once per task, assignee + assigner |
 | on status change | DM | Assignee + assigner, minus whoever made the change |
+
+The certification tip is the one exception to "no message carries both": the pulled `/standup`
+command's unfiltered view also repeats that day's tip as its last line (plain text, no quote) —
+issue #180. It stays out of every filtered view (tapping a filter button drops it).
 
 Two consequences worth stating plainly. The daily digest **no longer posts to the group at all**,
 and the weekly digest deliberately omits your open tasks — it would repeat the same member's 10am

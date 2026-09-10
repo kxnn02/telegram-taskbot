@@ -9,12 +9,14 @@ import { buildStandupOverviewCard } from "./standupOverviewCard.js";
 import { standupSummaryLine } from "./standupBuckets.js";
 
 // Issue #107: the push endpoint's HTML overview card — greeting, header,
-// counts, per-status detail, week framing, the books-reminder line, and
-// (only here) the AI daily quote appended at the very end.
+// counts, per-status detail, week framing, and (only here) the AI daily
+// quote. Issue #180: the books-reminder line is gone; the card now always
+// ends with a rotating certification tip instead, quote or no quote.
 
 const COHORT = "cohort-5-dryrun";
 const NOW = new Date("2026-09-01T04:00:00.000Z"); // Tuesday, ~noon Manila
 const carla: Caller = { username: "carla", cohortId: COHORT };
+const CERT_TIP_HTML = "💡 <b>Test tip lead.</b> Test tip body.\n— <i>Someone</i>";
 
 function makeService() {
   const store = new InMemoryTaskStore();
@@ -35,7 +37,7 @@ describe("buildStandupOverviewCard — person-first layout (#165 S2)", () => {
   it("the summary line replaces the count block, and none of the old count-block strings survive", async () => {
     const service = makeService();
     const report = await buildStandup(service, carla, NOW);
-    const card = buildStandupOverviewCard(report, { now: NOW, quote: "" });
+    const card = buildStandupOverviewCard(report, { now: NOW, quote: "", certTip: CERT_TIP_HTML });
 
     expect(card).toContain(standupSummaryLine(report.tasks));
     for (const stale of [
@@ -47,6 +49,8 @@ describe("buildStandupOverviewCard — person-first layout (#165 S2)", () => {
       "✅ Done:",
       "🚧 Blocked:",
       "⚠️ Overdue:",
+      "📚 <b>Reminder:</b>",
+      "Read and finish your assigned books, cohorts! Consistency compounds.",
     ]) {
       expect(card).not.toContain(stale);
     }
@@ -55,7 +59,7 @@ describe("buildStandupOverviewCard — person-first layout (#165 S2)", () => {
   it("the summary sits immediately under the date line, with no blank line between", async () => {
     const service = makeService();
     const report = await buildStandup(service, carla, NOW);
-    const card = buildStandupOverviewCard(report, { now: NOW, quote: "" });
+    const card = buildStandupOverviewCard(report, { now: NOW, quote: "", certTip: CERT_TIP_HTML });
     const lines = card.split("\n");
 
     const dateIdx = lines.indexOf(`<i>${formatReportDate(report.today)}</i>`);
@@ -76,7 +80,7 @@ describe("buildStandupOverviewCard — person-first layout (#165 S2)", () => {
       dueDate: "2026-09-05",
     });
     const report = await buildStandup(service, carla, NOW);
-    const card = buildStandupOverviewCard(report, { now: NOW, quote: "" });
+    const card = buildStandupOverviewCard(report, { now: NOW, quote: "", certTip: CERT_TIP_HTML });
 
     const aliceIdx = card.indexOf("👤 <b>@alice</b>");
     const carlaIdx = card.indexOf("👤 <b>@carla</b>");
@@ -116,7 +120,7 @@ describe("buildStandupOverviewCard — person-first layout (#165 S2)", () => {
     await service.setStatus(carla, review.value.id, "in_review");
 
     const report = await buildStandup(service, carla, NOW);
-    const card = buildStandupOverviewCard(report, { now: NOW, quote: "" });
+    const card = buildStandupOverviewCard(report, { now: NOW, quote: "", certTip: CERT_TIP_HTML });
 
     const overdueIdx = card.indexOf("⚠️ <b>Overdue (1)</b>");
     const doingIdx = card.indexOf("🔄 <b>Doing (2)</b>");
@@ -137,7 +141,7 @@ describe("buildStandupOverviewCard — person-first layout (#165 S2)", () => {
     await service.setStatus(carla, created.value.id, "in_review");
 
     const report = await buildStandup(service, carla, NOW);
-    const card = buildStandupOverviewCard(report, { now: NOW, quote: "" });
+    const card = buildStandupOverviewCard(report, { now: NOW, quote: "", certTip: CERT_TIP_HTML });
 
     expect(card.split("Overdue review task")).toHaveLength(2);
     expect(card).toContain("⚠️ <b>Overdue (1)</b>");
@@ -162,7 +166,7 @@ describe("buildStandupOverviewCard — person-first layout (#165 S2)", () => {
     await service.setStatus(carla, doneTask.value.id, "done");
 
     const report = await buildStandup(service, carla, NOW);
-    const card = buildStandupOverviewCard(report, { now: NOW, quote: "" });
+    const card = buildStandupOverviewCard(report, { now: NOW, quote: "", certTip: CERT_TIP_HTML });
 
     expect(card).not.toContain("👤 <b>@alice</b>");
     expect(card).toContain("📦 1 backlog");
@@ -172,16 +176,15 @@ describe("buildStandupOverviewCard — person-first layout (#165 S2)", () => {
     const service = makeService();
     const report = await buildStandup(service, carla, NOW);
     const quote = '<i>"Ship it."</i>\n— <i>Someone, A Book</i>';
-    const card = buildStandupOverviewCard(report, { now: NOW, quote });
+    const card = buildStandupOverviewCard(report, { now: NOW, quote, certTip: CERT_TIP_HTML });
 
     expect(card).toContain("<i>No open tasks right now.</i>");
     expect(card.startsWith("Good afternoon, team!")).toBe(true);
-    expect(card).toContain("📚 <b>Reminder:</b>");
     expect(card).toContain("✅ <b>Done this week");
     expect(card).toContain("🗓️ <b>Done last week");
     expect(card).toContain("<i>No tasks completed this week yet.</i>");
     expect(card).toContain("<i>Nothing completed last week.</i>");
-    expect(card.endsWith(quote)).toBe(true);
+    expect(card.endsWith(CERT_TIP_HTML)).toBe(true);
   });
 
   it("a blocked task's reason survives inside the Doing bucket (#146)", async () => {
@@ -195,7 +198,7 @@ describe("buildStandupOverviewCard — person-first layout (#165 S2)", () => {
     await service.setBlocked(carla, created.value.id, "waiting on infra access");
 
     const report = await buildStandup(service, carla, NOW);
-    const card = buildStandupOverviewCard(report, { now: NOW, quote: "" });
+    const card = buildStandupOverviewCard(report, { now: NOW, quote: "", certTip: CERT_TIP_HTML });
 
     expect(card).toContain("🔄 <b>Doing (1)</b>");
     expect(card).toContain("— <i>waiting on infra access</i>");
@@ -203,42 +206,33 @@ describe("buildStandupOverviewCard — person-first layout (#165 S2)", () => {
 });
 
 describe("buildStandupOverviewCard", () => {
-  it("puts the quote after the reminder line, at the very end", async () => {
+  it("puts the quote immediately above the tip, and the card always ends with the tip", async () => {
     const service = makeService();
     const report = await buildStandup(service, carla, NOW);
     const quote = '<i>"Ship it."</i>\n— <i>Someone, A Book</i>';
 
-    const card = buildStandupOverviewCard(report, { now: NOW, quote });
+    const card = buildStandupOverviewCard(report, { now: NOW, quote, certTip: CERT_TIP_HTML });
 
-    const reminderIdx = card.indexOf("📚 <b>Reminder:</b>");
     const quoteIdx = card.indexOf(quote);
-    expect(reminderIdx).toBeGreaterThan(-1);
-    expect(quoteIdx).toBeGreaterThan(reminderIdx);
-    expect(card.endsWith(quote)).toBe(true);
+    const tipIdx = card.indexOf(CERT_TIP_HTML);
+    expect(quoteIdx).toBeGreaterThan(-1);
+    expect(tipIdx).toBeGreaterThan(quoteIdx);
+    expect(card.endsWith(CERT_TIP_HTML)).toBe(true);
   });
 
-  it("copies the books-reminder line verbatim", async () => {
+  it("a failed (empty) quote leaves the rest of the card intact, still ending with the tip, with no stray blank lines", async () => {
     const service = makeService();
     const report = await buildStandup(service, carla, NOW);
-    const card = buildStandupOverviewCard(report, { now: NOW, quote: "" });
-    expect(card).toContain(
-      "📚 <b>Reminder:</b> <i>Read and finish your assigned books, cohorts! Consistency compounds.</i>",
-    );
-  });
-
-  it("a failed (empty) quote leaves the rest of the card intact with no stray blank lines", async () => {
-    const service = makeService();
-    const report = await buildStandup(service, carla, NOW);
-    const card = buildStandupOverviewCard(report, { now: NOW, quote: "" });
+    const card = buildStandupOverviewCard(report, { now: NOW, quote: "", certTip: CERT_TIP_HTML });
 
     expect(card).not.toMatch(/\n\n\n/);
-    expect(card.endsWith("Consistency compounds.</i>")).toBe(true);
+    expect(card.endsWith(CERT_TIP_HTML)).toBe(true);
   });
 
   it("does not hardcode a cohort name — uses the caller's own cohort", async () => {
     const service = makeService();
     const report = await buildStandup(service, carla, NOW);
-    const card = buildStandupOverviewCard(report, { now: NOW, quote: "" });
+    const card = buildStandupOverviewCard(report, { now: NOW, quote: "", certTip: CERT_TIP_HTML });
     expect(card).toContain("Cohort 5 Dryrun");
     expect(card).not.toContain("COHORT 4");
   });
@@ -246,7 +240,7 @@ describe("buildStandupOverviewCard", () => {
   it("includes the greeting for the given time", async () => {
     const service = makeService();
     const report = await buildStandup(service, carla, NOW);
-    const card = buildStandupOverviewCard(report, { now: NOW, quote: "" });
+    const card = buildStandupOverviewCard(report, { now: NOW, quote: "", certTip: CERT_TIP_HTML });
     expect(card.startsWith("Good afternoon, team!")).toBe(true);
   });
 
@@ -268,7 +262,7 @@ describe("buildStandupOverviewCard", () => {
     });
 
     const report = await buildStandup(service, carla, NOW);
-    const card = buildStandupOverviewCard(report, { now: NOW, quote: "" });
+    const card = buildStandupOverviewCard(report, { now: NOW, quote: "", certTip: CERT_TIP_HTML });
     expect(card).not.toContain("Secret task");
     expect(card).not.toContain("cohort-9");
   });

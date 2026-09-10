@@ -10,6 +10,7 @@ import {
   handleStandupPushEndpoint,
   sendStandupPush,
 } from "./standupPush.js";
+import { renderCertTipHtml, selectCertTipForDate } from "../bot/certTips.js";
 
 // Issue #107, deviation #2: the push endpoint is authenticated via this
 // repo's existing `src/jobs/jobAuth.ts` scheme — never a new one — because
@@ -48,13 +49,14 @@ describe("buildStandupPushText", () => {
     expect(text).toContain("📋 <b>");
   });
 
-  it("renders correctly with no model available (ThrowingTextModel) — no quote, nothing else broken", async () => {
+  it("renders correctly with no model available (ThrowingTextModel) — no quote, but the card still ends with the day's cert tip", async () => {
     const model = new ThrowingTextModel();
     const service = makeService();
     const text = await buildStandupPushText({ service, model }, COHORT, NOW);
+    const expectedTip = renderCertTipHtml(selectCertTipForDate(NOW));
     expect(text).not.toMatch(/<i>"/);
     expect(text).toContain("📋 <b>");
-    expect(text).toContain("Consistency compounds.</i>");
+    expect(text.endsWith(expectedTip)).toBe(true);
   });
 });
 
