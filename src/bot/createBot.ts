@@ -6,6 +6,7 @@ import { TaskService } from "../service/taskService.js";
 import type { TaskStorePort } from "../storage/taskStorePort.js";
 import type { RegistrationStorePort } from "../storage/registrationStorePort.js";
 import type { RosterStorePort } from "../storage/rosterStorePort.js";
+import type { CertTipHistoryStorePort } from "../storage/certTipHistoryStorePort.js";
 import { getNextOnsiteDay, parseDueDate } from "../date/parseDueDate.js";
 import { parseAddTaskArgs, parseTrailingAddTask, ADDTASK_USAGE } from "./addTaskParse.js";
 import { parseMentionTrigger } from "./mentionParse.js";
@@ -58,7 +59,7 @@ import {
   formatStandupFiltered,
   parseStandupCallback,
 } from "./standup.js";
-import { renderCertTipPlain, selectCertTipForDate } from "./certTips.js";
+import { renderCertTipPlain, selectRandomCertTip } from "./certTips.js";
 import {
   buildTasksPage,
   fetchTaskPages,
@@ -103,6 +104,14 @@ export interface CreateBotOptions {
    * contact. Production code passes a `SupabaseRosterStore`; tests pass an
    * `InMemoryRosterStore`. */
   rosterStore: RosterStorePort;
+  /** Storage port for the per-cohort "last cert tip shown via /standup"
+   * history (issue #180's randomize follow-up): backs `selectRandomCertTip`'s
+   * never-repeat-twice-in-a-row behavior. Only the on-demand `/standup`
+   * command reads/writes this — the scheduled daily push job and dashboard
+   * Preview/Test keep using the date-seeded `selectCertTipForDate` and never
+   * touch it. Production code passes a `SupabaseCertTipHistoryStore`; tests
+   * pass an `InMemoryCertTipHistoryStore`. */
+  certTipHistoryStore: CertTipHistoryStorePort;
   /** Language-model port (issue #102) `parseBulkTasks` (issue #104's
    * paste-in bulk task capture) is grounded against — production wires the
    * account's currently-funded `GroqTextModel`; tests pass a
@@ -366,7 +375,10 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     withCaller(async (ctx, caller) => {
       const now = clock.now();
       const report = await buildStandup(service, caller, now);
-      const certTipPlain = renderCertTipPlain(selectCertTipForDate(now));
+      const lastTipId = await options.certTipHistoryStore.getLastTipId(caller.cohortId);
+      const tip = selectRandomCertTip(lastTipId);
+      await options.certTipHistoryStore.setLastTipId(caller.cohortId, tip.id);
+      const certTipPlain = renderCertTipPlain(tip);
       await sendCard(
         ctx,
         formatStandup(report, certTipPlain),

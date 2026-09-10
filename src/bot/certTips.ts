@@ -244,6 +244,22 @@ export function selectCertTipForDate(now: Date): CertTip {
   return CERT_TIPS[order[position]!]!;
 }
 
+/**
+ * Randomized selector for the on-demand `/standup` command only — unlike
+ * `selectCertTipForDate`, this is unconditionally random, but avoids
+ * immediately repeating `excludeId` (the last tip shown to the same
+ * cohort). The scheduled daily push job and dashboard Preview/Test keep
+ * using `selectCertTipForDate` and never call this.
+ */
+export function selectRandomCertTip(
+  excludeId: number | null,
+  random: () => number = Math.random,
+): CertTip {
+  const pool = excludeId === null ? CERT_TIPS : CERT_TIPS.filter((t) => t.id !== excludeId);
+  const index = Math.floor(random() * pool.length);
+  return pool[index]!;
+}
+
 /** Mirrors `renderMemberBucketsHtml`/`renderMemberBucketsPlain` (this
  * codebase's existing HTML/plain rendering-pair pattern, `standupBuckets.ts`):
  * one function per surface, both driven off the same data. */
