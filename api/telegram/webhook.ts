@@ -5,6 +5,7 @@ import { createSupabaseClient } from "../../src/storage/supabaseClient.js";
 import { SupabaseTaskStore } from "../../src/storage/supabaseTaskStore.js";
 import { SupabaseRegistrationStore } from "../../src/storage/supabaseRegistrationStore.js";
 import { SupabaseRosterStore } from "../../src/storage/supabaseRosterStore.js";
+import { SupabaseCertTipHistoryStore } from "../../src/storage/supabaseCertTipHistoryStore.js";
 import { SupabaseProcessedUpdatesStore } from "../../src/storage/supabaseProcessedUpdatesStore.js";
 import { loadRosterFromStore } from "../../src/config/roster.js";
 import { buildTextModel } from "../../src/nlp/buildTextModel.js";
@@ -53,6 +54,7 @@ async function buildDeps(): Promise<WebhookHandlerDeps> {
     taskStore: new SupabaseTaskStore(supabase),
     registrationStore: new SupabaseRegistrationStore(supabase),
     rosterStore,
+    certTipHistoryStore: new SupabaseCertTipHistoryStore(supabase),
     roster,
     activeCohortId,
     // Built through the factory, never `new GroqTextModel()` (issue #142):

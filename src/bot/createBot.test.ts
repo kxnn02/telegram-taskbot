@@ -5,6 +5,7 @@ import { Roster } from "../domain/roster.js";
 import { InMemoryTaskStore } from "../storage/inMemoryTaskStore.js";
 import { InMemoryRegistrationStore } from "../storage/inMemoryRegistrationStore.js";
 import { InMemoryRosterStore } from "../storage/inMemoryRosterStore.js";
+import { InMemoryCertTipHistoryStore } from "../storage/inMemoryCertTipHistoryStore.js";
 import { FakeTextModel, ThrowingTextModel, type TextModel } from "../nlp/textModel.js";
 import { createBot, BOT_COMMANDS, HANDLED_COMMANDS, type CreatedBot } from "./createBot.js";
 
@@ -108,6 +109,7 @@ function makeTestBot(
     taskStore: new InMemoryTaskStore(),
     registrationStore: new InMemoryRegistrationStore(),
     rosterStore: new InMemoryRosterStore(),
+    certTipHistoryStore: new InMemoryCertTipHistoryStore(),
     activeCohortId,
     bot,
     roster,
@@ -667,6 +669,22 @@ describe("standup filters (issue #103 item 3)", () => {
       "standup|review|0",
       "standup|done|0",
     ]);
+  });
+
+  it("/standup's cert tip is randomized and never repeats immediately for the same cohort", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/standup"));
+    const firstText = lastCall(testBot.calls, "sendMessage")!.payload.text as string;
+    const firstTipLine = firstText.split("🎓 CCA-F Cert Tip")[1];
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/standup"));
+    const secondText = lastCall(testBot.calls, "sendMessage")!.payload.text as string;
+    const secondTipLine = secondText.split("🎓 CCA-F Cert Tip")[1];
+
+    expect(secondTipLine).not.toEqual(firstTipLine);
   });
 
   it("/standup chunks a card over Telegram's limit into multiple ordered sendMessage calls, with the keyboard only on the last (issue #179)", async () => {

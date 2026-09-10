@@ -4,6 +4,7 @@ import {
   renderCertTipHtml,
   renderCertTipPlain,
   selectCertTipForDate,
+  selectRandomCertTip,
 } from "./certTips.js";
 
 // Issue #180: the rotating CCA-F certification tip that replaces the books
@@ -63,6 +64,33 @@ describe("selectCertTipForDate", () => {
     expect(secondCycle).not.toEqual(firstCycle);
     // Still a full permutation of all 30 ids.
     expect(new Set(secondCycle).size).toBe(30);
+  });
+});
+
+describe("selectRandomCertTip", () => {
+  it("with excludeId null and random() returning 0, returns the first tip", () => {
+    expect(selectRandomCertTip(null, () => 0)).toEqual(CERT_TIPS[0]);
+  });
+
+  it("with excludeId null and random() returning just under 1, returns the last tip", () => {
+    expect(selectRandomCertTip(null, () => 0.999999)).toEqual(CERT_TIPS[CERT_TIPS.length - 1]);
+  });
+
+  it("never returns the excluded id, across many stubbed random values", () => {
+    const excludeId = CERT_TIPS[5]!.id;
+    for (let i = 0; i < 100; i++) {
+      const r = i / 100;
+      const tip = selectRandomCertTip(excludeId, () => r);
+      expect(tip.id).not.toBe(excludeId);
+    }
+  });
+
+  it("with no random argument (real Math.random), never returns the excluded id over many calls", () => {
+    const excludeId = CERT_TIPS[10]!.id;
+    for (let i = 0; i < 200; i++) {
+      const tip = selectRandomCertTip(excludeId);
+      expect(tip.id).not.toBe(excludeId);
+    }
   });
 });
 
