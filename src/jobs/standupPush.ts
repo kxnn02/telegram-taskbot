@@ -5,6 +5,7 @@ import type { Caller } from "../domain/types.js";
 import { buildStandup } from "../bot/standup.js";
 import { buildStandupOverviewCard } from "../bot/standupOverviewCard.js";
 import { dailyQuote } from "../bot/standupQuote.js";
+import { chunkMessage } from "../bot/format.js";
 
 /**
  * Issue #107, item 5: the standup push endpoint — Devie's
@@ -93,7 +94,13 @@ export async function sendStandupPush(
   const text = await buildStandupPushText(deps, cohortId, now);
   const groupChatId = await deps.cohorts.getGroupChatId(cohortId);
   if (!groupChatId) return { sent: false };
-  await deps.bot.api.sendMessage(groupChatId, text, { parse_mode: "HTML" });
+  // Issue #179: the card can exceed Telegram's 4096-char hard limit on a
+  // busy day, which Telegram rejects outright — split it the same way every
+  // other unbounded reply already does (`chunkMessage`, `format.ts`), rather
+  // than truncating or degrading content people are measured on.
+  for (const chunk of chunkMessage(text)) {
+    await deps.bot.api.sendMessage(groupChatId, chunk, { parse_mode: "HTML" });
+  }
   return { sent: true };
 }
 
