@@ -138,7 +138,7 @@ export function reviewQueue(tasks: TaskWithFlags[]): TaskWithFlags[] {
 
 export function renderReviewQueueHtml(tasks: TaskWithFlags[]): string[] {
   const queue = reviewQueue(tasks);
-  const lines: string[] = ["", `👀 <b>For Review and Approval (${queue.length}) — ${STANDUP_APPROVERS}</b>`];
+  const lines: string[] = ["", `👀 <b>For Review and Approval — ${STANDUP_APPROVERS}</b>`];
   if (queue.length === 0) {
     lines.push(NOTHING_FOR_REVIEW_HTML);
   } else {
@@ -153,7 +153,7 @@ export function renderReviewQueueHtml(tasks: TaskWithFlags[]): string[] {
 
 export function renderReviewQueuePlain(tasks: TaskWithFlags[]): string[] {
   const queue = reviewQueue(tasks);
-  const lines: string[] = ["", `👀 For Review and Approval (${queue.length}) — ${STANDUP_APPROVERS}`];
+  const lines: string[] = ["", `👀 For Review and Approval — ${STANDUP_APPROVERS}`];
   if (queue.length === 0) {
     lines.push(NOTHING_FOR_REVIEW_PLAIN);
   } else {

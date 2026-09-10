@@ -313,7 +313,7 @@ describe("renderReviewQueueHtml", () => {
     ];
     const lines = renderReviewQueueHtml(tasks);
     expect(lines[0]).toBe("");
-    expect(lines[1]).toBe("👀 <b>For Review and Approval (2) — Dom / Jedd</b>");
+    expect(lines[1]).toBe("👀 <b>For Review and Approval — Dom / Jedd</b>");
   });
 
   it("renders one task with showStatus=false", () => {
@@ -365,7 +365,7 @@ describe("renderReviewQueueHtml", () => {
   it("empty state: renders header with (0) and empty message", () => {
     const lines = renderReviewQueueHtml([]);
     expect(lines[0]).toBe("");
-    expect(lines[1]).toBe("👀 <b>For Review and Approval (0) — Dom / Jedd</b>");
+    expect(lines[1]).toBe("👀 <b>For Review and Approval — Dom / Jedd</b>");
     expect(lines[2]).toBe("<i>Nothing waiting for review right now.</i>");
   });
 });
@@ -378,7 +378,7 @@ describe("renderReviewQueuePlain", () => {
     ];
     const lines = renderReviewQueuePlain(tasks);
     expect(lines[0]).toBe("");
-    expect(lines[1]).toBe("👀 For Review and Approval (2) — Dom / Jedd");
+    expect(lines[1]).toBe("👀 For Review and Approval — Dom / Jedd");
   });
 
   it("renders one task with due date and assignee", () => {
@@ -428,7 +428,7 @@ describe("renderReviewQueuePlain", () => {
   it("empty state: renders header with (0) and empty message", () => {
     const lines = renderReviewQueuePlain([]);
     expect(lines[0]).toBe("");
-    expect(lines[1]).toBe("👀 For Review and Approval (0) — Dom / Jedd");
+    expect(lines[1]).toBe("👀 For Review and Approval — Dom / Jedd");
     expect(lines[2]).toBe("Nothing waiting for review right now.");
   });
 });

@@ -784,7 +784,7 @@ describe("formatStandup — review and approval section (issue #186)", () => {
     const report = await buildStandup(service, carla, NOW);
     const text = formatStandup(report);
 
-    expect(text).toContain("👀 For Review and Approval (0) — Dom / Jedd");
+    expect(text).toContain("👀 For Review and Approval — Dom / Jedd");
     expect(text).toContain("Nothing waiting for review right now.");
   });
 
