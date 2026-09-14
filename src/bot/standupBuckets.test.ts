@@ -243,9 +243,9 @@ describe("renderMemberBucketsPlain", () => {
       "",
       "👤 @alice",
       "🔄 Doing (1)",
-      "  - #5 Deploy staging — 🔄 In progress (due 2026-09-10)",
+      "  - #5 Deploy staging — 🔄 In Progress (due 2026-09-10)",
       "👀 For approval (1)",
-      "  - #11 Refactor auth module — 👀 In review (due 2026-09-11)",
+      "  - #11 Refactor auth module — 👀 In Review (due 2026-09-11)",
     ]);
   });
 

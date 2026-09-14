@@ -196,9 +196,9 @@ describe("statusLabel", () => {
   it("maps every stored status to #27's display label", () => {
     const expected: Record<TaskStatus, string> = {
       backlog: "Backlog",
-      todo: "To do",
-      in_progress: "In progress",
-      in_review: "In review",
+      todo: "To Do",
+      in_progress: "In Progress",
+      in_review: "In Review",
       blocked: "Blocked",
       done: "Done",
     };
@@ -211,7 +211,7 @@ describe("statusLabel", () => {
 describe("formatTaskLine", () => {
   it("renders the display label, not the raw snake_case status", () => {
     const text = formatTaskLine(task({ status: "in_progress", previousStatus: null, blockedReason: null }));
-    expect(text).toContain("In progress");
+    expect(text).toContain("In Progress");
     expect(text).not.toContain("in_progress");
   });
 
@@ -243,7 +243,7 @@ describe("formatTaskLine", () => {
 describe("formatTaskDetail", () => {
   it("renders the display label in the Status line", () => {
     const text = formatTaskDetail(task({ status: "in_review", previousStatus: null, blockedReason: null }));
-    expect(text).toContain("Status: In review");
+    expect(text).toContain("Status: In Review");
   });
 
   describe("note timestamps are Manila-resolved, not raw UTC ISO instants (H12)", () => {

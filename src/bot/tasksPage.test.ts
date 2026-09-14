@@ -168,7 +168,7 @@ describe("buildTasksPage — status sections", () => {
       "all",
       [COHORT],
     );
-    const order = ["🚧 <i>Blocked</i>", "🔄 <i>In progress</i>", "👀 <i>In review</i>", "📝 <i>To do</i>", "📦 <i>Backlog</i>"];
+    const order = ["🚧 <i>Blocked</i>", "🔄 <i>In Progress</i>", "👀 <i>In Review</i>", "📝 <i>To Do</i>", "📦 <i>Backlog</i>"];
     const positions = order.map((heading) => text.indexOf(heading));
     expect(positions.every((p) => p >= 0)).toBe(true);
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
@@ -181,7 +181,7 @@ describe("buildTasksPage — status sections", () => {
       "all",
       [COHORT],
     );
-    expect(text).toContain("📝 <i>To do</i>");
+    expect(text).toContain("📝 <i>To Do</i>");
     expect(text).not.toContain("📦 <i>Backlog</i>");
     expect(text).not.toContain("<i>No open tasks.</i>");
   });

@@ -42,9 +42,9 @@ describe("buildStandupOverviewCard — person-first layout (#165 S2)", () => {
     expect(card).toContain(standupSummaryLine(report.tasks));
     for (const stale of [
       "📊 <b>Overview</b>",
-      "🔄 In progress:",
-      "👀 In review:",
-      "📝 To do:",
+      "🔄 In Progress:",
+      "👀 In Review:",
+      "📝 To Do:",
       "📦 Backlog:",
       "✅ Done:",
       "🚧 Blocked:",

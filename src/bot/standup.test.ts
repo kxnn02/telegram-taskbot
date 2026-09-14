@@ -180,7 +180,7 @@ describe("formatStandup (standup redesign)", () => {
     const { service } = makeService();
     const report = await buildStandup(service, carla, NOW);
     const text = formatStandup(report);
-    expect(text).not.toMatch(/In progress \(/);
+    expect(text).not.toMatch(/In Progress \(/);
   });
 
   it("says nothing was completed this week when doneThisWeek is empty", async () => {
@@ -283,9 +283,9 @@ describe("formatStandup (person-first layout, #165 S3)", () => {
 
     expect(text).toContain(standupSummaryLine(report.tasks));
     expect(text).not.toContain("📊 Overview");
-    expect(text).not.toContain("🔄 In progress:");
-    expect(text).not.toContain("👀 In review:");
-    expect(text).not.toContain("📝 To do:");
+    expect(text).not.toContain("🔄 In Progress:");
+    expect(text).not.toContain("👀 In Review:");
+    expect(text).not.toContain("📝 To Do:");
     expect(text).not.toContain("📦 Backlog:");
     expect(text).not.toContain("✅ Done:");
     expect(text).not.toContain("🚧 Blocked:");

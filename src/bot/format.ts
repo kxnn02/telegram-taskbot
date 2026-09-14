@@ -10,9 +10,9 @@ import { esc } from "./html.js";
  * snake_case stored value. */
 const STATUS_LABELS: Record<TaskStatus, string> = {
   backlog: "Backlog",
-  todo: "To do",
-  in_progress: "In progress",
-  in_review: "In review",
+  todo: "To Do",
+  in_progress: "In Progress",
+  in_review: "In Review",
   blocked: "Blocked",
   done: "Done",
 };
