@@ -1459,15 +1459,16 @@ describe("bulk-paste task capture (issue #104)", () => {
     // This body is chosen so the heuristic also comes up empty: a single
     // punctuation-only "paragraph" whose title strips down to nothing once
     // trailing `!`/`?` characters are removed (`parseBulkTasksHeuristic`
-    // then `continue`s past it) — the semicolon-plus-space is only there to
-    // satisfy `shouldTriggerBulkCreate`'s grouped-segment gate.
+    // then `continue`s past it) — the `@carla` mention is needed to
+    // satisfy `shouldTriggerBulkCreate` (issue #188: mentions are now required
+    // for semi-colon-only patterns to trigger bulk).
     const roster = new Roster([]);
     const model = bulkModel([]);
     const testBot = makeTestBot(roster, COHORT, model);
     const userId = nextUserId();
 
     await testBot.bot.handleUpdate(
-      messageUpdate(userId, "carla", userId, "/addtask !!! ;  ???"),
+      messageUpdate(userId, "carla", userId, "/addtask @carla !!! ;  ???"),
     );
 
     expect(lastReplyText(testBot.calls)).toBe(
