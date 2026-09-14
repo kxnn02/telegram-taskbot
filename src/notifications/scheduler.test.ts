@@ -159,6 +159,19 @@ describe("runOverdueCrossingCheck", () => {
     expect(bot.sent).toHaveLength(0);
   });
 
+  it("renders the identifier through the task-ref renderer and the due date through the due-date renderer (issue #203)", async () => {
+    const past = new Date("2026-09-20T02:00:00.000Z"); // 10 days after the 2026-09-10 due date
+    const { deps, service, bot } = await makeDeps(past);
+    const created = await assign(service);
+    if (!created.ok) throw new Error("setup failed");
+
+    await runOverdueCrossingCheck(deps, COHORT, past);
+
+    expect(bot.sent[0]?.text).toBe(
+      `Task <code>T-${String(created.value.id).padStart(3, "0")}</code> ("Write the onboarding doc") is now overdue — it was due 10 days ago and hasn't been submitted.`,
+    );
+  });
+
   it("doesn't notify for a task that isn't overdue yet", async () => {
     const { deps, service, bot } = await makeDeps();
     await assign(service); // due 2026-09-10, NOW is 2026-09-04
@@ -241,10 +254,13 @@ describe("runOverdueCrossingCheck", () => {
 describe("runDueSoonReminderCheck", () => {
   it("reminds the assignee of a task due tomorrow", async () => {
     const { deps, service, bot } = await makeDeps();
-    await assign(service, { dueDate: "2026-09-05" }); // tomorrow relative to NOW
+    const created = await assign(service, { dueDate: "2026-09-05" }); // tomorrow relative to NOW
+    if (!created.ok) throw new Error("setup failed");
     await runDueSoonReminderCheck(deps, COHORT, NOW);
     expect(bot.sent).toHaveLength(1);
-    expect(bot.sent[0]?.text).toContain("Task");
+    expect(bot.sent[0]?.text).toBe(
+      `Task <code>T-${String(created.value.id).padStart(3, "0")}</code> ("Write the onboarding doc") is due tomorrow. Send /done T-${String(created.value.id).padStart(3, "0")} when you're ready for review.`,
+    );
   });
 
   it("doesn't remind for a task due further out", async () => {

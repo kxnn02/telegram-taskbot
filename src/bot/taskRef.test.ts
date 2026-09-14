@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatTaskRef, parseTaskRef } from "./taskRef.js";
+import { formatTaskRef, formatTaskRefHtml, parseTaskRef } from "./taskRef.js";
 
 describe("parseTaskRef (issue #31's shared task-ref parser)", () => {
   it("accepts a bare number", () => {
@@ -73,5 +73,11 @@ describe("formatTaskRef (issue #101)", () => {
 
   it("renders 4+ digit ids unpadded, never truncated", () => {
     expect(formatTaskRef(1000)).toBe("T-1000");
+  });
+});
+
+describe("formatTaskRefHtml (issue #203 — one task-identifier renderer, monospace)", () => {
+  it("wraps the T-001 form in a <code> tag", () => {
+    expect(formatTaskRefHtml(23)).toBe("<code>T-023</code>");
   });
 });

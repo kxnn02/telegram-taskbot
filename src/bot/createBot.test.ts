@@ -375,6 +375,29 @@ describe("auto-registration (ADR-0013) — every surviving command works for a n
     expect(text).toContain("@freshuser");
   });
 
+  it("assigns to someone else and DMs them through the due-date renderer and the task-ref renderer (issue #203)", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const bobId = nextUserId();
+    await testBot.bot.handleUpdate(messageUpdate(bobId, "bob", bobId, "/help"));
+
+    const creatorId = nextUserId();
+    await testBot.bot.handleUpdate(
+      messageUpdate(
+        creatorId,
+        "creator",
+        creatorId,
+        "/addtask Write the report @bob by 2026-09-18",
+      ),
+    );
+
+    // Fixed test time is 2026-09-05T02:00:00Z (2026-09-05 10:00 Manila); the
+    // task, id 1, is the first one created in this test.
+    expect(lastReplyTextIn(testBot.calls, bobId)).toBe(
+      "You've been assigned Task <code>T-001</code>: \"Write the report\" — due Friday, September 18. Send /done T-001 when you're ready for review.",
+    );
+  });
+
   it("/done, /complete, /completed, /update all work for a never-before-seen assignee", async () => {
     const roster = new Roster([]);
     const testBot = makeTestBot(roster);

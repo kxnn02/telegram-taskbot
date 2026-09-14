@@ -16,7 +16,9 @@ import { suggestClosestUsername } from "./usernameSuggest.js";
 import { parseStatusWord, VALID_STATUS_WORDS_TEXT } from "./statusParse.js";
 import { parseRefListItems, parseUpdateItems, type BatchItem } from "./updateBatch.js";
 import { findTaskByRef, type TaskLookup } from "./taskLookup.js";
-import { formatTaskRef } from "./taskRef.js";
+import { formatTaskRef, formatTaskRefHtml } from "./taskRef.js";
+import { renderDueDate } from "../date/renderDueDate.js";
+import { esc } from "./html.js";
 import {
   shouldTriggerBulkCreate,
   resolveBulkAssignee,
@@ -1025,11 +1027,15 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       reply += `\n${PAST_DUE_WARNING}`;
     }
     if (result.value.assigneeUsername !== normalizeUsername(caller.username)) {
+      const ref = formatTaskRef(result.value.id);
+      const rendered = renderDueDate(result.value.dueDate, new Date(), false, "long");
       const notified = await notifyUser(
         bot,
         registrations,
         result.value.assigneeUsername,
-        `You've been assigned Task ${result.value.id}: "${result.value.title}" (due ${result.value.dueDate}). Send /done ${result.value.id} when you're ready for review.`,
+        `You've been assigned Task ${formatTaskRefHtml(result.value.id)}: "${esc(result.value.title)}" — due ${rendered}. Send /done ${ref} when you're ready for review.`,
+        undefined,
+        { parse_mode: "HTML" },
       );
       if (!notified) {
         reply += `\nHeads-up: @${result.value.assigneeUsername} hasn't messaged me yet, so I couldn't notify them.`;
