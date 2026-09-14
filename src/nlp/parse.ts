@@ -249,6 +249,13 @@ export function cleanTaskTitle(
 
 const BULK_TASK_LABEL_STRIP_RE = /^(action\s*plan|note|fyi|task|update)\s*:\s*/i;
 
+/** Matches a bullet/numbered list line (`- `, `* `, `• `, `‣ `, `1.`/`1)`).
+ * The single source of truth for "is this line a list item?" — shared with
+ * `shouldTriggerBulkCreate` (`src/bot/bulkTaskCreate.ts`) so the trigger's
+ * "2+ bullet lines" gate and this module's segmentation never drift apart
+ * (issue #193). */
+export const BULLET_LINE_RE = /^\s*(?:[-*•‣]|\d+[.)])\s+\S/;
+
 /** The no-model fallback `parseBulkTasks` degrades to — on a missing API
  * key, a garbage response, or the model throwing. Deterministic paragraph
  * splitting plus the same due-date/priority extraction the model path
@@ -264,10 +271,20 @@ export function parseBulkTasksHeuristic(
     .replace(/@\w+/, "")
     .trim();
 
-  const chunked = withoutCmd
-    .split(/\n\s*\n+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+  // A bullet/numbered list with no blank lines between items (issue #193):
+  // segment it one task per line, matching what `shouldTriggerBulkCreate`
+  // routed here in the first place, before falling back to blank-line
+  // splitting below.
+  const lines = withoutCmd.split("\n");
+  const bulletLineCount = lines.filter((line) => BULLET_LINE_RE.test(line)).length;
+
+  const chunked =
+    bulletLineCount >= 2
+      ? lines.map((s) => s.trim()).filter((s) => BULLET_LINE_RE.test(s))
+      : withoutCmd
+          .split(/\n\s*\n+/)
+          .map((s) => s.trim())
+          .filter(Boolean);
 
   const paragraphs =
     chunked.length > 1
@@ -311,7 +328,8 @@ export function parseBulkTasksHeuristic(
 }
 
 const BULK_TASKS_SYSTEM_PROMPT = (today: string) => `You are a task extractor for a project management bot.
-The user will send text that assigns work to one or more people via @mentions.
+The user will send text listing one or more actionable items, usually — but not always —
+assigned to people via @mentions.
 Extract every actionable task and return ONLY a JSON array.
 Today's date is ${today}.
 
@@ -319,14 +337,16 @@ SUPPORTED MESSAGE FORMATS:
 1. Single @mention at top, multiple paragraphs below — each paragraph is a SEPARATE task for that person.
 2. Multiple @mentions inline — one task per mention.
 3. Bullet / numbered lists under a single @mention — each bullet is a separate task.
+4. Bullet / numbered list with NO @mention anywhere (a standalone checklist) — each bullet is still
+   a SEPARATE task; set "assignee" to null rather than returning [].
 
 SKIP THESE — return []:
 - Messages asking someone to add/post/update tasks in the chat.
-- Conversational messages with no concrete deliverable.
+- Conversational messages with no concrete deliverable and no list structure.
 - Messages where the @mention is tagging someone in a conversation, not assigning real project work.
 
 EXTRACTION RULES:
-- "assignee": @username without @, lowercase, first word only if full name.
+- "assignee": @username without @, lowercase, first word only if full name. null if no @mention applies.
 - "title": concise action (max 70 chars). Strip label prefixes like "Action Plan:", "Note:", "FYI:", "Task:", "Update:".
 - "description": any supporting context, details, or URLs within that paragraph beyond the main action verb phrase. Preserve URLs verbatim. null if nothing extra.
 - "priority": "low"|"medium"|"high"|"urgent" — infer from urgency words, default "medium".
