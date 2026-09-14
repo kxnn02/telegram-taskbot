@@ -37,6 +37,58 @@ describe("shouldTriggerBulkCreate", () => {
   it("is true for a semicolon-separated list", () => {
     expect(shouldTriggerBulkCreate("@dale fix login; review the PR")).toBe(true);
   });
+
+  // New test cases for issue #188: mention-free multi-paragraph prose
+  // should not trigger bulk create (only bullet/numbered lists or
+  // multi-mention/structured assignment patterns should).
+
+  it("(case 1) returns false for a 3-paragraph message with no mention", () => {
+    expect(
+      shouldTriggerBulkCreate(
+        `adjust date format if overdue just output x days ago
+
+for upcoming deadlines set to
+
+Day of the week, month date`
+      )
+    ).toBe(false);
+  });
+
+  it("(case 2) returns true for multiple mentions separated by blank lines", () => {
+    expect(shouldTriggerBulkCreate("@dom do X\n\n@jedd do Y")).toBe(true);
+  });
+
+  it("(case 3) returns true for a mention with a blank-line-separated body", () => {
+    expect(shouldTriggerBulkCreate("@dom do X\n\ndo Y")).toBe(true);
+  });
+
+  it("(case 4) returns true for a 2+ item bullet list with no mention", () => {
+    expect(shouldTriggerBulkCreate("- task one\n- task two")).toBe(true);
+  });
+
+  it("(case 5) returns true for a 2+ item numbered list with no mention", () => {
+    expect(shouldTriggerBulkCreate("1. one\n2. two")).toBe(true);
+  });
+
+  it("(case 6) returns false for a single-item bullet list", () => {
+    expect(shouldTriggerBulkCreate("- only one bullet")).toBe(false);
+  });
+
+  it("(case 7) returns false for a semicolon-separated list with no mention", () => {
+    expect(shouldTriggerBulkCreate("buy milk; buy eggs")).toBe(false);
+  });
+
+  it("(case 8) returns true for a semicolon-separated list with a mention", () => {
+    expect(shouldTriggerBulkCreate("@dom buy milk; buy eggs")).toBe(true);
+  });
+
+  it("(case 9) returns false for a single-line message with no mention", () => {
+    expect(shouldTriggerBulkCreate("single task no newline")).toBe(false);
+  });
+
+  it("(case 10) returns false for a single-line message with one mention", () => {
+    expect(shouldTriggerBulkCreate("@dom single task")).toBe(false);
+  });
 });
 
 // Devie's bulk insert (`route.ts:1140-1147`): `t.assignee === 'unassigned' ?
