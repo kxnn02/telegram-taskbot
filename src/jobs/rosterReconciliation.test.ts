@@ -249,6 +249,7 @@ describe("runRosterReconciliationJob", () => {
         verify: () => true,
         work: () => runRosterReconciliationJob(deps, "cohort-5"),
         onError: (error) => notifyJobFailure(notifyDeps, "roster-reconciliation", "cohort-5", error),
+        jobName: "roster-reconciliation",
       },
       { method: "POST", headers: {} },
     );

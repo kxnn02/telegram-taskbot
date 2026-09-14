@@ -41,10 +41,13 @@ export interface JobEndpointDeps {
    * fact. Any thrown error is swallowed the same way `onError`'s is — a
    * failure to *record* success must not turn a 200 into a 500. */
   recordRun?(status: "success" | "error", detail: string | null): Promise<void>;
-  /** Name of the job, used only to label a rejected-method log line (issue
-   * #199). Optional and not otherwise load-bearing — existing callers that
-   * don't pass it still work, they just get a generic label in that log. */
-  jobName?: string;
+  /** Name of the job, used to label a rejected-method log line (issue
+   * #199). Required — the compiler is the completeness check: every
+   * caller of `handleJobEndpoint` must supply its own canonical job name
+   * (the same string it already uses for `notifyJobFailure`/`recordRun`),
+   * so there is no dead default and no way to add a new endpoint without
+   * naming it in the log. */
+  jobName: string;
 }
 
 /**
@@ -60,7 +63,7 @@ export async function handleJobEndpoint(
 ): Promise<MinimalJobResponse> {
   if (req.method !== "GET" && req.method !== "POST") {
     console.error(
-      `handleJobEndpoint: ${deps.jobName ?? "unknown job"} rejected method ${req.method ?? "(none)"}`,
+      `handleJobEndpoint: ${deps.jobName} rejected method ${req.method ?? "(none)"}`,
     );
     return { status: 405 };
   }
