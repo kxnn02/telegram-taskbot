@@ -124,6 +124,24 @@ describe("formatDeadlines (issue #205 — grouped by day, shared vocabulary)", (
     expect(formatDeadlines([], NOW)).toBe("No deadlines due in the next 7 days.");
   });
 
+  it("HTML-escapes the title", () => {
+    const text = formatDeadlines(
+      [
+        task({
+          id: 1,
+          title: "<b>fix</b> & ship",
+          dueDate: "2026-09-01",
+          status: "todo",
+          previousStatus: null,
+          blockedReason: null,
+        }),
+      ],
+      NOW,
+    );
+    expect(text).toContain("&lt;b&gt;fix&lt;/b&gt; &amp; ship");
+    expect(text).not.toContain("<b>fix</b>");
+  });
+
   it("groups tasks under one day heading each, in the order given, with bare handles and no per-line status", () => {
     const text = formatDeadlines(
       [
