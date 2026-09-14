@@ -281,10 +281,16 @@ export function createBot(options: CreateBotOptions): CreatedBot {
 
   /** Sends `text` as one or more Telegram-sized messages (issue #55/F8):
    * several unbounded list commands could otherwise throw
-   * `Bad Request: message is too long`. */
-  async function replyChunked(ctx: import("grammy").Context, text: string): Promise<void> {
+   * `Bad Request: message is too long`. `html` defaults to `false` for the
+   * plain-text callers already using this; issue #205's `/deadlines` is the
+   * first to render markup through it. */
+  async function replyChunked(
+    ctx: import("grammy").Context,
+    text: string,
+    html = false,
+  ): Promise<void> {
     for (const chunk of chunkMessage(text)) {
-      await ctx.reply(chunk);
+      await ctx.reply(chunk, html ? { parse_mode: "HTML" as const } : undefined);
     }
   }
 
@@ -381,7 +387,11 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     "deadlines",
     withCaller(async (ctx, caller) => {
       const result = await service.listDeadlines(caller);
-      await replyChunked(ctx, result.ok ? formatDeadlines(result.value) : result.error);
+      await replyChunked(
+        ctx,
+        result.ok ? formatDeadlines(result.value, clock.now()) : result.error,
+        result.ok,
+      );
     }),
   );
 

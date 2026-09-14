@@ -117,18 +117,56 @@ describe("formatMyTasks pagination", () => {
   });
 });
 
-describe("formatDeadlines", () => {
-  it("says nothing is due when the list is empty", () => {
-    expect(formatDeadlines([])).toBe("Nothing due in the next 7 days.");
+describe("formatDeadlines (issue #205 — grouped by day, shared vocabulary)", () => {
+  const NOW = new Date("2026-08-25T02:00:00.000Z");
+
+  it("says no deadlines are due when the list is empty, per the shared empty-state shape", () => {
+    expect(formatDeadlines([], NOW)).toBe("No deadlines due in the next 7 days.");
   });
 
-  it("lists upcoming tasks with assignee, soonest first as given", () => {
-    const text = formatDeadlines([
-      task({ id: 1, title: "sooner", dueDate: "2026-09-01", status: "todo", previousStatus: null, blockedReason: null }),
-      task({ id: 2, title: "later", dueDate: "2026-09-05", status: "todo", previousStatus: null, blockedReason: null }),
-    ]);
-    expect(text.indexOf("#1")).toBeLessThan(text.indexOf("#2"));
-    expect(text).toContain("@alice");
+  it("groups tasks under one day heading each, in the order given, with bare handles and no per-line status", () => {
+    const text = formatDeadlines(
+      [
+        task({
+          id: 1,
+          title: "sooner",
+          dueDate: "2026-09-01",
+          status: "todo",
+          previousStatus: null,
+          blockedReason: null,
+          priority: "high",
+        }),
+        task({
+          id: 2,
+          title: "also sooner",
+          dueDate: "2026-09-01",
+          status: "in_progress",
+          previousStatus: null,
+          blockedReason: null,
+        }),
+        task({
+          id: 3,
+          title: "later",
+          dueDate: "2026-09-05",
+          status: "todo",
+          previousStatus: null,
+          blockedReason: null,
+        }),
+      ],
+      NOW,
+    );
+    expect(text).toBe(
+      [
+        "Due in the next 7 days:",
+        "",
+        "<b>Tue, Sep 1</b>",
+        "• <code>T-001</code> 🟠 sooner — @alice",
+        "• <code>T-002</code> also sooner — @alice",
+        "",
+        "<b>Sat, Sep 5</b>",
+        "• <code>T-003</code> later — @alice",
+      ].join("\n"),
+    );
   });
 });
 

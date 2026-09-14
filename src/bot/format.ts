@@ -3,6 +3,8 @@ import type { TaskWithFlags } from "../service/taskService.js";
 import type { Task, TaskPriority, TaskStatus } from "../domain/types.js";
 import { MANILA_ZONE } from "../domain/overdue.js";
 import { esc } from "./html.js";
+import { formatTaskRefHtml } from "./taskRef.js";
+import { renderDueDate } from "../date/renderDueDate.js";
 
 /** Display labels for the six free-set statuses (#27's normative status
  * table) — the only place this vocabulary is spelled out for user-facing
@@ -127,14 +129,28 @@ export function formatMyTasks(tasks: TaskWithFlags[], page = 1): string {
   return lines.join("\n");
 }
 
-export function formatDeadlines(tasks: TaskWithFlags[]): string {
+/** Issue #205 (spec #201's density reduction): grouped by day so the date
+ * is stated once per group rather than once per task, dropping the
+ * per-line status label, status glyph and "assigned to" wrapper. `tasks`
+ * is assumed already sorted by due date (as `listDeadlines` returns it) —
+ * grouping here only clusters adjacent same-day entries, it does not sort.
+ * Sent with `parse_mode: "HTML"`. */
+export function formatDeadlines(tasks: TaskWithFlags[], now: Date): string {
   if (tasks.length === 0) {
-    return "Nothing due in the next 7 days.";
+    return "No deadlines due in the next 7 days.";
   }
-  return [
-    "Due in the next 7 days:",
-    ...tasks.map((t) => `- ⏰ ${formatTaskLine(t)} (assigned to @${t.assigneeUsername})`),
-  ].join("\n");
+  const lines = ["Due in the next 7 days:"];
+  let currentDueDate: string | undefined;
+  for (const t of tasks) {
+    if (t.dueDate !== currentDueDate) {
+      currentDueDate = t.dueDate;
+      lines.push("", `<b>${renderDueDate(t.dueDate, now, false, "short")}</b>`);
+    }
+    lines.push(
+      `• ${formatTaskRefHtml(t.id)}${PRIORITY_BADGE[t.priority]} ${esc(t.title)} — @${t.assigneeUsername}`,
+    );
+  }
+  return lines.join("\n");
 }
 
 /** Short Manila-resolved date for the weekly digest's "marked done" lines
