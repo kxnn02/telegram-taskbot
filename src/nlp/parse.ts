@@ -375,7 +375,9 @@ export async function parseBulkTasks(
       user: message,
       maxTokens: 2048,
     });
-  } catch {
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("parseBulkTasks: model threw, falling back to heuristic.", error);
     return parseBulkTasksHeuristic(message, referenceDate);
   }
 
@@ -398,6 +400,8 @@ export async function parseBulkTasks(
     }
   }
 
+  // eslint-disable-next-line no-console
+  console.error("parseBulkTasks: model returned no tasks, falling back to heuristic.");
   return parseBulkTasksHeuristic(message, referenceDate);
 }
 
