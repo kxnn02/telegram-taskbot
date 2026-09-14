@@ -371,7 +371,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     "tasks",
     withCaller(async (ctx, caller) => {
       const filter = parseTasksFilter(matchToString(ctx.match));
-      const { pages, allRoles } = await fetchTaskPages(service, caller, roster, filter);
+      const { pages, allRoles } = await fetchTaskPages(service, caller, roster, filter, clock.now());
       const { text, keyboard } = buildTasksPage(pages, 0, filter.roleFilter, allRoles);
       await sendCard(ctx, text, keyboard, true);
     }),
@@ -425,10 +425,13 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     if (tasksCb) {
       const caller = await requireCaller(ctx);
       if (caller) {
-        const { pages, allRoles } = await fetchTaskPages(service, caller, roster, {
-          roleFilter: tasksCb.roleFilter,
-          assigneeFilter: null,
-        });
+        const { pages, allRoles } = await fetchTaskPages(
+          service,
+          caller,
+          roster,
+          { roleFilter: tasksCb.roleFilter, assigneeFilter: null },
+          clock.now(),
+        );
         const { text, keyboard } = buildTasksPage(
           pages,
           tasksCb.page,

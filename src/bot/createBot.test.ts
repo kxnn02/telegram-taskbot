@@ -656,7 +656,7 @@ describe("paged /tasks (issue #103 items 1 and 2)", () => {
 
     await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/tasks cohort-9"));
     expect(lastCall(testBot.calls, "sendMessage")!.payload.text).toBe(
-      "📋 <b>Tasks — cohort-9</b>\n\n<i>No active tasks for this filter.</i>",
+      "📋 <b>Tasks — cohort-9</b>\n\n<i>No open tasks for this filter.</i>",
     );
   });
 
