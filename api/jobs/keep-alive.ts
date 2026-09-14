@@ -63,6 +63,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           work: () => pingDatabase(client),
           onError,
           recordRun: buildJobRunRecorder(client, JOB_NAME),
+          jobName: JOB_NAME,
         },
         {
           method: req.method,

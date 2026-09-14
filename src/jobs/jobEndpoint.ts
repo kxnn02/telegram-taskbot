@@ -41,20 +41,30 @@ export interface JobEndpointDeps {
    * fact. Any thrown error is swallowed the same way `onError`'s is — a
    * failure to *record* success must not turn a 200 into a 500. */
   recordRun?(status: "success" | "error", detail: string | null): Promise<void>;
+  /** Name of the job, used to label a rejected-method log line (issue
+   * #199). Required — the compiler is the completeness check: every
+   * caller of `handleJobEndpoint` must supply its own canonical job name
+   * (the same string it already uses for `notifyJobFailure`/`recordRun`),
+   * so there is no dead default and no way to add a new endpoint without
+   * naming it in the log. */
+  jobName: string;
 }
 
 /**
- * Runs one job's HTTP envelope: only accepts POST (matching how `pg_net`
- * and Vercel Cron both call these — no query-string-driven GET jobs), then
- * authenticates, then runs the job's work, reporting and swallowing any
- * failure into a 500 rather than letting it propagate as an unhandled
- * rejection.
+ * Runs one job's HTTP envelope: accepts GET or POST — `pg_net` calls with
+ * POST, Vercel Cron calls with GET, both are accepted, everything else is
+ * rejected with a 405 (issue #199) — then authenticates, then runs the
+ * job's work, reporting and swallowing any failure into a 500 rather than
+ * letting it propagate as an unhandled rejection.
  */
 export async function handleJobEndpoint(
   deps: JobEndpointDeps,
   req: MinimalJobRequest,
 ): Promise<MinimalJobResponse> {
-  if (req.method !== "POST") {
+  if (req.method !== "GET" && req.method !== "POST") {
+    console.error(
+      `handleJobEndpoint: ${deps.jobName} rejected method ${req.method ?? "(none)"}`,
+    );
     return { status: 405 };
   }
   if (!deps.verify(req.headers)) {

@@ -34,6 +34,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           env.activeCohortId,
           error,
         ),
+      jobName: JOB_NAME,
     },
     {
       method: req.method,
