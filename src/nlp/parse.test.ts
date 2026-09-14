@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   appendDescription,
   cleanTaskTitle,
@@ -364,6 +364,60 @@ describe("parseBulkTasks", () => {
     const result = await parseBulkTasks(message, model, REFERENCE);
     expect(result).toHaveLength(1);
     expect(result[0]!.description).toBe("standby on-site");
+  });
+
+  it("logs a warning when the model throws, including the error message", async () => {
+    const message = "@dale fix the login bug by tomorrow";
+    const errorMsg = "API rate limited";
+    const errorSpy = vi.spyOn(console, "error");
+    const model = new ThrowingTextModel(new Error(errorMsg));
+    const result = await parseBulkTasks(message, model, REFERENCE);
+    expect(result).toEqual(parseBulkTasksHeuristic(message, REFERENCE));
+    expect(errorSpy).toHaveBeenCalled();
+    const loggedMsg = errorSpy.mock.calls[0]?.[0];
+    expect(String(loggedMsg)).toContain(errorMsg);
+    expect(String(loggedMsg)).toContain("heuristic");
+    errorSpy.mockRestore();
+  });
+
+  it("does not log the raw message content when the model throws", async () => {
+    const message = "@dale fix the login bug by tomorrow";
+    const errorSpy = vi.spyOn(console, "error");
+    const model = new ThrowingTextModel(new Error("model error"));
+    await parseBulkTasks(message, model, REFERENCE);
+    const loggedMsg = String(errorSpy.mock.calls[0]?.[0]);
+    expect(loggedMsg).not.toContain("fix the login bug");
+    expect(loggedMsg).not.toContain("tomorrow");
+    errorSpy.mockRestore();
+  });
+
+  it("logs when the model returns zero tasks, and falls back to heuristic", async () => {
+    const message = "@dale fix the login bug";
+    const model = new FakeTextModel([JSON.stringify([])]);
+    const errorSpy = vi.spyOn(console, "error");
+    const result = await parseBulkTasks(message, model, REFERENCE);
+    expect(result).toEqual(parseBulkTasksHeuristic(message, REFERENCE));
+    expect(errorSpy).toHaveBeenCalled();
+    const loggedMsg = String(errorSpy.mock.calls[0]?.[0]);
+    expect(loggedMsg).toContain("no tasks");
+    expect(loggedMsg).toContain("heuristic");
+    errorSpy.mockRestore();
+  });
+
+  it("does not log when the model succeeds and returns tasks", async () => {
+    const message = "@dale fix the login bug by tomorrow";
+    const model = new FakeTextModel([
+      JSON.stringify([
+        { assignee: "dale", title: "Fix the login bug", priority: "medium", dueDate: null },
+      ]),
+    ]);
+    const errorSpy = vi.spyOn(console, "error");
+    const logSpy = vi.spyOn(console, "log");
+    await parseBulkTasks(message, model, REFERENCE);
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(logSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+    logSpy.mockRestore();
   });
 });
 
