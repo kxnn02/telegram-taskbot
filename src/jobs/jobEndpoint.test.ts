@@ -9,16 +9,79 @@ function makeReq(overrides: Partial<{ method: string; headers: Record<string, st
 }
 
 describe("handleJobEndpoint", () => {
-  it("rejects a non-POST method with 405 without checking auth or running work", async () => {
+  it("GET reaches verify() — the result is not 405 (regression test for issue #199)", async () => {
     const verify = vi.fn().mockReturnValue(true);
-    const work = vi.fn();
+    const work = vi.fn().mockResolvedValue(undefined);
     const res = await handleJobEndpoint(
       { verify, work, onError: vi.fn() },
       makeReq({ method: "GET" }),
     );
+    expect(verify).toHaveBeenCalled();
+    expect(res.status).not.toBe(405);
+  });
+
+  it("GET with valid auth runs work() and records a job_runs success", async () => {
+    const verify = vi.fn().mockReturnValue(true);
+    const work = vi.fn().mockResolvedValue(undefined);
+    const recordRun = vi.fn().mockResolvedValue(undefined);
+    const res = await handleJobEndpoint(
+      { verify, work, onError: vi.fn(), recordRun },
+      makeReq({ method: "GET" }),
+    );
+    expect(res.status).toBe(200);
+    expect(work).toHaveBeenCalledTimes(1);
+    expect(recordRun).toHaveBeenCalledWith("success", null);
+  });
+
+  it("POST still verifies, runs work and records the run exactly as before (regression)", async () => {
+    const verify = vi.fn().mockReturnValue(true);
+    const work = vi.fn().mockResolvedValue(undefined);
+    const recordRun = vi.fn().mockResolvedValue(undefined);
+    const res = await handleJobEndpoint(
+      { verify, work, onError: vi.fn(), recordRun },
+      makeReq({ method: "POST" }),
+    );
+    expect(res.status).toBe(200);
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(work).toHaveBeenCalledTimes(1);
+    expect(recordRun).toHaveBeenCalledWith("success", null);
+  });
+
+  it("rejects a method that is neither GET nor POST with 405 without checking auth or running work", async () => {
+    const verify = vi.fn().mockReturnValue(true);
+    const work = vi.fn();
+    const res = await handleJobEndpoint(
+      { verify, work, onError: vi.fn() },
+      makeReq({ method: "PUT" }),
+    );
     expect(res.status).toBe(405);
     expect(verify).not.toHaveBeenCalled();
     expect(work).not.toHaveBeenCalled();
+  });
+
+  it("logs the job name and rejected method via console.error on a 405, without recording a run or invoking error reporting", async () => {
+    const verify = vi.fn().mockReturnValue(true);
+    const work = vi.fn();
+    const onError = vi.fn();
+    const recordRun = vi.fn();
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const res = await handleJobEndpoint(
+        { verify, work, onError, recordRun, jobName: "keep-alive" },
+        makeReq({ method: "DELETE" }),
+      );
+      expect(res.status).toBe(405);
+      expect(verify).not.toHaveBeenCalled();
+      expect(work).not.toHaveBeenCalled();
+      expect(onError).not.toHaveBeenCalled();
+      expect(recordRun).not.toHaveBeenCalled();
+      expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+      const [message] = consoleErrorSpy.mock.calls[0] ?? [];
+      expect(message).toContain("keep-alive");
+      expect(message).toContain("DELETE");
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
   });
 
   it("returns 401 when verify rejects the request, without running work", async () => {
@@ -90,7 +153,7 @@ describe("handleJobEndpoint", () => {
     const recordRun = vi.fn();
     await handleJobEndpoint(
       { verify: () => true, work: vi.fn(), onError: vi.fn(), recordRun },
-      makeReq({ method: "GET" }),
+      makeReq({ method: "PUT" }),
     );
     await handleJobEndpoint(
       { verify: () => false, work: vi.fn(), onError: vi.fn(), recordRun },
