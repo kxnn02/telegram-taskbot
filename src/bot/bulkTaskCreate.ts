@@ -1,5 +1,6 @@
 import { DateTime } from "luxon";
 import { normalizeUsername } from "../domain/roster.js";
+import { BULLET_LINE_RE } from "../nlp/parse.js";
 import { formatTaskRef } from "./taskRef.js";
 import { esc } from "./html.js";
 
@@ -25,8 +26,6 @@ import { esc } from "./html.js";
  *   like `Action Plan:` or `;`-separated segments).
  */
 export function shouldTriggerBulkCreate(raw: string): boolean {
-  const BULLET_LINE_RE = /^\s*(?:[-*•‣]|\d+[.)])\s+\S/;
-
   const mentions = [...raw.matchAll(/@(\w+)/g)];
   const hasMultipleMentions = mentions.length > 1;
   const hasAnyMention = mentions.length > 0;

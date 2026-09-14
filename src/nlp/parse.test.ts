@@ -325,6 +325,62 @@ Note: Standby on-site.`;
     const result = parseBulkTasksHeuristic("@dale this is urgent, fix the login bug", REFERENCE);
     expect(result[0]!.priority).toBe("urgent");
   });
+
+  it("splits a mention-free bullet list with no blank lines into one task per bullet (issue #193)", () => {
+    const message = `- buy the domain
+- set up DNS
+- deploy the site`;
+    const result = parseBulkTasksHeuristic(message, REFERENCE);
+    expect(result).toHaveLength(3);
+    expect(result[0]!.title).toBe("buy the domain");
+    expect(result[1]!.title).toBe("set up DNS");
+    expect(result[2]!.title).toBe("deploy the site");
+  });
+
+  it("splits a mention-free numbered list with no blank lines into one task per line (issue #193)", () => {
+    const message = `1. buy the domain
+2. set up DNS
+3. deploy the site`;
+    const result = parseBulkTasksHeuristic(message, REFERENCE);
+    expect(result).toHaveLength(3);
+    expect(result[0]!.title).toBe("buy the domain");
+    expect(result[1]!.title).toBe("set up DNS");
+    expect(result[2]!.title).toBe("deploy the site");
+  });
+
+  it("does not bullet-split when only one line looks like a bullet (issue #193)", () => {
+    const message = `- buy the domain
+set up DNS
+deploy the site`;
+    const result = parseBulkTasksHeuristic(message, REFERENCE);
+    expect(result).toHaveLength(1);
+  });
+
+  it("still splits on blank lines unchanged when there is no bullet list (regression, issue #193)", () => {
+    const message = `@Dale
+Summarize recommendations into slides.
+
+Action Plan: Present these tomorrow.
+
+Note: Standby on-site.`;
+    const result = parseBulkTasksHeuristic(message, REFERENCE);
+    expect(result).toHaveLength(2);
+    expect(result[0]!.title).toBe("Summarize recommendations into slides");
+    expect(result[1]!.title).toBe("Present these");
+  });
+
+  it("assigns every item to the mentioned person when a bullet list includes an @mention (issue #193)", () => {
+    const message = `@dale
+- buy the domain
+- set up DNS
+- deploy the site`;
+    const result = parseBulkTasksHeuristic(message, REFERENCE);
+    expect(result).toHaveLength(3);
+    expect(result.every((t) => t.assignee === "dale")).toBe(true);
+    expect(result[0]!.title).toBe("buy the domain");
+    expect(result[1]!.title).toBe("set up DNS");
+    expect(result[2]!.title).toBe("deploy the site");
+  });
 });
 
 describe("parseBulkTasks", () => {
