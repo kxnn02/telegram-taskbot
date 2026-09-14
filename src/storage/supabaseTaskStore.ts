@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Note, Task, TaskPriority, TaskStatus } from "../domain/types.js";
 import type { TaskRecord, TaskStorePort, UpdateOutcome } from "./taskStorePort.js";
+import { withRetry } from "./retry.js";
 
 interface TaskRow {
   id: number;
@@ -131,91 +132,99 @@ export class SupabaseTaskStore implements TaskStorePort {
   }
 
   async findTaskById(cohortId: string, id: number): Promise<TaskRecord | undefined> {
-    const { data, error } = await this.client
-      .from("tasks")
-      .select()
-      .eq("cohort_id", cohortId)
-      .eq("id", id)
-      .maybeSingle();
-    if (error) {
-      throw new Error(`findTaskById(${cohortId}, ${id}) failed: ${error.message}`);
-    }
-    if (!data) return undefined;
-    const notes = await this.notesFor(cohortId, id);
-    return toRecord(data as TaskRow, notes);
+    return withRetry(async () => {
+      const { data, error } = await this.client
+        .from("tasks")
+        .select()
+        .eq("cohort_id", cohortId)
+        .eq("id", id)
+        .maybeSingle();
+      if (error) {
+        throw new Error(`findTaskById(${cohortId}, ${id}) failed: ${error.message}`);
+      }
+      if (!data) return undefined;
+      const notes = await this.notesFor(cohortId, id);
+      return toRecord(data as TaskRow, notes);
+    });
   }
 
   async listTasksByCohort(cohortId: string): Promise<TaskRecord[]> {
-    const { data, error } = await this.client
-      .from("tasks")
-      .select()
-      .eq("cohort_id", cohortId)
-      .order("id", { ascending: true });
-    if (error) {
-      throw new Error(`listTasksByCohort(${cohortId}) failed: ${error.message}`);
-    }
-    const rows = (data ?? []) as TaskRow[];
-    const notesByTask = await this.notesForMany(cohortId, rows.map((r) => r.id));
-    return rows.map((row) => toRecord(row, notesByTask.get(row.id) ?? []));
+    return withRetry(async () => {
+      const { data, error } = await this.client
+        .from("tasks")
+        .select()
+        .eq("cohort_id", cohortId)
+        .order("id", { ascending: true });
+      if (error) {
+        throw new Error(`listTasksByCohort(${cohortId}) failed: ${error.message}`);
+      }
+      const rows = (data ?? []) as TaskRow[];
+      const notesByTask = await this.notesForMany(cohortId, rows.map((r) => r.id));
+      return rows.map((row) => toRecord(row, notesByTask.get(row.id) ?? []));
+    });
   }
 
   private async notesForMany(
     cohortId: string,
     taskIds: number[],
   ): Promise<Map<number, Note[]>> {
-    if (taskIds.length === 0) {
-      return new Map();
-    }
+    return withRetry(async () => {
+      if (taskIds.length === 0) {
+        return new Map();
+      }
 
-    const chunkSize = 200;
-    const result = new Map<number, Note[]>();
+      const chunkSize = 200;
+      const result = new Map<number, Note[]>();
 
-    // Process taskIds in chunks of 200
-    for (let i = 0; i < taskIds.length; i += chunkSize) {
-      const chunk = taskIds.slice(i, i + chunkSize);
+      // Process taskIds in chunks of 200
+      for (let i = 0; i < taskIds.length; i += chunkSize) {
+        const chunk = taskIds.slice(i, i + chunkSize);
+        const { data, error } = await this.client
+          .from("notes")
+          .select()
+          .eq("cohort_id", cohortId)
+          .in("task_id", chunk)
+          .order("task_id", { ascending: true })
+          .order("note_id", { ascending: true });
+
+        if (error) {
+          throw new Error(`notesForMany(${cohortId}) failed: ${error.message}`);
+        }
+
+        // Group rows by task_id
+        for (const row of (data as NoteRow[]) ?? []) {
+          if (!result.has(row.task_id)) {
+            result.set(row.task_id, []);
+          }
+          result.get(row.task_id)!.push({
+            text: row.text,
+            authorUsername: row.author_username,
+            createdAt: row.created_at,
+          });
+        }
+      }
+
+      return result;
+    });
+  }
+
+  private async notesFor(cohortId: string, taskId: number): Promise<Note[]> {
+    return withRetry(async () => {
       const { data, error } = await this.client
         .from("notes")
         .select()
         .eq("cohort_id", cohortId)
-        .in("task_id", chunk)
-        .order("task_id", { ascending: true })
+        .eq("task_id", taskId)
         .order("note_id", { ascending: true });
-
       if (error) {
-        throw new Error(`notesForMany(${cohortId}) failed: ${error.message}`);
+        throw new Error(`notesFor(${cohortId}, ${taskId}) failed: ${error.message}`);
       }
-
-      // Group rows by task_id
-      for (const row of (data as NoteRow[]) ?? []) {
-        if (!result.has(row.task_id)) {
-          result.set(row.task_id, []);
-        }
-        result.get(row.task_id)!.push({
-          text: row.text,
-          authorUsername: row.author_username,
-          createdAt: row.created_at,
-        });
-      }
-    }
-
-    return result;
-  }
-
-  private async notesFor(cohortId: string, taskId: number): Promise<Note[]> {
-    const { data, error } = await this.client
-      .from("notes")
-      .select()
-      .eq("cohort_id", cohortId)
-      .eq("task_id", taskId)
-      .order("note_id", { ascending: true });
-    if (error) {
-      throw new Error(`notesFor(${cohortId}, ${taskId}) failed: ${error.message}`);
-    }
-    return (data as NoteRow[]).map((row) => ({
-      text: row.text,
-      authorUsername: row.author_username,
-      createdAt: row.created_at,
-    }));
+      return (data as NoteRow[]).map((row) => ({
+        text: row.text,
+        authorUsername: row.author_username,
+        createdAt: row.created_at,
+      }));
+    });
   }
 }
 
