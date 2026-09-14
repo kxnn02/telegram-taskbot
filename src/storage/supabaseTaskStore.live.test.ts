@@ -119,11 +119,9 @@ describe("SupabaseTaskStore retry regression tests", () => {
           return {
             select: () => ({
               eq: () => ({
-                eq: () => ({
-                  order: () => ({
-                    error,
-                    data: null,
-                  }),
+                order: () => ({
+                  error,
+                  data: null,
                 }),
               }),
             }),
@@ -146,6 +144,7 @@ describe("SupabaseTaskStore retry regression tests", () => {
 
     // Mock the client's from() method to always throw a non-transient error
     let taskQueryCount = 0;
+    const originalFrom = client.from.bind(client);
     vi.spyOn(client, "from").mockImplementation(function (table: string) {
       if (table === "tasks") {
         taskQueryCount++;
@@ -153,23 +152,25 @@ describe("SupabaseTaskStore retry regression tests", () => {
         return {
           select: () => ({
             eq: () => ({
-              eq: () => ({
-                order: () => ({
-                  error: new Error('column "nonexistent" does not exist'),
-                  data: null,
-                }),
+              order: () => ({
+                error: new Error('column "nonexistent" does not exist'),
+                data: null,
               }),
             }),
           }),
         } as never;
       }
-      return {} as never;
+      return originalFrom(table);
     });
 
-    // The call should fail immediately without retrying
-    await expect(store.listTasksByCohort(cohortId)).rejects.toThrow(
-      'column "nonexistent" does not exist',
-    );
-    expect(taskQueryCount).toBe(1);
+    try {
+      // The call should fail immediately without retrying
+      await expect(store.listTasksByCohort(cohortId)).rejects.toThrow(
+        'column "nonexistent" does not exist',
+      );
+      expect(taskQueryCount).toBe(1);
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 });
