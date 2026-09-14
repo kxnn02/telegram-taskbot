@@ -155,11 +155,50 @@ export class SupabaseTaskStore implements TaskStorePort {
       throw new Error(`listTasksByCohort(${cohortId}) failed: ${error.message}`);
     }
     const rows = (data ?? []) as TaskRow[];
-    const records: TaskRecord[] = [];
-    for (const row of rows) {
-      records.push(toRecord(row, await this.notesFor(cohortId, row.id)));
+    const notesByTask = await this.notesForMany(cohortId, rows.map((r) => r.id));
+    return rows.map((row) => toRecord(row, notesByTask.get(row.id) ?? []));
+  }
+
+  private async notesForMany(
+    cohortId: string,
+    taskIds: number[],
+  ): Promise<Map<number, Note[]>> {
+    if (taskIds.length === 0) {
+      return new Map();
     }
-    return records;
+
+    const chunkSize = 200;
+    const result = new Map<number, Note[]>();
+
+    // Process taskIds in chunks of 200
+    for (let i = 0; i < taskIds.length; i += chunkSize) {
+      const chunk = taskIds.slice(i, i + chunkSize);
+      const { data, error } = await this.client
+        .from("notes")
+        .select()
+        .eq("cohort_id", cohortId)
+        .in("task_id", chunk)
+        .order("task_id", { ascending: true })
+        .order("note_id", { ascending: true });
+
+      if (error) {
+        throw new Error(`notesForMany(${cohortId}) failed: ${error.message}`);
+      }
+
+      // Group rows by task_id
+      for (const row of (data as NoteRow[]) ?? []) {
+        if (!result.has(row.task_id)) {
+          result.set(row.task_id, []);
+        }
+        result.get(row.task_id)!.push({
+          text: row.text,
+          authorUsername: row.author_username,
+          createdAt: row.created_at,
+        });
+      }
+    }
+
+    return result;
   }
 
   private async notesFor(cohortId: string, taskId: number): Promise<Note[]> {
