@@ -168,63 +168,59 @@ export class SupabaseTaskStore implements TaskStorePort {
     cohortId: string,
     taskIds: number[],
   ): Promise<Map<number, Note[]>> {
-    return withRetry(async () => {
-      if (taskIds.length === 0) {
-        return new Map();
-      }
+    if (taskIds.length === 0) {
+      return new Map();
+    }
 
-      const chunkSize = 200;
-      const result = new Map<number, Note[]>();
+    const chunkSize = 200;
+    const result = new Map<number, Note[]>();
 
-      // Process taskIds in chunks of 200
-      for (let i = 0; i < taskIds.length; i += chunkSize) {
-        const chunk = taskIds.slice(i, i + chunkSize);
-        const { data, error } = await this.client
-          .from("notes")
-          .select()
-          .eq("cohort_id", cohortId)
-          .in("task_id", chunk)
-          .order("task_id", { ascending: true })
-          .order("note_id", { ascending: true });
-
-        if (error) {
-          throw new Error(`notesForMany(${cohortId}) failed: ${error.message}`);
-        }
-
-        // Group rows by task_id
-        for (const row of (data as NoteRow[]) ?? []) {
-          if (!result.has(row.task_id)) {
-            result.set(row.task_id, []);
-          }
-          result.get(row.task_id)!.push({
-            text: row.text,
-            authorUsername: row.author_username,
-            createdAt: row.created_at,
-          });
-        }
-      }
-
-      return result;
-    });
-  }
-
-  private async notesFor(cohortId: string, taskId: number): Promise<Note[]> {
-    return withRetry(async () => {
+    // Process taskIds in chunks of 200
+    for (let i = 0; i < taskIds.length; i += chunkSize) {
+      const chunk = taskIds.slice(i, i + chunkSize);
       const { data, error } = await this.client
         .from("notes")
         .select()
         .eq("cohort_id", cohortId)
-        .eq("task_id", taskId)
+        .in("task_id", chunk)
+        .order("task_id", { ascending: true })
         .order("note_id", { ascending: true });
+
       if (error) {
-        throw new Error(`notesFor(${cohortId}, ${taskId}) failed: ${error.message}`);
+        throw new Error(`notesForMany(${cohortId}) failed: ${error.message}`);
       }
-      return (data as NoteRow[]).map((row) => ({
-        text: row.text,
-        authorUsername: row.author_username,
-        createdAt: row.created_at,
-      }));
-    });
+
+      // Group rows by task_id
+      for (const row of (data as NoteRow[]) ?? []) {
+        if (!result.has(row.task_id)) {
+          result.set(row.task_id, []);
+        }
+        result.get(row.task_id)!.push({
+          text: row.text,
+          authorUsername: row.author_username,
+          createdAt: row.created_at,
+        });
+      }
+    }
+
+    return result;
+  }
+
+  private async notesFor(cohortId: string, taskId: number): Promise<Note[]> {
+    const { data, error } = await this.client
+      .from("notes")
+      .select()
+      .eq("cohort_id", cohortId)
+      .eq("task_id", taskId)
+      .order("note_id", { ascending: true });
+    if (error) {
+      throw new Error(`notesFor(${cohortId}, ${taskId}) failed: ${error.message}`);
+    }
+    return (data as NoteRow[]).map((row) => ({
+      text: row.text,
+      authorUsername: row.author_username,
+      createdAt: row.created_at,
+    }));
   }
 }
 
