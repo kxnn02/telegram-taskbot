@@ -115,14 +115,30 @@ export function formatTaskLine(task: TaskWithFlags): string {
   return `#${task.id}${PRIORITY_BADGE[task.priority]} ${task.title} — ${STATUS_EMOJI[task.status]} ${statusLabel(task.status)} (due ${task.dueDate})${flagText}`;
 }
 
-export function formatMyTasks(tasks: TaskWithFlags[], page = 1): string {
+/** One task's line on the daily digest (issue #206, spec #201's short
+ * form): the shared monospace identifier, priority badge and bullet, plus
+ * the shared due-date renderer in short form — which already reads as
+ * "3 days ago"/"yesterday"/"today" for anything late or due soon, so the
+ * old bracketed `[⚠️ OVERDUE 5d]` flag is gone; the date text itself now
+ * carries that. Distinct from `formatTaskLine` (the standup card's own
+ * line, out of this ticket's scope) so converting the digest doesn't
+ * change the standup card underneath it. */
+function formatDigestTaskLine(task: TaskWithFlags, now: Date): string {
+  const due = renderDueDate(task.dueDate, now, task.overdue, "short");
+  return `• ${formatTaskRefHtml(task.id)}${PRIORITY_BADGE[task.priority]} ${esc(task.title)} — ${STATUS_EMOJI[task.status]} ${statusLabel(task.status)} (due ${due})`;
+}
+
+/** Daily digest content (issue #206, spec #201): shared identifier, date,
+ * priority and bullet vocabulary, in short form (several tasks listed at
+ * once). Sent with `parse_mode: "HTML"`. */
+export function formatMyTasks(tasks: TaskWithFlags[], now: Date, page = 1): string {
   if (tasks.length === 0) {
-    return "You're all clear — no tasks right now.";
+    return "No open tasks.";
   }
   const paged = paginate(tasks, page);
   const lines = [
     "Your open tasks:",
-    ...paged.items.map((t) => "- " + formatTaskLine(t)),
+    ...paged.items.map((t) => formatDigestTaskLine(t, now)),
   ];
   const footer = paginationFooter("tasks", paged.page, paged.totalPages);
   if (footer) lines.push("", footer);
@@ -169,12 +185,13 @@ function formatShortDate(isoDate: string): string {
  * not a variant of either. */
 export function formatWeeklyCompleted(tasks: TaskWithFlags[]): string {
   if (tasks.length === 0) {
-    return "Nothing completed this week.";
+    return "No tasks completed this week.";
   }
   return [
     `✅ Completed this week (${tasks.length}):`,
     ...tasks.map(
-      (t) => `- #${t.id} ${t.title} (marked done ${formatShortDate(t.updatedAt)})`,
+      (t) =>
+        `• ${formatTaskRefHtml(t.id)}${PRIORITY_BADGE[t.priority]} ${esc(t.title)} (marked done ${formatShortDate(t.updatedAt)})`,
     ),
   ].join("\n");
 }

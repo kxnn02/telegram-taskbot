@@ -63,6 +63,28 @@ describe("runRosterReconciliationJob", () => {
     }
   });
 
+  it("sends a heading naming the count, one name per line, and the instruction last (issue #206)", async () => {
+    const { deps, sendMessage } = makeDeps({
+      api: makeMembershipApi({ 1: { status: "left" }, 2: { status: "left" } }),
+    });
+    await deps.registrations.register(1, "alice");
+    await deps.registrations.register(2, "bob");
+    await deps.registrations.register(3, "carol");
+
+    await runRosterReconciliationJob(deps, "cohort-5");
+
+    expect(sendMessage.mock.calls[0]![1]).toBe(
+      [
+        "Roster reconciliation: 2 member(s) appear to have left the cohort group and no longer show as present.",
+        "",
+        "• alice",
+        "• bob",
+        "",
+        "They still hold roster access — review and remove them manually if they've actually left.",
+      ].join("\n"),
+    );
+  });
+
   it("does not flag a present member", async () => {
     const { deps, sendMessage } = makeDeps({
       api: makeMembershipApi({ 1: { status: "member" } }),

@@ -152,17 +152,19 @@ export async function runDailyDigest(
   deps: SchedulerDeps,
   digestBuilder: DigestBuilder,
   cohortId: string,
+  now: Date = new Date(),
 ): Promise<void> {
   const entries = deps.roster.all().filter((e) => e.cohortId === cohortId);
   for (const entry of entries) {
     try {
-      const text = await digestBuilder.ownTasksDigest(entry.username, cohortId);
+      const text = await digestBuilder.ownTasksDigest(entry.username, cohortId, now);
       if (text) {
         await sendDM(
           deps.bot,
           deps.registrations,
           entry.username,
           `Daily digest:\n\n${text}`,
+          { parse_mode: "HTML" },
         );
       }
     } catch (err) {
@@ -196,6 +198,7 @@ export async function runWeeklyDigest(
           deps.registrations,
           entry.username,
           `Weekly digest:\n\n${text}`,
+          { parse_mode: "HTML" },
         );
       }
     } catch (err) {

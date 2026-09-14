@@ -19,12 +19,13 @@ export class DigestBuilder {
   constructor(private readonly deps: DigestBuilderDeps) {}
 
   /** Own-open-tasks digest — the daily digest's shape (PRD §8, #145).
-   * Returns null when the member has nothing open. */
-  async ownTasksDigest(username: string, cohortId: string): Promise<string | null> {
+   * Returns null when the member has nothing open. `now` is threaded into
+   * `formatMyTasks` for its short-form due-date rendering (issue #206). */
+  async ownTasksDigest(username: string, cohortId: string, now: Date): Promise<string | null> {
     const caller: Caller = { username, cohortId };
     const result = await this.deps.service.listMyTasks(caller);
     if (!result.ok || result.value.length === 0) return null;
-    return formatMyTasks(result.value);
+    return formatMyTasks(result.value, now);
   }
 
   /** Weekly digest content (#143 D4b / #147): completed-this-week only, not

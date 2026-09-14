@@ -57,13 +57,13 @@ function assign(
 describe("DigestBuilder.ownTasksDigest", () => {
   it("returns null (suppressed) when the member has no open tasks", async () => {
     const { builder } = makeBuilder();
-    expect(await builder.ownTasksDigest("alice", COHORT)).toBeNull();
+    expect(await builder.ownTasksDigest("alice", COHORT, NOW)).toBeNull();
   });
 
   it("returns digest text when the member has open tasks", async () => {
     const { builder, service } = makeBuilder();
     await assign(service);
-    const text = await builder.ownTasksDigest("alice", COHORT);
+    const text = await builder.ownTasksDigest("alice", COHORT, NOW);
     expect(text).not.toBeNull();
     expect(text).toContain("onboarding doc");
   });

@@ -91,29 +91,58 @@ describe("formatAmbiguousTaskMatches (issue #124 stage S1, Devie route.ts:957-96
   });
 });
 
-describe("formatMyTasks pagination", () => {
+describe("formatMyTasks (issue #206 — shared vocabulary, short form)", () => {
+  const NOW = new Date("2026-08-25T02:00:00.000Z");
+
+  it("says no open tasks when the list is empty, per the shared empty-state shape", () => {
+    expect(formatMyTasks([], NOW)).toBe("No open tasks.");
+  });
+
+  it("renders the shared identifier, priority badge, status and short due-date form, HTML-escaping the title", () => {
+    const text = formatMyTasks(
+      [
+        task({
+          id: 1,
+          title: "<b>fix</b> & ship",
+          dueDate: "2026-09-01",
+          status: "todo",
+          previousStatus: null,
+          blockedReason: null,
+          priority: "high",
+        }),
+      ],
+      NOW,
+    );
+    expect(text).toBe(
+      [
+        "Your open tasks:",
+        "• <code>T-001</code> 🟠 &lt;b&gt;fix&lt;/b&gt; &amp; ship — 📝 To Do (due Tue, Sep 1)",
+      ].join("\n"),
+    );
+  });
+
   it("shows no pagination footer when everything fits on one page", () => {
-    const text = formatMyTasks(tasks(10));
+    const text = formatMyTasks(tasks(10), NOW);
     expect(text).not.toMatch(/Page \d+ of \d+/);
-    expect(text).toContain("#1");
-    expect(text).toContain("#10");
+    expect(text).toContain("T-001");
+    expect(text).toContain("T-010");
   });
 
   it("splits into pages of 10 once the list exceeds the page size", () => {
-    const text = formatMyTasks(tasks(11));
+    const text = formatMyTasks(tasks(11), NOW);
     expect(text).toContain("Page 1 of 2");
     expect(text).toContain("/tasks");
     expect(text).not.toContain("/mytasks");
-    expect(text).toContain("#1");
-    expect(text).toContain("#10");
-    expect(text).not.toContain("#11");
+    expect(text).toContain("T-001");
+    expect(text).toContain("T-010");
+    expect(text).not.toContain("T-011");
   });
 
   it("returns the requested page's slice", () => {
-    const text = formatMyTasks(tasks(11), 2);
+    const text = formatMyTasks(tasks(11), NOW, 2);
     expect(text).toContain("Page 2 of 2");
-    expect(text).toContain("#11");
-    expect(text).not.toContain("#10");
+    expect(text).toContain("T-011");
+    expect(text).not.toContain("T-010");
   });
 });
 
@@ -207,11 +236,11 @@ describe("formatApproved", () => {
 });
 
 describe("formatWeeklyCompleted (#143 D4b / #147)", () => {
-  it("says nothing was completed when the list is empty", () => {
-    expect(formatWeeklyCompleted([])).toBe("Nothing completed this week.");
+  it("says nothing was completed when the list is empty, per the shared empty-state shape", () => {
+    expect(formatWeeklyCompleted([])).toBe("No tasks completed this week.");
   });
 
-  it("heads the list with a count and lists each task with its marked-done date", () => {
+  it("heads the list with a count and lists each task with the shared identifier and its marked-done date", () => {
     const text = formatWeeklyCompleted([
       task({
         id: 1,
@@ -233,9 +262,26 @@ describe("formatWeeklyCompleted (#143 D4b / #147)", () => {
     expect(text).toBe(
       [
         "✅ Completed this week (2):",
-        "- #1 Get design from Zendy (marked done Sep 3)",
-        "- #4 Draft welcome email copy (marked done Sep 5)",
+        "• <code>T-001</code> Get design from Zendy (marked done Sep 3)",
+        "• <code>T-004</code> Draft welcome email copy (marked done Sep 5)",
       ].join("\n"),
+    );
+  });
+
+  it("HTML-escapes the title and renders the priority badge", () => {
+    const text = formatWeeklyCompleted([
+      task({
+        id: 2,
+        title: "<b>fix</b> & ship",
+        status: "done",
+        previousStatus: null,
+        blockedReason: null,
+        priority: "urgent",
+        updatedAt: "2026-09-03T00:00:00.000Z",
+      }),
+    ]);
+    expect(text).toBe(
+      "✅ Completed this week (1):\n• <code>T-002</code> 🔴 &lt;b&gt;fix&lt;/b&gt; &amp; ship (marked done Sep 3)",
     );
   });
 

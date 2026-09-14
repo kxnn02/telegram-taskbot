@@ -72,7 +72,7 @@ export async function runDailyDigestJob(
   const claimed = await deps.throttle.claim(key);
   if (!claimed) return;
   const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
-  await runDailyDigest(deps, digestBuilder, cohortId);
+  await runDailyDigest(deps, digestBuilder, cohortId, now);
 }
 
 /** Weekly digest job — same idempotency shape as `runDailyDigestJob`, keyed

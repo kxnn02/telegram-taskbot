@@ -304,16 +304,17 @@ describe("runDailyDigest", () => {
     if (!aliceTask.ok || !bobTask.ok) throw new Error("setup failed");
 
     const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
-    await runDailyDigest(deps, digestBuilder, COHORT);
+    await runDailyDigest(deps, digestBuilder, COHORT, past);
 
-    const aliceDm = bot.sent.find((m) => m.text.includes(`#${aliceTask.value.id}`));
-    const bobDm = bot.sent.find((m) => m.text.includes(`#${bobTask.value.id}`));
+    const aliceDm = bot.sent.find((m) => m.text.includes(`T-${String(aliceTask.value.id).padStart(3, "0")}`));
+    const bobDm = bot.sent.find((m) => m.text.includes(`T-${String(bobTask.value.id).padStart(3, "0")}`));
     expect(aliceDm).toBeDefined();
     expect(bobDm).toBeDefined();
-    expect(aliceDm?.text).not.toContain(`#${bobTask.value.id}`);
-    expect(bobDm?.text).not.toContain(`#${aliceTask.value.id}`);
+    expect(aliceDm?.text).not.toContain(`T-${String(bobTask.value.id).padStart(3, "0")}`);
+    expect(bobDm?.text).not.toContain(`T-${String(aliceTask.value.id).padStart(3, "0")}`);
     expect(bot.sent.some((m) => m.text.includes("Awaiting review"))).toBe(false);
     expect(bot.sent.some((m) => m.text.includes("Overdue:"))).toBe(false);
+    expect(aliceDm?.parseMode).toBe("HTML");
   });
 
   it("sends nothing to a member with no open tasks", async () => {
@@ -366,7 +367,8 @@ describe("runDailyDigest", () => {
     // his DM.
     const dmCount = bot.sent.filter((m) => typeof m.chatId === "number").length;
     expect(dmCount).toBe(1);
-    expect(bot.sent[0]?.text).toContain(`#${bobTask.value.id}`);
+    expect(bot.sent[0]?.text).toContain(`T-${String(bobTask.value.id).padStart(3, "0")}`);
+    expect(bot.sent[0]?.parseMode).toBe("HTML");
   });
 });
 
@@ -385,12 +387,13 @@ describe("runWeeklyDigest (#143 D4b / #147: completed-this-week only)", () => {
     const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
     await runWeeklyDigest(deps, digestBuilder, COHORT, NOW);
 
-    const aliceDm = bot.sent.find((m) => m.text.includes(`#${aliceTask.value.id}`));
-    const bobDm = bot.sent.find((m) => m.text.includes(`#${bobTask.value.id}`));
+    const aliceDm = bot.sent.find((m) => m.text.includes(`T-${String(aliceTask.value.id).padStart(3, "0")}`));
+    const bobDm = bot.sent.find((m) => m.text.includes(`T-${String(bobTask.value.id).padStart(3, "0")}`));
     expect(aliceDm).toBeDefined();
     expect(bobDm).toBeDefined();
-    expect(aliceDm?.text).not.toContain(`#${bobTask.value.id}`);
-    expect(bobDm?.text).not.toContain(`#${aliceTask.value.id}`);
+    expect(aliceDm?.text).not.toContain(`T-${String(bobTask.value.id).padStart(3, "0")}`);
+    expect(bobDm?.text).not.toContain(`T-${String(aliceTask.value.id).padStart(3, "0")}`);
+    expect(aliceDm?.parseMode).toBe("HTML");
   });
 
   it("does not include a member's still-open tasks (dropped per #143 D4b — would duplicate the daily digest)", async () => {
@@ -407,8 +410,8 @@ describe("runWeeklyDigest (#143 D4b / #147: completed-this-week only)", () => {
     await runWeeklyDigest(deps, digestBuilder, COHORT, NOW);
 
     const aliceDm = bot.sent.find((m) => m.text.includes("Weekly digest"));
-    expect(aliceDm?.text).toContain(`#${doneTask.value.id}`);
-    expect(aliceDm?.text).not.toContain(`#${openTask.value.id}`);
+    expect(aliceDm?.text).toContain(`T-${String(doneTask.value.id).padStart(3, "0")}`);
+    expect(aliceDm?.text).not.toContain(`T-${String(openTask.value.id).padStart(3, "0")}`);
   });
 
   it("sends nothing to a member who completed nothing this week", async () => {
@@ -439,7 +442,7 @@ describe("runWeeklyDigest (#143 D4b / #147: completed-this-week only)", () => {
     const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
     await runWeeklyDigest(deps, digestBuilder, COHORT, NOW);
 
-    const daveDm = bot.sent.find((m) => m.text.includes(`#${daveTask.value.id}`));
+    const daveDm = bot.sent.find((m) => m.text.includes(`T-${String(daveTask.value.id).padStart(3, "0")}`));
     expect(daveDm).toBeDefined();
   });
 });

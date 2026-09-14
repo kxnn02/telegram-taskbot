@@ -121,7 +121,16 @@ export async function runRosterReconciliationJob(
   }
   if (toReport.length === 0) return;
 
-  const text = `Roster reconciliation: the following member(s) appear to have left the cohort group and no longer show as present: ${toReport.join(", ")}. They still hold roster access — review and remove them manually if they've actually left.`;
+  // Issue #206 (spec #201's "one output vocabulary"): a heading naming the
+  // count, one name per line, and the instruction last — replacing the old
+  // single ~240-character paragraph that comma-joined usernames mid-sentence.
+  const text = [
+    `Roster reconciliation: ${toReport.length} member(s) appear to have left the cohort group and no longer show as present.`,
+    "",
+    ...toReport.map((username) => `• ${username}`),
+    "",
+    "They still hold roster access — review and remove them manually if they've actually left.",
+  ].join("\n");
   for (const member of remaining) {
     await sendDM(deps.bot, deps.registrations, member.username, text);
   }
