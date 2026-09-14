@@ -2,7 +2,7 @@ import type { TaskService, TaskWithFlags } from "../service/taskService.js";
 import type { Caller, Note, TaskPriority } from "../domain/types.js";
 import { normalizeUsername, type Roster } from "../domain/roster.js";
 import { formatTaskRef } from "./taskRef.js";
-import { esc } from "./html.js";
+import { esc, escAttr } from "./html.js";
 
 /**
  * DevieBot's paged `/tasks` browser (issue #103 items 1 and 2), ported from
@@ -150,7 +150,7 @@ function commentMeta(notes: Note[]): { link?: string; note?: string } {
 function taskLine(task: TaskWithFlags): string {
   const code = formatTaskRef(task.id);
   const { link, note } = commentMeta(task.notes);
-  const linkPart = link ? ` · <a href="${link}">🔗</a>` : "";
+  const linkPart = link ? ` · <a href="${escAttr(link)}">🔗</a>` : "";
   const notePart = note ? `\n    📝 ${esc(note)}` : "";
   return `  • <code>${code}</code> ${esc(task.title)}${linkPart}${notePart}`;
 }

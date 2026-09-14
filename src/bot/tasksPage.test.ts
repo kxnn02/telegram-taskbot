@@ -369,6 +369,20 @@ describe("fetchTaskPages (issue #103 items 1 and 2)", () => {
     expect(line).toContain("\n    📝 ready for QA");
   });
 
+  it("escapes a note URL containing a double quote so the link markup survives", async () => {
+    const { service, roster } = makeService();
+    const id = await seed(service, "carla", "Fix the login bug");
+    await service.addNote(carla, id, 'https://example.com/pr/1?x="y"');
+
+    const { pages } = await fetchTaskPages(service, carla, roster, {
+      roleFilter: "all",
+      assigneeFilter: null,
+    });
+    const line = pages[0]!.byStatus.todo![0]!;
+    expect(line).toContain('<a href="https://example.com/pr/1?x=&quot;y&quot;">🔗</a>');
+    expect(line).not.toContain('x="y"');
+  });
+
   it("filters to one member with an assignee filter", async () => {
     const { service, roster } = makeService([
       { username: "carla", cohortId: COHORT },

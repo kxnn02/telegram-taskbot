@@ -102,7 +102,8 @@ describe("formatMyTasks pagination", () => {
   it("splits into pages of 10 once the list exceeds the page size", () => {
     const text = formatMyTasks(tasks(11));
     expect(text).toContain("Page 1 of 2");
-    expect(text).toContain("/mytasks 2");
+    expect(text).toContain("/tasks");
+    expect(text).not.toContain("/mytasks");
     expect(text).toContain("#1");
     expect(text).toContain("#10");
     expect(text).not.toContain("#11");

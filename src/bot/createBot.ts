@@ -59,7 +59,7 @@ import {
   formatStandupFiltered,
   parseStandupCallback,
 } from "./standup.js";
-import { renderCertTipPlain, selectRandomCertTip } from "./certTips.js";
+import { getCertTipById, renderCertTipPlain, selectRandomCertTip } from "./certTips.js";
 import {
   buildTasksPage,
   fetchTaskPages,
@@ -322,25 +322,46 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   /** Edits a card in place, falling back to a fresh message if the edit is
    * refused — Devie's `editWithKeyboard` (`route.ts:85-105`), including its
    * treatment of Telegram's "message is not modified" 400 as success, which
-   * is what clicking the page you are already on produces. */
+   * is what clicking the page you are already on produces.
+   *
+   * Issue #202: a page/tab long enough to exceed Telegram's edit-size limit
+   * used to be rejected silently — a button press that looked dead, with no
+   * error surfaced to anyone. Splits exactly like `sendCard`: when there is
+   * more than one chunk, the first is edited into the existing message (no
+   * keyboard — it isn't the last chunk) and the rest are sent as new
+   * messages, with the keyboard only on the final one. */
   async function editCard(
     ctx: import("grammy").Context,
     text: string,
     keyboard: InlineKeyboardMarkup,
     html: boolean,
   ): Promise<void> {
-    const options = {
-      ...(html ? { parse_mode: "HTML" as const } : {}),
-      reply_markup: keyboard,
-    };
+    const parseModeOpt = html ? { parse_mode: "HTML" as const } : {};
+    const chunks = chunkMessage(text);
+    const [first, ...rest] = chunks;
+
     try {
-      await ctx.editMessageText(text, options);
+      await ctx.editMessageText(first!, {
+        ...parseModeOpt,
+        ...(rest.length === 0 ? { reply_markup: keyboard } : {}),
+      });
     } catch (err) {
       if (err instanceof GrammyError && err.description.includes("message is not modified")) {
         return;
       }
       console.error(err);
-      await ctx.reply(text, options);
+      await ctx.reply(first!, {
+        ...parseModeOpt,
+        ...(rest.length === 0 ? { reply_markup: keyboard } : {}),
+      });
+    }
+
+    for (let i = 0; i < rest.length; i++) {
+      const isLast = i === rest.length - 1;
+      await ctx.reply(rest[i]!, {
+        ...parseModeOpt,
+        ...(isLast ? { reply_markup: keyboard } : {}),
+      });
     }
   }
 
@@ -421,9 +442,15 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       const caller = await requireCaller(ctx);
       if (caller) {
         const report = await buildStandup(service, caller, clock.now());
+        // Issue #202: Overview must restore the *original* cert tip, not
+        // re-select one — look up the id `/standup` already recorded for
+        // this cohort rather than calling `selectRandomCertTip` again.
+        const lastTipId = await options.certTipHistoryStore.getLastTipId(caller.cohortId);
+        const tip = lastTipId !== null ? getCertTipById(lastTipId) : undefined;
+        const certTipPlain = tip ? renderCertTipPlain(tip) : undefined;
         await editCard(
           ctx,
-          formatStandupFiltered(report, standupCb.filter),
+          formatStandupFiltered(report, standupCb.filter, certTipPlain),
           buildStandupKeyboard(report, standupCb.filter),
           false,
         );
@@ -905,7 +932,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
 
     const parsed = parseAddTaskArgs(raw, new Date());
     if ("error" in parsed) {
-      await ctx.reply(parsed.error);
+      await ctx.reply(parsed.error, { parse_mode: "HTML" as const });
       return;
     }
 

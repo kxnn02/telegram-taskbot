@@ -66,16 +66,10 @@ function paginate<T>(items: T[], requestedPage: number, pageSize = PAGE_SIZE): P
   return { items: items.slice(start, start + pageSize), page, totalPages };
 }
 
-function paginationFooter(
-  commandName: string,
-  page: number,
-  totalPages: number,
-  hintPrefix = "",
-): string | null {
+function paginationFooter(commandName: string, page: number, totalPages: number): string | null {
   if (totalPages <= 1) return null;
-  const prefix = hintPrefix ? `${hintPrefix} ` : "";
   if (page < totalPages) {
-    return `Page ${page} of ${totalPages} — send /${commandName} ${prefix}${page + 1} for more`;
+    return `Page ${page} of ${totalPages} — send /${commandName} for more`;
   }
   return `Page ${page} of ${totalPages}.`;
 }
@@ -128,7 +122,7 @@ export function formatMyTasks(tasks: TaskWithFlags[], page = 1): string {
     "Your open tasks:",
     ...paged.items.map((t) => "- " + formatTaskLine(t)),
   ];
-  const footer = paginationFooter("mytasks", paged.page, paged.totalPages);
+  const footer = paginationFooter("tasks", paged.page, paged.totalPages);
   if (footer) lines.push("", footer);
   return lines.join("\n");
 }

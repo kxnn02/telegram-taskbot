@@ -426,6 +426,19 @@ describe("/addtask bare command (no wizard, #106, Devie's block per issue #124 s
     expect(text).toBe(ADDTASK_USAGE);
     expect(call.payload.parse_mode).toBe("HTML");
   });
+
+  it("a mention with no title also gets the rendered usage block, not raw markup (issue #202)", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/addtask @dale"));
+
+    const { ADDTASK_USAGE } = await import("./addTaskParse.js");
+    const call = lastCall(testBot.calls, "sendMessage")!;
+    expect(call.payload.text).toBe(ADDTASK_USAGE);
+    expect(call.payload.parse_mode).toBe("HTML");
+  });
 });
 
 describe("removed commands get Telegram's default unknown-command fallback, not a stack trace", () => {
@@ -638,6 +651,37 @@ describe("paged /tasks (issue #103 items 1 and 2)", () => {
     expect(allReplyTexts(testBot.calls).join("")).not.toContain("Secret task");
   });
 
+  it("paging onto a member with enough tasks to exceed Telegram's limit renders the page instead of doing nothing (issue #202)", async () => {
+    const roster = new Roster([
+      { username: "alice", cohortId: COHORT },
+      { username: "bob", cohortId: COHORT },
+    ]);
+    const testBot = makeTestBot(roster);
+    const caller = { username: "alice", cohortId: COHORT };
+    for (let i = 0; i < 100; i++) {
+      const created = await testBot.service.assignTask(caller, {
+        assigneeUsername: "bob",
+        title: `A fairly long task title for entry number ${i} so the page grows large`,
+        dueDate: "2026-09-10",
+      });
+      if (!created.ok) throw new Error("setup failed");
+    }
+    const userId = nextUserId();
+
+    // Page 0 is alice's (empty) page; Next (page 1) is bob's long page.
+    await testBot.bot.handleUpdate(callbackUpdate(userId, "alice", userId, "tasks|all|1", 777));
+
+    const sendOrEdit = testBot.calls.filter(
+      (c) => c.method === "sendMessage" || c.method === "editMessageText",
+    );
+    expect(sendOrEdit.length).toBeGreaterThan(0);
+    for (const call of sendOrEdit) {
+      const text = call.payload.text as string;
+      expect(text.length).toBeLessThanOrEqual(4000);
+    }
+    expect(sendOrEdit.some((c) => (c.payload.text as string).includes("@bob"))).toBe(true);
+  });
+
   it("ignores a malformed tasks callback but still answers it", async () => {
     const testBot = threeMemberBot();
     const userId = nextUserId();
@@ -741,6 +785,28 @@ describe("standup filters (issue #103 item 3)", () => {
     expect(edit.payload.text).toContain("📦 Backlog (1)");
     expect(edit.payload.text).toContain("Parked idea");
     expect(keyboardOf(edit).inline_keyboard[0]!.map((b) => b.text)).toContain("· Backlog (1)");
+  });
+
+  it("tapping Overview after another filter restores the card with the original cert tip, not a re-selected one (issue #202)", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/standup"));
+    const originalText = lastCall(testBot.calls, "sendMessage")!.payload.text as string;
+    const originalTip = originalText.split("🎓 CCA-F Cert Tip")[1];
+    expect(originalTip).toBeDefined();
+
+    await testBot.bot.handleUpdate(
+      callbackUpdate(userId, "alice", userId, "standup|backlog|0", 888),
+    );
+    await testBot.bot.handleUpdate(
+      callbackUpdate(userId, "alice", userId, "standup|overview|0", 888),
+    );
+
+    const restored = lastCall(testBot.calls, "editMessageText")!.payload.text as string;
+    expect(restored).toContain("🎓 CCA-F Cert Tip");
+    expect(restored.split("🎓 CCA-F Cert Tip")[1]).toEqual(originalTip);
   });
 
   it("ignores an unknown standup filter but still answers the callback", async () => {

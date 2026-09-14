@@ -260,6 +260,17 @@ export function selectRandomCertTip(
   return pool[index]!;
 }
 
+/**
+ * Looks up a previously-selected tip by id (issue #202) — used to carry the
+ * *same* tip through a standup card's Overview re-render rather than
+ * calling `selectRandomCertTip` again, which would silently swap it.
+ * `undefined` when the id doesn't match any tip (defensive: it never should
+ * once written by `selectRandomCertTip`).
+ */
+export function getCertTipById(id: number): CertTip | undefined {
+  return CERT_TIPS.find((t) => t.id === id);
+}
+
 /** Mirrors `renderMemberBucketsHtml`/`renderMemberBucketsPlain` (this
  * codebase's existing HTML/plain rendering-pair pattern, `standupBuckets.ts`):
  * one function per surface, both driven off the same data. */

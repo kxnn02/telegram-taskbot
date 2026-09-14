@@ -173,11 +173,13 @@ function standupHeaderLines(report: StandupReport): string[] {
  * Issue #180: `certTipPlain`, when given, is appended as the last line,
  * preceded by a blank line — the caller renders it (`renderCertTipPlain`,
  * same pre-rendered pattern as the pushed card's `certTip`/`quote`), so this
- * function stays synchronous. Only the unfiltered `/standup` command passes
- * one; `formatStandupFiltered`'s `overview` branch calls this with no tip at
- * all, since tapping a filter button — including the Overview button itself
- * — drops the tip. There is no quote here: unlike the pushed card, `/standup`
- * never calls the model, so it always returns instantly from cached data.
+ * function stays synchronous. The unfiltered `/standup` command passes one
+ * directly; `formatStandupFiltered`'s `overview` branch (issue #202) passes
+ * the *original* tip back through on re-render — looked up by the id
+ * `/standup` recorded, never re-selected, so tapping Overview after another
+ * filter restores the same tip rather than silently swapping it. There is
+ * no quote here: unlike the pushed card, `/standup` never calls the model,
+ * so it always returns instantly from cached data.
  */
 export function formatStandup(report: StandupReport, certTipPlain?: string): string {
   const lines: string[] = [
@@ -299,8 +301,12 @@ const FILTER_SECTION: Record<
  * Pure, like `formatStandup`: everything it needs is already on the report,
  * which is what lets the callback handler re-render any tab from one fetch.
  */
-export function formatStandupFiltered(report: StandupReport, filter: StandupFilter): string {
-  if (filter === "overview") return formatStandup(report);
+export function formatStandupFiltered(
+  report: StandupReport,
+  filter: StandupFilter,
+  certTipPlain?: string,
+): string {
+  if (filter === "overview") return formatStandup(report, certTipPlain);
 
   const section = FILTER_SECTION[filter];
   // The Done tab is this week's completions, not every done task ever —
