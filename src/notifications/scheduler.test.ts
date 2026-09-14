@@ -38,14 +38,18 @@ const alice = caller("alice");
 // 2026-09-04 10:00 Asia/Manila
 const NOW = new Date("2026-09-04T02:00:00.000Z");
 
-function makeFakeBot(): NotifierBot & { sent: Array<{ chatId: number | string; text: string }> } {
-  const sent: Array<{ chatId: number | string; text: string }> = [];
+function makeFakeBot(): NotifierBot & {
+  sent: Array<{ chatId: number | string; text: string; parseMode?: string }>;
+} {
+  const sent: Array<{ chatId: number | string; text: string; parseMode?: string }> = [];
   return {
     sent,
     api: {
-      sendMessage: vi.fn(async (chatId: number | string, text: string) => {
-        sent.push({ chatId, text });
-      }),
+      sendMessage: vi.fn(
+        async (chatId: number | string, text: string, options?: { parse_mode?: string }) => {
+          sent.push({ chatId, text, parseMode: options?.parse_mode });
+        },
+      ),
     },
   };
 }
@@ -170,6 +174,7 @@ describe("runOverdueCrossingCheck", () => {
     expect(bot.sent[0]?.text).toBe(
       `Task <code>T-${String(created.value.id).padStart(3, "0")}</code> ("Write the onboarding doc") is now overdue — it was due 10 days ago and hasn't been submitted.`,
     );
+    expect(bot.sent[0]?.parseMode).toBe("HTML");
   });
 
   it("doesn't notify for a task that isn't overdue yet", async () => {
@@ -261,6 +266,7 @@ describe("runDueSoonReminderCheck", () => {
     expect(bot.sent[0]?.text).toBe(
       `Task <code>T-${String(created.value.id).padStart(3, "0")}</code> ("Write the onboarding doc") is due tomorrow. Send /done T-${String(created.value.id).padStart(3, "0")} when you're ready for review.`,
     );
+    expect(bot.sent[0]?.parseMode).toBe("HTML");
   });
 
   it("doesn't remind for a task due further out", async () => {

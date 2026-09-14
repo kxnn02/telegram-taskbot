@@ -396,6 +396,10 @@ describe("auto-registration (ADR-0013) — every surviving command works for a n
     expect(lastReplyTextIn(testBot.calls, bobId)).toBe(
       "You've been assigned Task <code>T-001</code>: \"Write the report\" — due Friday, September 18. Send /done T-001 when you're ready for review.",
     );
+    const bobCalls = testBot.calls.filter(
+      (c) => c.method === "sendMessage" && c.payload.chat_id === bobId,
+    );
+    expect(bobCalls.at(-1)?.payload.parse_mode).toBe("HTML");
   });
 
   it("/done, /complete, /completed, /update all work for a never-before-seen assignee", async () => {
