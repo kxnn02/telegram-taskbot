@@ -12,18 +12,36 @@ import { esc } from "./html.js";
  * insert — this module is the glue between them.
  */
 
-/** Devie's gate for routing `/addtask`'s body to the bulk parser instead of
- * the single-task grammar (`route.ts:1128-1134`), copied character for
- * character: more than one `@mention`, any newline, or a grouped-segment
- * marker (`Action Plan:`/`Note:`/`Task:`/`Update:`, a `; `-separated list, or
- * a blank-line-separated paragraph). Checked ahead of every other
- * `/addtask` parsing in `createBot.ts`. */
+/**
+ * Gate for routing `/addtask`'s body to the bulk parser (issue #104) instead of
+ * the single-task grammar (`createBot.ts:901`). Bulk capture is designed for
+ * pasting meeting notes that assign work to people via `@mention`; a mention-free
+ * multi-paragraph prose message should not trigger it (see issue #188).
+ *
+ * Returns true when:
+ * - More than one `@mention` is present, OR
+ * - A 2+ item bullet/numbered list exists (standalone checklist, no mention needed), OR
+ * - An `@mention` is present AND the body has structural hints (newlines or keywords
+ *   like `Action Plan:` or `;`-separated segments).
+ */
 export function shouldTriggerBulkCreate(raw: string): boolean {
+  const BULLET_LINE_RE = /^\s*(?:[-*•‣]|\d+[.)])\s+\S/;
+
   const mentions = [...raw.matchAll(/@(\w+)/g)];
   const hasMultipleMentions = mentions.length > 1;
-  const hasNewlines = raw.includes("\n");
-  const hasGroupedSegments = /(?:Action\s*Plan|Note|Task|Update)\s*:|;\s+|\n\s*\n/i.test(raw);
-  return hasMultipleMentions || hasNewlines || hasGroupedSegments;
+  const hasAnyMention = mentions.length > 0;
+
+  // A real list stands on its own without a mention: 2+ bullet/numbered lines.
+  const bulletLines = raw.split("\n").filter((line) => BULLET_LINE_RE.test(line)).length;
+  const hasBulletList = bulletLines >= 2;
+
+  // Structural hints that only mean "bulk" when an assignment is present.
+  // NOTE: the blank-line alternative (\n\s*\n) is deliberately dropped from
+  // the keyword regex — it is subsumed by hasStructure's newline check.
+  const hasKeywordSegments = /(?:Action\s*Plan|Note|Task|Update)\s*:|;\s+/i.test(raw);
+  const hasStructure = raw.includes("\n") || hasKeywordSegments;
+
+  return hasMultipleMentions || hasBulletList || (hasAnyMention && hasStructure);
 }
 
 /**
