@@ -374,9 +374,10 @@ describe("parseBulkTasks", () => {
     const result = await parseBulkTasks(message, model, REFERENCE);
     expect(result).toEqual(parseBulkTasksHeuristic(message, REFERENCE));
     expect(errorSpy).toHaveBeenCalled();
-    const loggedMsg = errorSpy.mock.calls[0]?.[0];
-    expect(String(loggedMsg)).toContain(errorMsg);
-    expect(String(loggedMsg)).toContain("heuristic");
+    const [prefix, loggedError] = errorSpy.mock.calls[0] ?? [];
+    expect(String(prefix)).toContain("heuristic");
+    expect(loggedError).toBeInstanceOf(Error);
+    expect((loggedError as Error).message).toContain(errorMsg);
     errorSpy.mockRestore();
   });
 
@@ -385,9 +386,10 @@ describe("parseBulkTasks", () => {
     const errorSpy = vi.spyOn(console, "error");
     const model = new ThrowingTextModel(new Error("model error"));
     await parseBulkTasks(message, model, REFERENCE);
-    const loggedMsg = String(errorSpy.mock.calls[0]?.[0]);
-    expect(loggedMsg).not.toContain("fix the login bug");
-    expect(loggedMsg).not.toContain("tomorrow");
+    const loggedArgs = errorSpy.mock.calls[0] ?? [];
+    const loggedText = loggedArgs.map((arg) => String(arg)).join(" ");
+    expect(loggedText).not.toContain("fix the login bug");
+    expect(loggedText).not.toContain("tomorrow");
     errorSpy.mockRestore();
   });
 
