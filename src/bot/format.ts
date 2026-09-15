@@ -504,7 +504,7 @@ function pluralize(n: number, word: string): string {
  * trailing phrases. It's retained only when a mixed-status `/update` batch
  * makes the lines genuinely differ. */
 export function formatBatchReply(
-  kind: "done" | "complete" | "update",
+  kind: "done" | "complete" | "update" | "due",
   successes: BatchSuccessLine[],
   failures: BatchFailureLine[],
 ): string {
@@ -526,9 +526,13 @@ export function formatBatchReply(
       ? `👀 <b>Moved ${pluralize(successes.length, "task")} to In Review.</b>`
       : kind === "complete"
         ? `✅ <b>Marked ${pluralize(successes.length, "task")} as done.</b>`
-        : uniformChangeWord !== undefined
-          ? `✅ <b>Updated ${pluralize(successes.length, "task")} to ${uniformChangeWord}.</b>`
-          : `✅ <b>Updated ${pluralize(successes.length, "task")}.</b>`;
+        : kind === "due"
+          ? uniformChangeWord !== undefined
+            ? `📅 <b>Updated ${pluralize(successes.length, "task")}${successes.length === 1 ? "'s" : "'"} due date to ${uniformChangeWord}.</b>`
+            : `📅 <b>Updated ${pluralize(successes.length, "task")}${successes.length === 1 ? "'s" : "'"} due dates.</b>`
+          : uniformChangeWord !== undefined
+            ? `✅ <b>Updated ${pluralize(successes.length, "task")} to ${uniformChangeWord}.</b>`
+            : `✅ <b>Updated ${pluralize(successes.length, "task")}.</b>`;
 
   const lines = [header];
   for (const s of successes) {
@@ -597,10 +601,11 @@ export const UPDATE_USAGE = [
   "<i>Optionally append <code>link:&lt;url&gt;</code> and/or <code>note:&lt;text&gt;</code>.</i>",
 ].join("\n");
 
-/** `/due`'s bare-command usage block (issue #222) — same shape as `DONE_USAGE`
- * and `COMPLETE_USAGE` above, with worked examples covering the bare, `by`,
- * numeric-ref and keyword-ref forms. Bulk forms aren't covered here since
- * they aren't supported yet (single-item only, this ticket). */
+/** `/due`'s bare-command usage block — same shape as `DONE_USAGE` and
+ * `COMPLETE_USAGE` above. Issue #222's single-item examples cover the bare,
+ * `by`, numeric-ref and keyword-ref forms; issue #223 adds the two bulk
+ * forms — one shared trailing date across a ref list, and one date per
+ * ref. */
 export const DUE_USAGE = [
   "Usage: <code>/due &lt;number or keyword&gt; [by] &lt;date&gt;</code>",
   "",
@@ -609,8 +614,11 @@ export const DUE_USAGE = [
   "/due t21 by next monday",
   "/due 23 sept 30",
   "/due login bug friday",
+  "/due t21,t22,t23 friday",
+  "/due t21 friday, t22 sept 30",
   "",
   '<i>Sets a task\'s due date. The word "by" is optional.</i>',
+  "<i>Comma- or newline-separate a list of refs to change several at once — one shared date, or one date per ref.</i>",
 ].join("\n");
 
 /** Devie's unknown-command reply (issue #124 stage S3), sent with

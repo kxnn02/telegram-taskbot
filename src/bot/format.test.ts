@@ -904,6 +904,59 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
       ].join("\n"),
     );
   });
+
+  it("issue #223: a due batch where every task got the same date states it once in the header", () => {
+    const text = formatBatchReply(
+      "due",
+      [
+        { ref: "T-001", title: "First", changeWord: "Fri, Sep 4", emoji: "✏️" },
+        { ref: "T-002", title: "Second", changeWord: "Fri, Sep 4", emoji: "✏️" },
+      ],
+      [],
+    );
+    expect(text).toBe(
+      [
+        "📅 <b>Updated 2 tasks' due date to Fri, Sep 4.</b>",
+        "• ✏️ <code>T-001</code> First",
+        "• ✏️ <code>T-002</code> Second",
+      ].join("\n"),
+    );
+  });
+
+  it("issue #223: a due batch with mixed dates keeps each line's own date", () => {
+    const text = formatBatchReply(
+      "due",
+      [
+        { ref: "T-001", title: "First", changeWord: "Fri, Sep 4", emoji: "✏️" },
+        { ref: "T-002", title: "Second", changeWord: "Wed, Sep 30", emoji: "✏️" },
+      ],
+      [],
+    );
+    expect(text).toBe(
+      [
+        "📅 <b>Updated 2 tasks' due dates.</b>",
+        "• ✏️ <code>T-001</code> First → <b>Fri, Sep 4</b>",
+        "• ✏️ <code>T-002</code> Second → <b>Wed, Sep 30</b>",
+      ].join("\n"),
+    );
+  });
+
+  it("issue #223: a due batch with a bad ref groups it under Skipped", () => {
+    const text = formatBatchReply(
+      "due",
+      [{ ref: "T-001", title: "First", changeWord: "Fri, Sep 4", emoji: "✏️" }],
+      [{ ref: "t999", reason: "no open task found" }],
+    );
+    expect(text).toBe(
+      [
+        "📅 <b>Updated 1 task's due date to Fri, Sep 4.</b>",
+        "• ✏️ <code>T-001</code> First",
+        "",
+        "⚠️ <b>Skipped 1 item:</b>",
+        "• <b>t999</b> → no open task found",
+      ].join("\n"),
+    );
+  });
 });
 
 describe("usage blocks (issue #124 stage S3, Devie's verbatim text)", () => {
@@ -959,7 +1012,7 @@ describe("usage blocks (issue #124 stage S3, Devie's verbatim text)", () => {
     );
   });
 
-  it("DUE_USAGE (issue #222)", () => {
+  it("DUE_USAGE (issue #222 single-item, issue #223 bulk)", () => {
     expect(DUE_USAGE).toBe(
       [
         "Usage: <code>/due &lt;number or keyword&gt; [by] &lt;date&gt;</code>",
@@ -969,8 +1022,11 @@ describe("usage blocks (issue #124 stage S3, Devie's verbatim text)", () => {
         "/due t21 by next monday",
         "/due 23 sept 30",
         "/due login bug friday",
+        "/due t21,t22,t23 friday",
+        "/due t21 friday, t22 sept 30",
         "",
         "<i>Sets a task's due date. The word \"by\" is optional.</i>",
+        "<i>Comma- or newline-separate a list of refs to change several at once — one shared date, or one date per ref.</i>",
       ].join("\n"),
     );
   });

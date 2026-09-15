@@ -1165,7 +1165,7 @@ describe("keyword task lookup for /done, /complete, /update (issue #124 stage S1
   });
 });
 
-describe("/due (issue #222) — single-item only; bulk is a later ticket", () => {
+describe("/due (issue #222) — single-item form", () => {
   async function seedTask(
     testBot: ReturnType<typeof makeTestBot>,
     assignee: string,
@@ -1386,6 +1386,187 @@ describe("/due (issue #222) — single-item only; bulk is a later ticket", () =>
     const after = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, id);
     if (!after.ok) throw new Error("read failed");
     expect(after.value.overdue).toBe(true);
+  });
+});
+
+describe("/due bulk (issue #223)", () => {
+  async function seedTask(
+    testBot: ReturnType<typeof makeTestBot>,
+    assignee: string,
+    assigner: string,
+    title: string,
+    dueDate: string,
+  ) {
+    const created = await testBot.service.assignTask(
+      { username: assigner, cohortId: COHORT },
+      { assigneeUsername: assignee, title, dueDate },
+    );
+    if (!created.ok) throw new Error("setup failed");
+    return created.value.id;
+  }
+
+  it("a comma-separated ref list with one trailing shared date re-dates every task and states the date once", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const first = await seedTask(testBot, "alice", "alice", "Fix the login bug", "2026-09-10");
+    const second = await seedTask(testBot, "alice", "alice", "Write the docs", "2026-09-11");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, `/due t${first}, t${second} 2026-09-20`),
+    );
+
+    const call = lastCall(testBot.calls, "sendMessage")!;
+    expect(call.payload.parse_mode).toBe("HTML");
+    const text = call.payload.text as string;
+    expect(text).toContain("📅 <b>Updated 2 tasks' due date to Sun, Sep 20.</b>");
+    expect(text).toContain(`<code>T-${String(first).padStart(3, "0")}</code> Fix the login bug`);
+    expect(text).toContain(`<code>T-${String(second).padStart(3, "0")}</code> Write the docs`);
+
+    const firstTask = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, first);
+    const secondTask = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, second);
+    if (!firstTask.ok || !secondTask.ok) throw new Error("read failed");
+    expect(firstTask.value.dueDate).toBe("2026-09-20");
+    expect(secondTask.value.dueDate).toBe("2026-09-20");
+  });
+
+  it("a per-item bulk change sets a distinct date on each task and each line keeps its own date", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const first = await seedTask(testBot, "alice", "alice", "Fix the login bug", "2026-09-10");
+    const second = await seedTask(testBot, "alice", "alice", "Write the docs", "2026-09-11");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(
+        userId,
+        "alice",
+        userId,
+        `/due t${first} 2026-09-20, t${second} 2026-09-30`,
+      ),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("📅 <b>Updated 2 tasks' due dates.</b>");
+    expect(text).toContain(
+      `<code>T-${String(first).padStart(3, "0")}</code> Fix the login bug → <b>Sun, Sep 20</b>`,
+    );
+    expect(text).toContain(
+      `<code>T-${String(second).padStart(3, "0")}</code> Write the docs → <b>Wed, Sep 30</b>`,
+    );
+
+    const firstTask = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, first);
+    const secondTask = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, second);
+    if (!firstTask.ok || !secondTask.ok) throw new Error("read failed");
+    expect(firstTask.value.dueDate).toBe("2026-09-20");
+    expect(secondTask.value.dueDate).toBe("2026-09-30");
+  });
+
+  it("a message mixing commas and newlines as separators works the same as either alone", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const first = await seedTask(testBot, "alice", "alice", "Fix the login bug", "2026-09-10");
+    const second = await seedTask(testBot, "alice", "alice", "Write the docs", "2026-09-11");
+    const third = await seedTask(testBot, "alice", "alice", "Ship the release", "2026-09-12");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(
+        userId,
+        "alice",
+        userId,
+        `/due t${first},\nt${second}, t${third} 2026-09-20`,
+      ),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("📅 <b>Updated 3 tasks' due date to Sun, Sep 20.</b>");
+
+    const firstTask = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, first);
+    const secondTask = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, second);
+    const thirdTask = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, third);
+    if (!firstTask.ok || !secondTask.ok || !thirdTask.ok) throw new Error("read failed");
+    expect(firstTask.value.dueDate).toBe("2026-09-20");
+    expect(secondTask.value.dueDate).toBe("2026-09-20");
+    expect(thirdTask.value.dueDate).toBe("2026-09-20");
+  });
+
+  /**
+   * This is the landmine test (issue #223 comment on the ticket, inherited
+   * from #221): `finishBatch`'s success-line filter used to require
+   * `status !== undefined`, which every `/due` outcome fails since a
+   * deadline change is not a status change. Left unfixed, this asserts
+   * "❌ No tasks were updated." even though t{first} was in fact re-dated —
+   * pinning the *full* rendered reply string, not just the stored date, is
+   * what catches that.
+   */
+  it("a bulk change with one bad ref applies the rest and lists the bad one under Skipped — full reply string pinned", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const first = await seedTask(testBot, "alice", "alice", "Fix the login bug", "2026-09-10");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, `/due t${first}, t999 2026-09-20`),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toBe(
+      [
+        "📅 <b>Updated 1 task's due date to Sun, Sep 20.</b>",
+        `• ✏️ <code>T-${String(first).padStart(3, "0")}</code> Fix the login bug`,
+        "",
+        "⚠️ <b>Skipped 1 item:</b>",
+        "• <b>t999</b> → Task 999 doesn't exist.",
+      ].join("\n"),
+    );
+
+    const firstTask = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, first);
+    if (!firstTask.ok) throw new Error("read failed");
+    expect(firstTask.value.dueDate).toBe("2026-09-20");
+  });
+
+  it("a bulk change where nothing succeeded renders the no-tasks-updated block", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, "/due t998, t999 2026-09-20"),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("❌ No tasks were updated.");
+    expect(text).toContain("<i>Use /tasks to see valid task numbers.</i>");
+  });
+
+  it("a bulk change across one member's tasks sends that member exactly one DM", async () => {
+    const roster = new Roster([
+      { username: "alice", cohortId: COHORT },
+      { username: "bob", cohortId: COHORT },
+    ]);
+    const testBot = makeTestBot(roster);
+    const bobId = nextUserId();
+    await testBot.bot.handleUpdate(messageUpdate(bobId, "bob", bobId, "/help"));
+    testBot.calls.length = 0;
+
+    const first = await seedTask(testBot, "bob", "alice", "First task", "2026-09-10");
+    const second = await seedTask(testBot, "bob", "alice", "Second task", "2026-09-11");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, `/due t${first}, t${second} 2026-09-20`),
+    );
+
+    const bobCalls = testBot.calls.filter(
+      (c) => c.method === "sendMessage" && c.payload.chat_id === bobId,
+    );
+    expect(bobCalls.length).toBe(1);
+    expect(lastReplyTextIn(testBot.calls, bobId)).toBe(
+      "@alice updated 2 of your tasks:\n" +
+        `t${first} ("First task") → Sunday, September 20, 2026\n` +
+        `t${second} ("Second task") → Sunday, September 20, 2026`,
+    );
   });
 });
 
