@@ -1012,7 +1012,7 @@ describe("usage blocks (issue #124 stage S3, Devie's verbatim text)", () => {
     );
   });
 
-  it("DUE_USAGE (issue #222)", () => {
+  it("DUE_USAGE (issue #222 single-item, issue #223 bulk)", () => {
     expect(DUE_USAGE).toBe(
       [
         "Usage: <code>/due &lt;number or keyword&gt; [by] &lt;date&gt;</code>",
@@ -1022,8 +1022,11 @@ describe("usage blocks (issue #124 stage S3, Devie's verbatim text)", () => {
         "/due t21 by next monday",
         "/due 23 sept 30",
         "/due login bug friday",
+        "/due t21,t22,t23 friday",
+        "/due t21 friday, t22 sept 30",
         "",
         "<i>Sets a task's due date. The word \"by\" is optional.</i>",
+        "<i>Comma- or newline-separate a list of refs to change several at once — one shared date, or one date per ref.</i>",
       ].join("\n"),
     );
   });

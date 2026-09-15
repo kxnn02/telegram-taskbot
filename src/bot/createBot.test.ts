@@ -1462,6 +1462,35 @@ describe("/due bulk (issue #223)", () => {
     expect(secondTask.value.dueDate).toBe("2026-09-30");
   });
 
+  it("a message mixing commas and newlines as separators works the same as either alone", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const first = await seedTask(testBot, "alice", "alice", "Fix the login bug", "2026-09-10");
+    const second = await seedTask(testBot, "alice", "alice", "Write the docs", "2026-09-11");
+    const third = await seedTask(testBot, "alice", "alice", "Ship the release", "2026-09-12");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(
+        userId,
+        "alice",
+        userId,
+        `/due t${first},\nt${second}, t${third} 2026-09-20`,
+      ),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("📅 <b>Updated 3 tasks' due date to Sun, Sep 20.</b>");
+
+    const firstTask = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, first);
+    const secondTask = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, second);
+    const thirdTask = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, third);
+    if (!firstTask.ok || !secondTask.ok || !thirdTask.ok) throw new Error("read failed");
+    expect(firstTask.value.dueDate).toBe("2026-09-20");
+    expect(secondTask.value.dueDate).toBe("2026-09-20");
+    expect(thirdTask.value.dueDate).toBe("2026-09-20");
+  });
+
   /**
    * This is the landmine test (issue #223 comment on the ticket, inherited
    * from #221): `finishBatch`'s success-line filter used to require

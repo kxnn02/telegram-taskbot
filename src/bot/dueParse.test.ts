@@ -154,6 +154,27 @@ describe("parseDueBatchItems (issue #223)", () => {
     expect(items.every((i) => i.dueDate?.isoDate === "2026-09-04")).toBe(true);
   });
 
+  it("a list mixing commas and newlines as separators in one message behaves identically to either alone", () => {
+    // Per-item reading: a comma between the first two items, a newline
+    // before the third.
+    const perItem = parseDueBatchItems("t21 friday, t22 sept 30\nt23 2026-09-30", REFERENCE);
+    expect(perItem.map((i) => i.ref)).toEqual([21, 22, 23]);
+    expect(perItem.map((i) => i.dueDate?.isoDate)).toEqual([
+      "2026-09-04",
+      "2026-09-30",
+      "2026-09-30",
+    ]);
+
+    // Shared-date reading: same mixed separators, one trailing date on the
+    // last segment (the date itself is joined to its ref by a plain space,
+    // same as every other segment — only a comma or newline ever marks an
+    // item boundary).
+    const shared = parseDueBatchItems("t21,\nt22, t23 friday", REFERENCE);
+    expect(shared).toHaveLength(3);
+    expect(shared.map((i) => i.ref)).toEqual([21, 22, 23]);
+    expect(shared.every((i) => i.dueDate?.isoDate === "2026-09-04")).toBe(true);
+  });
+
   it("a keyword ref works in a shared-date list alongside numeric refs", () => {
     const items = parseDueBatchItems("t21, login bug, t23 friday", REFERENCE);
     expect(items.map((i) => i.label)).toEqual(["t21", "login bug", "t23"]);

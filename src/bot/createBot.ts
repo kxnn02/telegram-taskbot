@@ -620,8 +620,11 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     changeWord?: string;
     /** Issue #223: `/due`'s own reply-line emoji, since it has no
      * `TaskStatus` for `batchEmoji` to key off. Unset for status-based
-     * kinds, which keep using `batchEmoji`. */
-    emoji?: string;
+     * kinds, which keep using `batchEmoji`. Named `emojiOverride` rather
+     * than `emoji` so it reads distinctly from the `batchEmoji()` function
+     * just below — that one derives an emoji from `kind` + `status`, this
+     * one replaces that derivation outright for a kind-less outcome. */
+    emojiOverride?: string;
   }
 
   /** Runs one `setStatus` call per batch item (issue #32) — no batch
@@ -753,7 +756,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         // (issue #220's "appropriate rendering of its new deadline").
         changeDescription: item.dueDate.friendly,
         changeWord: renderDueDate(result.value.dueDate, clock.now(), false, "short"),
-        emoji: "✏️",
+        emojiOverride: "✏️",
       });
     }
     return outcomes;
@@ -805,7 +808,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         ref: formatTaskRef(o.id),
         title: o.task.title,
         changeWord: o.status !== undefined ? batchChangeWord(kind, o.status) : (o.changeWord ?? ""),
-        emoji: o.status !== undefined ? batchEmoji(kind, o.status) : (o.emoji ?? "📌"),
+        emoji: o.status !== undefined ? batchEmoji(kind, o.status) : (o.emojiOverride ?? "📌"),
         metaSuffix: o.metaSuffix,
       }));
     const failures: BatchFailureLine[] = outcomes

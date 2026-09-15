@@ -2,10 +2,11 @@ import { parseDueDate, type ParsedDueDate } from "../date/parseDueDate.js";
 import { parseTaskRef } from "./taskRef.js";
 
 /**
- * `/due <ref> [by] <date>` — single-item form only (issue #222; bulk is a
- * later ticket). `ref` is the raw label the member typed, not yet resolved
- * against any task list — that's `findTaskByRef`'s job, same as
- * `/done`/`/complete`/`/update`.
+ * `/due <ref> [by] <date>` — one parsed item, whether from the single-item
+ * form (issue #222) or one item of a bulk change (issue #223's
+ * `parseDueBatchItems`, further down this file). `ref` is the raw label
+ * the member typed, not yet resolved against any task list — that's
+ * `findTaskByRef`'s job, same as `/done`/`/complete`/`/update`.
  */
 export interface DueParsed {
   ref: string;
