@@ -9,6 +9,7 @@ import {
   standupSummaryLine,
   reviewQueue,
   renderReviewQueueHtml,
+  REVIEW_QUEUE_RULE,
 } from "./standupBuckets.js";
 
 const NOW = new Date("2026-09-01T00:00:00.000Z");
@@ -202,6 +203,11 @@ describe("renderMemberBucketsHtml", () => {
     // Issue #209: the due date renders through the shared date renderer, so
     // the overdue task reads as elapsed time ("7 days ago") rather than a
     // calendar date — the trap this ticket exists to fix.
+    //
+    // Issue #210: task #2 is `in_review`, so it's now de-duplicated out of
+    // this member's "For approval" bucket entirely — it belongs to the
+    // review queue only (`renderReviewQueueHtml`), which is what makes "For
+    // approval" never appear in a member's block any more.
     expect(renderMemberBucketsHtml(tasks, NOW)).toEqual([
       "",
       "👤 <b>@alice</b>",
@@ -209,8 +215,6 @@ describe("renderMemberBucketsHtml", () => {
       "▸ <code>T-007</code> Finalize demo slides 🔴 🔄 · 7 days ago",
       "🔄 <b>Doing (1)</b>",
       "▸ <code>T-001</code> Fix login redirect 🔴 🔄 · Fri, Sep 11",
-      "👀 <b>For approval (1)</b>",
-      "▸ <code>T-002</code> Ship tasks API 👀 · Wed, Sep 9",
     ]);
   });
 
@@ -270,14 +274,22 @@ describe("reviewQueue", () => {
 });
 
 describe("renderReviewQueueHtml", () => {
-  it("renders the header with task count", () => {
+  // Issue #210: the queue's distinguishing devices — a rule heavier than
+  // the light one used elsewhere in the product, an uppercase heading, a
+  // count in that heading, and a quote block giving the section its own
+  // vertical rail. Present whether the queue is empty or not.
+  it("renders the heavier rule, uppercase heading with count, and a blockquote", () => {
     const tasks = [
       baseTask({ id: 1, status: "in_review", overdue: false }),
       baseTask({ id: 2, status: "in_review", overdue: false }),
     ];
     const lines = renderReviewQueueHtml(tasks, NOW);
     expect(lines[0]).toBe("");
-    expect(lines[1]).toBe("👀 <b>For Review and Approval — Dom / Jedd</b>");
+    expect(lines[1]).toBe(REVIEW_QUEUE_RULE);
+    expect(lines[1]).not.toBe("─────────────────────"); // heavier than tasksPage.ts's light rule
+    expect(lines[2]).toBe("👀 <b>FOR REVIEW AND APPROVAL (2)</b>");
+    expect(lines[3]).toBe("<blockquote>");
+    expect(lines.at(-1)).toBe("</blockquote>");
   });
 
   it("renders one task with showStatus=false", () => {
@@ -292,10 +304,10 @@ describe("renderReviewQueueHtml", () => {
       }),
     ];
     const lines = renderReviewQueueHtml(tasks, NOW);
-    expect(lines[2]).toContain("T-014");
-    expect(lines[2]).toContain("Module 3 slide deck");
-    expect(lines[2]).toContain("@alice");
-    expect(lines[2]).not.toContain("👀");
+    expect(lines[4]).toContain("T-014");
+    expect(lines[4]).toContain("Module 3 slide deck");
+    expect(lines[4]).toContain("@alice");
+    expect(lines[4]).not.toContain("👀");
   });
 
   // Issue #209: an overdue queued task used to carry both a due date and a
@@ -313,8 +325,8 @@ describe("renderReviewQueueHtml", () => {
       }),
     ];
     const lines = renderReviewQueueHtml(tasks, NOW);
-    expect(lines[2]).toContain("4 days ago");
-    expect(lines[2]).not.toContain("⚠️");
+    expect(lines[4]).toContain("4 days ago");
+    expect(lines[4]).not.toContain("⚠️");
   });
 
   it("HTML-escapes title and username", () => {
@@ -328,14 +340,57 @@ describe("renderReviewQueueHtml", () => {
       }),
     ];
     const lines = renderReviewQueueHtml(tasks, NOW);
-    expect(lines[2]).toContain(esc("Test <b>bold</b> & amp"));
-    expect(lines[2]).toContain(esc("a<b"));
+    expect(lines[4]).toContain(esc("Test <b>bold</b> & amp"));
+    expect(lines[4]).toContain(esc("a<b"));
   });
 
-  it("empty state: renders header with (0) and empty message", () => {
+  it("empty state: renders header with (0) and empty message, still inside the blockquote", () => {
     const lines = renderReviewQueueHtml([], NOW);
     expect(lines[0]).toBe("");
-    expect(lines[1]).toBe("👀 <b>For Review and Approval — Dom / Jedd</b>");
-    expect(lines[2]).toBe("<i>No tasks waiting for review right now.</i>");
+    expect(lines[1]).toBe(REVIEW_QUEUE_RULE);
+    expect(lines[2]).toBe("👀 <b>FOR REVIEW AND APPROVAL (0)</b>");
+    expect(lines[3]).toBe("<blockquote>");
+    expect(lines[4]).toBe("<i>No tasks waiting for review right now.</i>");
+    expect(lines[5]).toBe("</blockquote>");
+  });
+});
+
+describe("renderMemberBucketsHtml — de-duplication against the review queue (#210)", () => {
+  it("a task that is both Overdue and in review appears exactly once in the whole card: in the queue, not the member's Overdue bucket", () => {
+    const tasks = [
+      baseTask({
+        id: 42,
+        title: "Overdue and in review",
+        status: "in_review",
+        overdue: true,
+        dueDate: "2026-08-20",
+      }),
+    ];
+    const memberLines = renderMemberBucketsHtml(tasks, NOW);
+    const queueLines = renderReviewQueueHtml(tasks, NOW);
+
+    // Omitted from the member's bucket entirely (falls back to the
+    // no-open-tasks line, since this was the member's only task).
+    expect(memberLines).toEqual(["", NO_OPEN_TASKS_HTML]);
+    expect(memberLines.join("\n")).not.toContain("Overdue and in review");
+
+    // Present exactly once, in the queue.
+    expect(queueLines.join("\n").split("Overdue and in review")).toHaveLength(2);
+  });
+
+  it("a plain in_review (not overdue) task is omitted from its owner's For approval bucket", () => {
+    const tasks = [
+      baseTask({ id: 1, title: "Also has doing work", status: "in_progress", overdue: false }),
+      baseTask({
+        id: 2,
+        title: "Needs review",
+        status: "in_review",
+        overdue: false,
+      }),
+    ];
+    const lines = renderMemberBucketsHtml(tasks, NOW);
+    expect(lines.join("\n")).not.toContain("Needs review");
+    expect(lines.join("\n")).not.toContain("For approval");
+    expect(lines.join("\n")).toContain("Also has doing work");
   });
 });

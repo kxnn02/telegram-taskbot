@@ -309,13 +309,15 @@ describe("formatStandup (person-first layout, #165 S3)", () => {
       title: "Alice's task",
       dueDate: "2026-09-05",
     });
-    const bobTask = await service.assignTask(carla, {
+    // Deliberately not in_review — a task in the review queue is
+    // de-duplicated out of its owner's bucket (#210), which would leave
+    // bob absent from the member list entirely and defeat this test's
+    // purpose (grouping/ordering, not the review queue).
+    await service.assignTask(carla, {
       assigneeUsername: "bob",
       title: "Bob's task",
       dueDate: "2026-09-05",
     });
-    if (!bobTask.ok) throw new Error("setup failed");
-    await service.setStatus(carla, bobTask.value.id, "in_review");
 
     const report = await buildStandup(service, carla, NOW);
     const text = formatStandup(report);
@@ -337,7 +339,7 @@ describe("formatStandup (person-first layout, #165 S3)", () => {
     expect(text).not.toContain("@alice:");
   });
 
-  it("renders bucket headings with counts, in overdue -> doing -> for_approval order", async () => {
+  it("renders bucket headings with counts, in overdue -> doing order", async () => {
     const { service } = makeService();
     const overdueTask = await service.assignTask(carla, {
       assigneeUsername: "alice",
@@ -370,13 +372,14 @@ describe("formatStandup (person-first layout, #165 S3)", () => {
 
     expect(text).toContain("⚠️ <b>Overdue (1)</b>");
     expect(text).toContain("🔄 <b>Doing (2)</b>");
-    expect(text).toContain("👀 <b>For approval (1)</b>");
+    // Issue #210: the in_review task is de-duplicated out of the member's
+    // own "For approval" bucket — the review queue owns it instead, so
+    // "For approval" never appears in a member's block any more.
+    expect(text).not.toContain("👀 <b>For approval");
 
     const overdueIdx = text.indexOf("⚠️ <b>Overdue (");
     const doingIdx = text.indexOf("🔄 <b>Doing (");
-    const approvalIdx = text.indexOf("👀 <b>For approval (");
     expect(overdueIdx).toBeLessThan(doingIdx);
-    expect(doingIdx).toBeLessThan(approvalIdx);
   });
 
   // Issue #209 (spec #201): `/standup` now renders through the same HTML
@@ -754,7 +757,10 @@ describe("formatStandup — review and approval section (issue #186)", () => {
     return created.value.id;
   }
 
-  it("contains the review section after Done this week and before the cert tip", async () => {
+  // Issue #210: the review queue now renders above "Done this week", not
+  // below it — the reversal of issue #186's bottom placement was agreed
+  // explicitly for this ticket.
+  it("contains the review section before Done this week and the cert tip", async () => {
     const { service } = makeService();
     await seedReview(service, "Task for review");
     const report = await buildStandup(service, carla, NOW);
@@ -762,11 +768,12 @@ describe("formatStandup — review and approval section (issue #186)", () => {
     const text = formatStandup(report, tip);
 
     const doneIdx = text.indexOf("✅ <b>Done this week");
-    const reviewIdx = text.indexOf("👀 <b>For Review and Approval");
+    const reviewIdx = text.indexOf("👀 <b>FOR REVIEW AND APPROVAL");
     const tipIdx = text.indexOf(tip);
     expect(doneIdx).toBeGreaterThan(-1);
-    expect(reviewIdx).toBeGreaterThan(doneIdx);
-    expect(tipIdx).toBeGreaterThan(reviewIdx);
+    expect(reviewIdx).toBeGreaterThan(-1);
+    expect(reviewIdx).toBeLessThan(doneIdx);
+    expect(tipIdx).toBeGreaterThan(doneIdx);
   });
 
   it("contains the review section even without a cert tip", async () => {
@@ -776,9 +783,10 @@ describe("formatStandup — review and approval section (issue #186)", () => {
     const text = formatStandup(report);
 
     const doneIdx = text.indexOf("✅ <b>Done this week");
-    const reviewIdx = text.indexOf("👀 <b>For Review and Approval");
+    const reviewIdx = text.indexOf("👀 <b>FOR REVIEW AND APPROVAL");
     expect(doneIdx).toBeGreaterThan(-1);
-    expect(reviewIdx).toBeGreaterThan(doneIdx);
+    expect(reviewIdx).toBeGreaterThan(-1);
+    expect(reviewIdx).toBeLessThan(doneIdx);
   });
 
   it("shows (0) and empty message when no tasks are in review", async () => {
@@ -786,7 +794,7 @@ describe("formatStandup — review and approval section (issue #186)", () => {
     const report = await buildStandup(service, carla, NOW);
     const text = formatStandup(report);
 
-    expect(text).toContain("👀 <b>For Review and Approval — Dom / Jedd</b>");
+    expect(text).toContain("👀 <b>FOR REVIEW AND APPROVAL (0)</b>");
     expect(text).toContain("No tasks waiting for review right now.");
   });
 
@@ -799,7 +807,7 @@ describe("formatStandup — review and approval section (issue #186)", () => {
     const report = await buildStandup(service, carla, NOW);
     const text = formatStandup(report);
 
-    expect(text).toContain("👀 <b>For Review and Approval — Dom / Jedd</b>");
+    expect(text).toContain("👀 <b>FOR REVIEW AND APPROVAL (1)</b>");
     expect(text).toContain("<code>");
   });
 
@@ -809,7 +817,7 @@ describe("formatStandup — review and approval section (issue #186)", () => {
     const report = await buildStandup(service, carla, NOW);
     const text = formatStandupFiltered(report, "active");
 
-    expect(text).not.toContain("👀 For Review and Approval");
+    expect(text).not.toContain("👀 <b>FOR REVIEW AND APPROVAL");
   });
 
   it("review section does not appear in backlog filter", async () => {
@@ -818,7 +826,7 @@ describe("formatStandup — review and approval section (issue #186)", () => {
     const report = await buildStandup(service, carla, NOW);
     const text = formatStandupFiltered(report, "backlog");
 
-    expect(text).not.toContain("👀 For Review and Approval");
+    expect(text).not.toContain("👀 <b>FOR REVIEW AND APPROVAL");
   });
 
   it("review section does not appear in review filter", async () => {
@@ -827,7 +835,7 @@ describe("formatStandup — review and approval section (issue #186)", () => {
     const report = await buildStandup(service, carla, NOW);
     const text = formatStandupFiltered(report, "review");
 
-    expect(text).not.toContain("👀 For Review and Approval");
+    expect(text).not.toContain("👀 <b>FOR REVIEW AND APPROVAL");
   });
 
   it("review section does not appear in done filter", async () => {
@@ -836,7 +844,7 @@ describe("formatStandup — review and approval section (issue #186)", () => {
     const report = await buildStandup(service, carla, NOW);
     const text = formatStandupFiltered(report, "done");
 
-    expect(text).not.toContain("👀 For Review and Approval");
+    expect(text).not.toContain("👀 <b>FOR REVIEW AND APPROVAL");
   });
 
   it("overview filter still equals formatStandup (unchanged)", async () => {

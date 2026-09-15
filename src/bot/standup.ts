@@ -191,11 +191,18 @@ function standupHeaderLines(report: StandupReport): string[] {
  * filter restores the same tip rather than silently swapping it. There is
  * no quote here: unlike the pushed card, `/standup` never calls the model,
  * so it always returns instantly from cached data.
+ *
+ * Issue #210 (spec #201): the review queue now renders immediately under
+ * the summary line, above the person-first buckets — reversing the bottom
+ * placement issue #186 chose, deliberately and by agreement, to keep this
+ * surface in step with the pushed card's own reordering. Do not "restore"
+ * the bottom placement.
  */
 export function formatStandup(report: StandupReport, certTipHtml?: string): string {
   const lines: string[] = [
     ...standupHeaderLines(report),
     standupSummaryLine(report.tasks),
+    ...renderReviewQueueHtml(report.tasks, report.today),
     ...renderMemberBucketsHtml(report.tasks, report.today),
   ];
 
@@ -207,8 +214,6 @@ export function formatStandup(report: StandupReport, certTipHtml?: string): stri
       lines.push(`▸ ${formatTaskRefHtml(t.id)} ${esc(t.title)} (@${esc(t.assigneeUsername)})`);
     }
   }
-
-  lines.push(...renderReviewQueueHtml(report.tasks, report.today));
 
   if (certTipHtml) {
     lines.push("", certTipHtml);

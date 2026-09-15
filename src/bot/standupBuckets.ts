@@ -27,8 +27,13 @@ export const STANDUP_BUCKET_EMOJI: Record<StandupBucket, string> = {
 
 export const NO_OPEN_TASKS_HTML = "<i>No open tasks right now.</i>";
 
-export const STANDUP_APPROVERS = "Dom / Jedd";
 export const NOTHING_FOR_REVIEW_HTML = "<i>No tasks waiting for review right now.</i>";
+
+/** Issue #210 (spec #201): a horizontal rule heavier than the light one
+ * `tasksPage.ts` already draws elsewhere in the product (`─` × 21) — one of
+ * the review queue's five distinguishing devices, and not used anywhere
+ * else in the standup card. */
+export const REVIEW_QUEUE_RULE = "━".repeat(20);
 
 export function bucketOf(task: TaskWithFlags): StandupBucket | undefined {
   if (task.status === "done") return undefined;
@@ -54,11 +59,24 @@ function sortWithinBucket(tasks: TaskWithFlags[]): TaskWithFlags[] {
   );
 }
 
-export function bucketByMember(tasks: TaskWithFlags[]): MemberBuckets[] {
+/**
+ * Issue #210: `excludeIds` de-duplicates against the review queue — a task
+ * listed there (`reviewQueue`) is omitted here, in its owner's bucket,
+ * rather than rendered twice (three times, for a task that is both Overdue
+ * and in review — the trap this ticket fixes). This governs *rendering*
+ * only: `bucketOf` and `standupSummaryLine` are untouched, so an overdue
+ * in-review task still counts as Overdue, per the unchanged classification
+ * rule.
+ */
+export function bucketByMember(
+  tasks: TaskWithFlags[],
+  excludeIds: ReadonlySet<number> = new Set(),
+): MemberBuckets[] {
   return groupByMember(tasks)
     .map((group) => {
       const byBucket = new Map<StandupBucket, TaskWithFlags[]>();
       for (const t of group.tasks) {
+        if (excludeIds.has(t.id)) continue;
         const bucket = bucketOf(t);
         if (bucket === undefined) continue;
         const list = byBucket.get(bucket) ?? [];
@@ -96,7 +114,8 @@ export function standupSummaryLine(tasks: TaskWithFlags[]): string {
 }
 
 export function renderMemberBucketsHtml(tasks: TaskWithFlags[], now: Date): string[] {
-  const members = bucketByMember(tasks);
+  const excludeIds = new Set(reviewQueue(tasks).map((t) => t.id));
+  const members = bucketByMember(tasks, excludeIds);
   if (members.length === 0) return ["", NO_OPEN_TASKS_HTML];
 
   const lines: string[] = [];
@@ -120,10 +139,29 @@ export function reviewQueue(tasks: TaskWithFlags[]): TaskWithFlags[] {
  * due date and a trailing `⚠️` flag — a date plus a suffix the reader still
  * had to decode. `taskLine`'s due date now already reads as elapsed time
  * (`3 days ago`) for an overdue task, so the flag is gone; lateness is
- * expressed once, not twice. */
+ * expressed once, not twice.
+ *
+ * Issue #210 (spec #201): the queue is set apart by four of its five
+ * distinguishing devices — `REVIEW_QUEUE_RULE` (heavier than the light rule
+ * `tasksPage.ts` draws elsewhere), an uppercase heading, a count in that
+ * heading, and a `<blockquote>` giving the whole section its own vertical
+ * rail, present whether the queue is empty or not. The fifth device — a
+ * line @-mentioning the two reviewers so Telegram actually notifies them —
+ * is deliberately not built here: the ticket's own fallback is "if the
+ * handles are unavailable... keep the other four devices and drop only the
+ * mention line", and no real Telegram username for either reviewer exists
+ * anywhere in this codebase (only the old hardcoded display string "Dom /
+ * Jedd", which is exactly the plain-text naming this device replaces).
+ * Wiring the mention back in is a follow-up once real handles are supplied,
+ * not a config surface (out of scope, spec #201). */
 export function renderReviewQueueHtml(tasks: TaskWithFlags[], now: Date): string[] {
   const queue = reviewQueue(tasks);
-  const lines: string[] = ["", `👀 <b>For Review and Approval — ${STANDUP_APPROVERS}</b>`];
+  const lines: string[] = [
+    "",
+    REVIEW_QUEUE_RULE,
+    `👀 <b>FOR REVIEW AND APPROVAL (${queue.length})</b>`,
+    "<blockquote>",
+  ];
   if (queue.length === 0) {
     lines.push(NOTHING_FOR_REVIEW_HTML);
   } else {
@@ -131,5 +169,6 @@ export function renderReviewQueueHtml(tasks: TaskWithFlags[], now: Date): string
       lines.push(`${taskLine(t, now, { showStatus: false })} (@${esc(t.assigneeUsername)})`);
     }
   }
+  lines.push("</blockquote>");
   return lines;
 }
