@@ -910,6 +910,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
           title: result.value.title,
           assigneeUsername: result.value.assigneeUsername,
           dueDate: result.value.dueDate,
+          priority: result.value.priority,
           description: result.value.description,
         });
       }
@@ -920,7 +921,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       return;
     }
 
-    await ctx.reply(formatBulkCreateReply(created), { parse_mode: "HTML" as const });
+    await ctx.reply(formatBulkCreateReply(created, new Date()), { parse_mode: "HTML" as const });
   }
 
   /**
