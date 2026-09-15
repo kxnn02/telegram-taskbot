@@ -1228,6 +1228,37 @@ describe("Devie's batch reply shape (issue #124 stage S3)", () => {
     expect(text).toContain("  🔗 https://example.com/pr/1");
   });
 
+  it("collapses a bulk /done into one DM to the assignee, worded from each outcome's change description (issue #221)", async () => {
+    const roster = new Roster([
+      { username: "alice", cohortId: COHORT },
+      { username: "bob", cohortId: COHORT },
+    ]);
+    const testBot = makeTestBot(roster);
+    const bobId = nextUserId();
+    await testBot.bot.handleUpdate(messageUpdate(bobId, "bob", bobId, "/help"));
+
+    const userId = nextUserId();
+    const first = await testBot.service.assignTask(
+      { username: "alice", cohortId: COHORT },
+      { assigneeUsername: "bob", title: "First task", dueDate: "2026-09-10" },
+    );
+    const second = await testBot.service.assignTask(
+      { username: "alice", cohortId: COHORT },
+      { assigneeUsername: "bob", title: "Second task", dueDate: "2026-09-10" },
+    );
+    if (!first.ok || !second.ok) throw new Error("setup failed");
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, `/done t${first.value.id},t${second.value.id}`),
+    );
+
+    expect(lastReplyTextIn(testBot.calls, bobId)).toBe(
+      `@alice updated 2 of your tasks:\n` +
+        `t${first.value.id} ("First task") → In Review\n` +
+        `t${second.value.id} ("Second task") → In Review`,
+    );
+  });
+
   it("single-item /done, /complete and /update replies are all sent with parse_mode HTML", async () => {
     const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
     const testBot = makeTestBot(roster);

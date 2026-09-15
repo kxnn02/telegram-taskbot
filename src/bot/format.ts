@@ -459,9 +459,11 @@ export interface BatchSuccessLine {
   /** The `T-001` form (`formatTaskRef`). */
   ref: string;
   title: string;
-  /** Already-rendered status word, e.g. `"in review"`, `"done"`, or an
-   * `/update` batch item's own resolved status word. */
-  statusWord: string;
+  /** Already-rendered description of whatever the command changed on this
+   * item — e.g. `"in review"`, `"done"`, or an `/update` batch item's own
+   * resolved status word. Not always a status: a future command (e.g. a
+   * due-date change) populates this with its own change wording instead. */
+  changeWord: string;
   emoji: string;
   /** `/update`'s `🔗`/`📝` rider sub-lines, pre-rendered with their own
    * leading newlines — `""`/`undefined` for `/done`/`/complete`, whose
@@ -504,8 +506,8 @@ export function formatBatchReply(
     return lines.join("\n");
   }
 
-  const uniformStatusWord = successes.every((s) => s.statusWord === successes[0]!.statusWord)
-    ? successes[0]!.statusWord
+  const uniformChangeWord = successes.every((s) => s.changeWord === successes[0]!.changeWord)
+    ? successes[0]!.changeWord
     : undefined;
 
   const header =
@@ -513,15 +515,15 @@ export function formatBatchReply(
       ? `👀 <b>Moved ${pluralize(successes.length, "task")} to In Review.</b>`
       : kind === "complete"
         ? `✅ <b>Marked ${pluralize(successes.length, "task")} as done.</b>`
-        : uniformStatusWord !== undefined
-          ? `✅ <b>Updated ${pluralize(successes.length, "task")} to ${uniformStatusWord}.</b>`
+        : uniformChangeWord !== undefined
+          ? `✅ <b>Updated ${pluralize(successes.length, "task")} to ${uniformChangeWord}.</b>`
           : `✅ <b>Updated ${pluralize(successes.length, "task")}.</b>`;
 
   const lines = [header];
   for (const s of successes) {
-    const statusSuffix = uniformStatusWord !== undefined ? "" : ` → <b>${s.statusWord}</b>`;
+    const changeSuffix = uniformChangeWord !== undefined ? "" : ` → <b>${s.changeWord}</b>`;
     lines.push(
-      `• ${s.emoji} <code>${s.ref}</code> ${esc(s.title)}${statusSuffix}${s.metaSuffix ?? ""}`,
+      `• ${s.emoji} <code>${s.ref}</code> ${esc(s.title)}${changeSuffix}${s.metaSuffix ?? ""}`,
     );
   }
   if (failures.length > 0) {

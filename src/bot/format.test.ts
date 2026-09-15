@@ -513,7 +513,7 @@ describe("chunkMessage (issue #55/F8)", () => {
     const successes = Array.from({ length: 400 }, (_, i) => ({
       ref: `T-${String(i + 1).padStart(3, "0")}`,
       title: `Some task title number ${i}`,
-      statusWord: "done",
+      changeWord: "done",
       emoji: "✅",
     }));
     const text = formatBatchReply("update", successes, []);
@@ -684,7 +684,7 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
   it("done batch, singular count", () => {
     const text = formatBatchReply(
       "done",
-      [{ ref: "T-001", title: "Fix the login bug", statusWord: "in review", emoji: "👀" }],
+      [{ ref: "T-001", title: "Fix the login bug", changeWord: "in review", emoji: "👀" }],
       [],
     );
     expect(text).toBe(
@@ -699,8 +699,8 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
     const text = formatBatchReply(
       "done",
       [
-        { ref: "T-001", title: "First", statusWord: "in review", emoji: "👀" },
-        { ref: "T-002", title: "Second", statusWord: "in review", emoji: "👀" },
+        { ref: "T-001", title: "First", changeWord: "in review", emoji: "👀" },
+        { ref: "T-002", title: "Second", changeWord: "in review", emoji: "👀" },
       ],
       [],
     );
@@ -710,7 +710,7 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
   it("complete batch", () => {
     const text = formatBatchReply(
       "complete",
-      [{ ref: "T-001", title: "Fix the login bug", statusWord: "done", emoji: "✅" }],
+      [{ ref: "T-001", title: "Fix the login bug", changeWord: "done", emoji: "✅" }],
       [],
     );
     expect(text).toBe(
@@ -728,7 +728,7 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
         {
           ref: "T-001",
           title: "Fix the login bug",
-          statusWord: "done",
+          changeWord: "done",
           emoji: "✅",
           metaSuffix: "\n  🔗 https://example.com/pr/1\n  📝 ready for QA",
         },
@@ -748,7 +748,7 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
   it("HTML-escapes the title of every success line", () => {
     const text = formatBatchReply(
       "update",
-      [{ ref: "T-001", title: "<b>x</b> & y", statusWord: "done", emoji: "✅" }],
+      [{ ref: "T-001", title: "<b>x</b> & y", changeWord: "done", emoji: "✅" }],
       [],
     );
     expect(text).toContain("&lt;b&gt;x&lt;/b&gt; &amp; y");
@@ -757,7 +757,7 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
   it("a batch with both successes and failures groups failures at the end under a Skipped header", () => {
     const text = formatBatchReply(
       "update",
-      [{ ref: "T-001", title: "Fix the login bug", statusWord: "done", emoji: "✅" }],
+      [{ ref: "T-001", title: "Fix the login bug", changeWord: "done", emoji: "✅" }],
       [{ ref: "t22", reason: "no active task found" }],
     );
     expect(text).toBe(
@@ -774,7 +774,7 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
   it("multiple failures pluralize 'items'", () => {
     const text = formatBatchReply(
       "update",
-      [{ ref: "T-001", title: "x", statusWord: "done", emoji: "✅" }],
+      [{ ref: "T-001", title: "x", changeWord: "done", emoji: "✅" }],
       [
         { ref: "t22", reason: "no active task found" },
         { ref: "t23", reason: "no active task found" },
@@ -813,8 +813,8 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
     const text = formatBatchReply(
       "update",
       [
-        { ref: "T-001", title: "First", statusWord: "done", emoji: "✅" },
-        { ref: "T-002", title: "Second", statusWord: "done", emoji: "✅" },
+        { ref: "T-001", title: "First", changeWord: "done", emoji: "✅" },
+        { ref: "T-002", title: "Second", changeWord: "done", emoji: "✅" },
       ],
       [],
     );
@@ -831,8 +831,8 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
     const text = formatBatchReply(
       "update",
       [
-        { ref: "T-001", title: "First", statusWord: "done", emoji: "✅" },
-        { ref: "T-002", title: "Second", statusWord: "in review", emoji: "👀" },
+        { ref: "T-001", title: "First", changeWord: "done", emoji: "✅" },
+        { ref: "T-002", title: "Second", changeWord: "in review", emoji: "👀" },
       ],
       [],
     );
@@ -849,8 +849,8 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
     const text = formatBatchReply(
       "done",
       [
-        { ref: "T-001", title: "First", statusWord: "in review", emoji: "👀" },
-        { ref: "T-002", title: "Second", statusWord: "in review", emoji: "👀" },
+        { ref: "T-001", title: "First", changeWord: "in review", emoji: "👀" },
+        { ref: "T-002", title: "Second", changeWord: "in review", emoji: "👀" },
       ],
       [],
     );
@@ -870,7 +870,7 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
         {
           ref: "T-001",
           title: "Fix the login bug",
-          statusWord: "done",
+          changeWord: "done",
           emoji: "✅",
           metaSuffix: "\n  🔗 https://example.com/pr/1",
         },

@@ -597,6 +597,12 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     id?: number;
     task?: { assigneeUsername: string; assignedByUsername: string; title: string };
     status?: TaskStatus;
+    /** Rendered description of what changed on this item, e.g. `"in
+     * review"` or `"done"` — used to build each recipient's collapsed batch
+     * DM summary line. Not always a status word: a future command (e.g. a
+     * due-date change) populates this with its own change wording instead
+     * of deriving it from `status`. */
+    changeDescription?: string;
     /** The `🔗`/`📝` lines for this item's `/update` riders (#103 item 6),
      * appended to its ✓ line by `finishBatch`. Always `""` for
      * `/done`/`/complete`, whose grammar has no riders. */
@@ -651,6 +657,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         id: ref,
         task: result.value,
         status: resolvedStatus.status,
+        changeDescription: statusLabel(resolvedStatus.status),
         metaSuffix: await attachUpdateMeta(caller, ref, item),
       });
     }
@@ -666,12 +673,12 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   async function sendBatchNotifications(caller: Caller, outcomes: BatchOutcome[]): Promise<void> {
     const perRecipient = new Map<string, string[]>();
     for (const outcome of outcomes) {
-      if (!outcome.ok || !outcome.task || !outcome.status) continue;
+      if (!outcome.ok || !outcome.task || !outcome.changeDescription) continue;
       const recipients = new Set([outcome.task.assigneeUsername, outcome.task.assignedByUsername]);
       recipients.delete(caller.username);
       for (const username of recipients) {
         const changes = perRecipient.get(username) ?? [];
-        changes.push(`${outcome.label} ("${outcome.task.title}") → ${statusLabel(outcome.status)}`);
+        changes.push(`${outcome.label} ("${outcome.task.title}") → ${outcome.changeDescription}`);
         perRecipient.set(username, changes);
       }
     }
@@ -681,11 +688,11 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }
   }
 
-  /** Devie's per-kind batch status word/emoji (issue #124 stage S3):
+  /** Devie's per-kind batch change word/emoji (issue #124 stage S3):
    * `/done` and `/complete` always report their own fixed status, since
    * that's the only status either command can ever set; `/update` reports
    * whatever status each item actually resolved to. */
-  function batchStatusWord(kind: "done" | "complete" | "update", status: TaskStatus): string {
+  function batchChangeWord(kind: "done" | "complete" | "update", status: TaskStatus): string {
     if (kind === "done") return "in review";
     if (kind === "complete") return "done";
     return status.replace(/_/g, " ");
@@ -717,7 +724,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       .map((o) => ({
         ref: formatTaskRef(o.id),
         title: o.task.title,
-        statusWord: batchStatusWord(kind, o.status),
+        changeWord: batchChangeWord(kind, o.status),
         emoji: batchEmoji(kind, o.status),
         metaSuffix: o.metaSuffix,
       }));
