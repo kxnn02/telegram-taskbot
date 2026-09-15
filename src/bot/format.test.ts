@@ -9,6 +9,7 @@ import {
   formatDeadlines,
   formatDoneOk,
   formatCompleteOk,
+  formatDueOk,
   formatMyTasks,
   formatTaskAdded,
   formatTaskDetail,
@@ -22,6 +23,7 @@ import {
   DONE_USAGE,
   COMPLETE_USAGE,
   UPDATE_USAGE,
+  DUE_USAGE,
 } from "./format.js";
 import { formatTaskRefHtml } from "./taskRef.js";
 
@@ -379,6 +381,7 @@ describe("formatHelp (issue #124 stage S3: Devie's HTML card, verbatim)", () => 
     "/update &lt;ref&gt; &lt;status&gt; — single update",
     "/done, /complete and /update all accept a comma- or newline-separated list of refs for bulk updates (e.g. /done <code>T-021</code>,<code>T-022</code>,<code>T-023</code>)",
     "⚠️ /done marks In Review, not Done — use /complete to mark a task actually finished.",
+    "/due &lt;ref&gt; [by] &lt;date&gt; — change a task's deadline (e.g. /due 23 friday)",
     "",
     "<i>Statuses: backlog · todo · in progress · in review · blocked · done</i>",
   ].join("\n");
@@ -680,6 +683,22 @@ describe("formatDoneOk / formatCompleteOk / formatUpdateOk (issue #124 stage S3)
   });
 });
 
+describe("formatDueOk (issue #222)", () => {
+  const NOW = new Date("2026-09-09T12:00:00Z");
+
+  it("names the task title and renders the new deadline in long form, same '📅 Due:' vocabulary as formatTaskAdded", () => {
+    expect(formatDueOk("Fix the login bug", "2026-09-25", NOW)).toBe(
+      "✏️ <b>Fix the login bug</b>\n📅 Due: Friday, September 25",
+    );
+  });
+
+  it("HTML-escapes the title", () => {
+    expect(formatDueOk("<b>x</b> & y", "2026-09-25", NOW)).toContain(
+      "&lt;b&gt;x&lt;/b&gt; &amp; y",
+    );
+  });
+});
+
 describe("formatBatchReply (issue #124 stage S3)", () => {
   it("done batch, singular count", () => {
     const text = formatBatchReply(
@@ -936,6 +955,22 @@ describe("usage blocks (issue #124 stage S3, Devie's verbatim text)", () => {
         "",
         "<i>Valid statuses: backlog · todo · in progress · in review · blocked · done</i>",
         "<i>Optionally append <code>link:&lt;url&gt;</code> and/or <code>note:&lt;text&gt;</code>.</i>",
+      ].join("\n"),
+    );
+  });
+
+  it("DUE_USAGE (issue #222)", () => {
+    expect(DUE_USAGE).toBe(
+      [
+        "Usage: <code>/due &lt;number or keyword&gt; [by] &lt;date&gt;</code>",
+        "",
+        "<b>Examples:</b>",
+        "/due t21 friday",
+        "/due t21 by next monday",
+        "/due 23 sept 30",
+        "/due login bug friday",
+        "",
+        "<i>Sets a task's due date. The word \"by\" is optional.</i>",
       ].join("\n"),
     );
   });

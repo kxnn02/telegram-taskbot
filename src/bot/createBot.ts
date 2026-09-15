@@ -15,6 +15,7 @@ import { notifyUser, notifyStatusChange } from "./notify.js";
 import { suggestClosestUsername } from "./usernameSuggest.js";
 import { parseStatusWord, VALID_STATUS_WORDS_TEXT } from "./statusParse.js";
 import { parseRefListItems, parseUpdateItems, type BatchItem } from "./updateBatch.js";
+import { parseDueArgs } from "./dueParse.js";
 import { findTaskByRef, type TaskLookup } from "./taskLookup.js";
 import { formatTaskRef, formatTaskRefHtml } from "./taskRef.js";
 import { renderDueDate } from "../date/renderDueDate.js";
@@ -41,6 +42,7 @@ import {
   formatCompleteOk,
   formatDeadlines,
   formatDoneOk,
+  formatDueOk,
   formatHelp,
   formatStart,
   formatTaskAdded,
@@ -51,6 +53,7 @@ import {
   COMPLETE_USAGE,
   DONE_USAGE,
   UPDATE_USAGE,
+  DUE_USAGE,
   UNKNOWN_COMMAND_REPLY,
   type BatchFailureLine,
   type BatchSuccessLine,
@@ -172,6 +175,7 @@ export const BOT_COMMANDS = [
   { command: "complete", description: "Mark a task Done" },
   { command: "completed", description: "Mark a task Done" },
   { command: "update", description: "Set a task's status (or bulk-update several)" },
+  { command: "due", description: "Change a task's due date" },
   { command: "standup", description: "On-demand standup report for the cohort" },
 ] as const;
 
@@ -847,6 +851,52 @@ export function createBot(options: CreateBotOptions): CreatedBot {
 
   bot.command("complete", completeHandler);
   bot.command("completed", completeHandler);
+
+  // ---- /due (issue #222) — single-item only; bulk is a later ticket -------
+  // No new service method: `service.editTask` already takes a due-date-only
+  // patch and already validates the ISO format. No access check (ADR-0013):
+  // any Caller may re-date any task in their own Cohort.
+  bot.command(
+    "due",
+    withCaller(async (ctx, caller) => {
+      const raw = matchToString(ctx.match).trim();
+      if (raw.length === 0) {
+        await ctx.reply(DUE_USAGE, { parse_mode: "HTML" as const });
+        return;
+      }
+      const parsed = parseDueArgs(raw, clock.now());
+      if (parsed === undefined) {
+        await ctx.reply(DUE_USAGE, { parse_mode: "HTML" as const });
+        return;
+      }
+      if ("error" in parsed) {
+        await ctx.reply(parsed.error);
+        return;
+      }
+      const resolved = await resolveRef(caller, parsed.ref);
+      if (resolved.kind !== "found") {
+        await replyNotFoundOrAmbiguous(ctx, "/due", parsed.ref, resolved);
+        return;
+      }
+      const result = await service.editTask(caller, resolved.task.id, {
+        dueDate: parsed.dueDate.isoDate,
+      });
+      if (!result.ok) {
+        await ctx.reply(`❌ ${result.error}`);
+        return;
+      }
+      await ctx.reply(formatDueOk(result.value.title, result.value.dueDate, clock.now()), {
+        parse_mode: "HTML" as const,
+      });
+      await notifyStatusChange(
+        bot,
+        registrations,
+        result.value,
+        caller.username,
+        `@${caller.username} changed the due date on Task ${resolved.task.id} ("${result.value.title}") to ${parsed.dueDate.friendly}. Send /due ${resolved.task.id} <date> to change it again.`,
+      );
+    }),
+  );
 
   // ---- /addtask (one-liner; bare command gets a usage example, Devie-style,
   // not the removed step-by-step form) ------------------------------------

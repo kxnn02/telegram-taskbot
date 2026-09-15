@@ -67,6 +67,12 @@ no confirmation step, and no permission check left to maintain.
 Cohort scoping survives because it is tenancy, not permission. Re-adding access control would be
 a new proposal, not a bug fix.
 
+ADR-0013 also cut the command menu to Devie's exact ten commands, on the same carbon-copy
+premise. [ADR-0016](./docs/adr/0016-due-command-is-an-eleventh-command.md) is the one documented
+exception: `/due`, since Devie has no deadline-editing command of its own to copy. ADR-0013 is
+unmodified — parity is still the default, and `/due` is one cited departure from it, not a
+reopening.
+
 ### One cohort per deployment, bound by `ACTIVE_COHORT_ID`
 
 `Roster.find(username)` without a cohort resolves ambiguously — the same Telegram account exists
