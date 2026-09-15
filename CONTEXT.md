@@ -207,6 +207,11 @@ it that way. Runbook: [`docs/runbooks/migrations.md`](./docs/runbooks/migrations
   and the parity decision outranks the vocabulary rule here. The empty-state sentences underneath
   them *were* converted, so prose and button label disagree on purpose. Decided when the collision
   surfaced; do not "finish" the rename.
+- **The standup card bullets with `▸`; every other list bullets with `•`.** Spec #201 asked for one
+  bullet character everywhere (its story 34), and every other surface was converted — but `▸` comes
+  from Devie's `taskLine` and stays, for the same parity reason the "Active" labels do. Two bullets
+  ship on purpose. The spec itself notes this was a default rather than an instruction and is a
+  one-line reversal if the parity call is ever revisited; it is not an oversight to tidy up.
 - **A notification is only marked sent if it actually sent.** Overdue-crossing used to record a
   task as notified even when nobody could be DM'd, permanently losing the one-shot alert (#162);
   roster reconciliation used to spend its 24h throttle claim before sending, suppressing an
