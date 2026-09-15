@@ -504,7 +504,7 @@ function pluralize(n: number, word: string): string {
  * trailing phrases. It's retained only when a mixed-status `/update` batch
  * makes the lines genuinely differ. */
 export function formatBatchReply(
-  kind: "done" | "complete" | "update",
+  kind: "done" | "complete" | "update" | "due",
   successes: BatchSuccessLine[],
   failures: BatchFailureLine[],
 ): string {
@@ -526,9 +526,13 @@ export function formatBatchReply(
       ? `👀 <b>Moved ${pluralize(successes.length, "task")} to In Review.</b>`
       : kind === "complete"
         ? `✅ <b>Marked ${pluralize(successes.length, "task")} as done.</b>`
-        : uniformChangeWord !== undefined
-          ? `✅ <b>Updated ${pluralize(successes.length, "task")} to ${uniformChangeWord}.</b>`
-          : `✅ <b>Updated ${pluralize(successes.length, "task")}.</b>`;
+        : kind === "due"
+          ? uniformChangeWord !== undefined
+            ? `📅 <b>Updated ${pluralize(successes.length, "task")}${successes.length === 1 ? "'s" : "'"} due date to ${uniformChangeWord}.</b>`
+            : `📅 <b>Updated ${pluralize(successes.length, "task")}${successes.length === 1 ? "'s" : "'"} due dates.</b>`
+          : uniformChangeWord !== undefined
+            ? `✅ <b>Updated ${pluralize(successes.length, "task")} to ${uniformChangeWord}.</b>`
+            : `✅ <b>Updated ${pluralize(successes.length, "task")}.</b>`;
 
   const lines = [header];
   for (const s of successes) {

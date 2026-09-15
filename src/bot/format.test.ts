@@ -904,6 +904,59 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
       ].join("\n"),
     );
   });
+
+  it("issue #223: a due batch where every task got the same date states it once in the header", () => {
+    const text = formatBatchReply(
+      "due",
+      [
+        { ref: "T-001", title: "First", changeWord: "Fri, Sep 4", emoji: "✏️" },
+        { ref: "T-002", title: "Second", changeWord: "Fri, Sep 4", emoji: "✏️" },
+      ],
+      [],
+    );
+    expect(text).toBe(
+      [
+        "📅 <b>Updated 2 tasks' due date to Fri, Sep 4.</b>",
+        "• ✏️ <code>T-001</code> First",
+        "• ✏️ <code>T-002</code> Second",
+      ].join("\n"),
+    );
+  });
+
+  it("issue #223: a due batch with mixed dates keeps each line's own date", () => {
+    const text = formatBatchReply(
+      "due",
+      [
+        { ref: "T-001", title: "First", changeWord: "Fri, Sep 4", emoji: "✏️" },
+        { ref: "T-002", title: "Second", changeWord: "Wed, Sep 30", emoji: "✏️" },
+      ],
+      [],
+    );
+    expect(text).toBe(
+      [
+        "📅 <b>Updated 2 tasks' due dates.</b>",
+        "• ✏️ <code>T-001</code> First → <b>Fri, Sep 4</b>",
+        "• ✏️ <code>T-002</code> Second → <b>Wed, Sep 30</b>",
+      ].join("\n"),
+    );
+  });
+
+  it("issue #223: a due batch with a bad ref groups it under Skipped", () => {
+    const text = formatBatchReply(
+      "due",
+      [{ ref: "T-001", title: "First", changeWord: "Fri, Sep 4", emoji: "✏️" }],
+      [{ ref: "t999", reason: "no open task found" }],
+    );
+    expect(text).toBe(
+      [
+        "📅 <b>Updated 1 task's due date to Fri, Sep 4.</b>",
+        "• ✏️ <code>T-001</code> First",
+        "",
+        "⚠️ <b>Skipped 1 item:</b>",
+        "• <b>t999</b> → no open task found",
+      ].join("\n"),
+    );
+  });
 });
 
 describe("usage blocks (issue #124 stage S3, Devie's verbatim text)", () => {

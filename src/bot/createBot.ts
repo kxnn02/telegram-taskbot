@@ -15,7 +15,7 @@ import { notifyUser, notifyStatusChange } from "./notify.js";
 import { suggestClosestUsername } from "./usernameSuggest.js";
 import { parseStatusWord, VALID_STATUS_WORDS_TEXT } from "./statusParse.js";
 import { parseRefListItems, parseUpdateItems, type BatchItem } from "./updateBatch.js";
-import { parseDueArgs, isWholeArgDate } from "./dueParse.js";
+import { parseDueArgs, isWholeArgDate, parseDueBatchItems, type DueBatchItem } from "./dueParse.js";
 import { findTaskByRef, type TaskLookup } from "./taskLookup.js";
 import { formatTaskRef, formatTaskRefHtml } from "./taskRef.js";
 import { renderDueDate } from "../date/renderDueDate.js";
@@ -611,6 +611,17 @@ export function createBot(options: CreateBotOptions): CreatedBot {
      * appended to its ✓ line by `finishBatch`. Always `""` for
      * `/done`/`/complete`, whose grammar has no riders. */
     metaSuffix?: string;
+    /** Issue #223: `/due`'s own reply-line rendering of its change — the
+     * short-form date (`renderDueDate`'s `"short"` form, e.g. `"Fri, Sep
+     * 4"`), distinct from `changeDescription`'s long form used in the DM.
+     * Status-based kinds (`/done`/`/complete`/`/update`) leave this unset
+     * and keep deriving their line word from `status` via
+     * `batchChangeWord`, unchanged. */
+    changeWord?: string;
+    /** Issue #223: `/due`'s own reply-line emoji, since it has no
+     * `TaskStatus` for `batchEmoji` to key off. Unset for status-based
+     * kinds, which keep using `batchEmoji`. */
+    emoji?: string;
   }
 
   /** Runs one `setStatus` call per batch item (issue #32) — no batch
@@ -692,17 +703,73 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }
   }
 
+  /** Runs one `editTask` call per `/due` bulk item (issue #223) — the
+   * `/due` analogue of `runBatch` above. Kept separate rather than folded
+   * into `runBatch` because `runBatch`'s `resolveStatus` plumbing and
+   * `service.setStatus` call are status-specific; a due-date change has no
+   * status at all, and per the finding on this ticket must not pretend to
+   * have one. An item with no `dueDate` (its segment failed to parse — see
+   * `parseDueBatchItems`) is reported as its own failure without ever
+   * attempting ref resolution, so a garbled segment like `"t23 banana"`
+   * doesn't get keyword-matched against some unrelated task. */
+  async function runDueBatch(caller: Caller, items: DueBatchItem[]): Promise<BatchOutcome[]> {
+    const outcomes: BatchOutcome[] = [];
+    for (const item of items) {
+      if (item.dueDate === undefined) {
+        outcomes.push({ label: item.label, ok: false, message: item.error ?? "no date given" });
+        continue;
+      }
+      let ref = item.ref;
+      if (ref === undefined) {
+        const lookup = await resolveRef(caller, item.label);
+        if (lookup.kind === "ambiguous") {
+          outcomes.push({
+            label: `"${item.label}"`,
+            ok: false,
+            message: "multiple tasks matched; use task number",
+          });
+          continue;
+        }
+        if (lookup.kind === "none") {
+          outcomes.push({ label: `"${item.label}"`, ok: false, message: "no open task found" });
+          continue;
+        }
+        ref = lookup.task.id;
+      }
+      const label = `t${ref}`;
+      const result = await service.editTask(caller, ref, { dueDate: item.dueDate.isoDate });
+      if (!result.ok) {
+        outcomes.push({ label, ok: false, message: result.error });
+        continue;
+      }
+      outcomes.push({
+        label,
+        ok: true,
+        message: item.dueDate.friendly,
+        id: ref,
+        task: result.value,
+        // Long form for the collapsed DM, short form for the reply line —
+        // `renderDueDate`'s own documented split between the two forms
+        // (issue #220's "appropriate rendering of its new deadline").
+        changeDescription: item.dueDate.friendly,
+        changeWord: renderDueDate(result.value.dueDate, clock.now(), false, "short"),
+        emoji: "✏️",
+      });
+    }
+    return outcomes;
+  }
+
   /** Devie's per-kind batch change word/emoji (issue #124 stage S3):
    * `/done` and `/complete` always report their own fixed status, since
    * that's the only status either command can ever set; `/update` reports
    * whatever status each item actually resolved to. */
-  function batchChangeWord(kind: "done" | "complete" | "update", status: TaskStatus): string {
+  function batchChangeWord(kind: "done" | "complete" | "update" | "due", status: TaskStatus): string {
     if (kind === "done") return "in review";
     if (kind === "complete") return "done";
     return status.replace(/_/g, " ");
   }
 
-  function batchEmoji(kind: "done" | "complete" | "update", status: TaskStatus): string {
+  function batchEmoji(kind: "done" | "complete" | "update" | "due", status: TaskStatus): string {
     if (kind === "done") return "👀";
     if (kind === "complete") return "✅";
     return STATUS_EMOJI[status] ?? "📌";
@@ -718,18 +785,27 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     ctx: import("grammy").Context,
     caller: Caller,
     outcomes: BatchOutcome[],
-    kind: "done" | "complete" | "update",
+    kind: "done" | "complete" | "update" | "due",
   ): Promise<void> {
+    // Issue #223 (landmine inherited from #221): a status-based outcome
+    // (`/done`/`/complete`/`/update`) always carries `status`, but a `/due`
+    // outcome never does — it isn't a status change, only a
+    // `changeDescription`/`changeWord` pair. The filter below used to
+    // require `status !== undefined`, which silently dropped every `/due`
+    // outcome from the success list. Widened to admit either shape.
     const successes: BatchSuccessLine[] = outcomes
       .filter(
-        (o): o is BatchOutcome & { id: number; task: NonNullable<BatchOutcome["task"]>; status: TaskStatus } =>
-          o.ok && o.id !== undefined && o.task !== undefined && o.status !== undefined,
+        (o): o is BatchOutcome & { id: number; task: NonNullable<BatchOutcome["task"]> } =>
+          o.ok &&
+          o.id !== undefined &&
+          o.task !== undefined &&
+          (o.status !== undefined || o.changeDescription !== undefined),
       )
       .map((o) => ({
         ref: formatTaskRef(o.id),
         title: o.task.title,
-        changeWord: batchChangeWord(kind, o.status),
-        emoji: batchEmoji(kind, o.status),
+        changeWord: o.status !== undefined ? batchChangeWord(kind, o.status) : (o.changeWord ?? ""),
+        emoji: o.status !== undefined ? batchEmoji(kind, o.status) : (o.emoji ?? "📌"),
         metaSuffix: o.metaSuffix,
       }));
     const failures: BatchFailureLine[] = outcomes
@@ -859,7 +935,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   bot.command("complete", completeHandler);
   bot.command("completed", completeHandler);
 
-  // ---- /due (issue #222) — single-item only; bulk is a later ticket -------
+  // ---- /due (issue #222 single-item, issue #223 bulk) ----------------------
   // No new service method: `service.editTask` already takes a due-date-only
   // patch and already validates the ISO format. No access check (ADR-0013):
   // any Caller may re-date any task in their own Cohort.
@@ -869,6 +945,15 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       const raw = matchToString(ctx.match).trim();
       if (raw.length === 0) {
         await ctx.reply(DUE_USAGE, { parse_mode: "HTML" as const });
+        return;
+      }
+      // Issue #223: a comma or newline anywhere in the argument means the
+      // bulk grammar, same split `parseDueBatchItems` itself uses. The
+      // single-item path below is otherwise untouched from issue #222.
+      if (raw.includes(",") || raw.includes("\n")) {
+        const items: DueBatchItem[] = parseDueBatchItems(raw, clock.now());
+        const outcomes = await runDueBatch(caller, items);
+        await finishBatch(ctx, caller, outcomes, "due");
         return;
       }
       const parsed = parseDueArgs(raw, clock.now());

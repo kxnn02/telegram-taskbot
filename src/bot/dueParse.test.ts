@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseDueArgs, isWholeArgDate, type DueParsed, type DueParseError } from "./dueParse.js";
+import {
+  parseDueArgs,
+  isWholeArgDate,
+  parseDueBatchItems,
+  type DueParsed,
+  type DueParseError,
+} from "./dueParse.js";
 
 // Monday, 2026-08-31, 10:00 Asia/Manila (02:00 UTC) — same reference instant
 // `addTaskParse.test.ts` uses, so ISO expectations line up across both.
@@ -117,5 +123,68 @@ describe("isWholeArgDate", () => {
 
   it("false for an empty string", () => {
     expect(isWholeArgDate("", REFERENCE)).toBe(false);
+  });
+});
+
+describe("parseDueBatchItems (issue #223)", () => {
+  it("a comma-separated list with a per-item date on each", () => {
+    const items = parseDueBatchItems("t21 friday, t22 sept 30", REFERENCE);
+    expect(items).toEqual([
+      { label: "t21", ref: 21, dueDate: expect.objectContaining({ isoDate: "2026-09-04" }) },
+      { label: "t22", ref: 22, dueDate: expect.objectContaining({ isoDate: "2026-09-30" }) },
+    ]);
+  });
+
+  it("a newline-separated list with a per-item date on each", () => {
+    const items = parseDueBatchItems("t21 friday\nt22 sept 30", REFERENCE);
+    expect(items.map((i) => i.ref)).toEqual([21, 22]);
+    expect(items.map((i) => i.dueDate?.isoDate)).toEqual(["2026-09-04", "2026-09-30"]);
+  });
+
+  it("a comma-separated ref list with one trailing shared date", () => {
+    const items = parseDueBatchItems("t21, t22, t23 friday", REFERENCE);
+    expect(items).toHaveLength(3);
+    expect(items.map((i) => i.ref)).toEqual([21, 22, 23]);
+    expect(items.every((i) => i.dueDate?.isoDate === "2026-09-04")).toBe(true);
+  });
+
+  it("a newline-separated ref list with one trailing shared date", () => {
+    const items = parseDueBatchItems("t21\nt22\nt23 friday", REFERENCE);
+    expect(items).toHaveLength(3);
+    expect(items.every((i) => i.dueDate?.isoDate === "2026-09-04")).toBe(true);
+  });
+
+  it("a keyword ref works in a shared-date list alongside numeric refs", () => {
+    const items = parseDueBatchItems("t21, login bug, t23 friday", REFERENCE);
+    expect(items.map((i) => i.label)).toEqual(["t21", "login bug", "t23"]);
+    expect(items.every((i) => i.dueDate?.isoDate === "2026-09-04")).toBe(true);
+  });
+
+  it("a mixed list where one segment fails to parse per-item falls back to the shared-date reading", () => {
+    // Per-item parsing fails on "t22" alone (no date on that segment), so
+    // the trailing-shared-date reading — one "friday" for the whole list —
+    // wins instead, per #220's precedence (copied from /update's grammar).
+    const items = parseDueBatchItems("t21, t22, t23 friday", REFERENCE);
+    expect(items.map((i) => i.ref)).toEqual([21, 22, 23]);
+  });
+
+  it("when neither per-item nor shared-date parsing covers everything, each segment reports its own outcome", () => {
+    const items = parseDueBatchItems("t21 friday, t22 banana", REFERENCE);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({ label: "t21", ref: 21, dueDate: expect.objectContaining({ isoDate: "2026-09-04" }) });
+    expect(items[1]!.dueDate).toBeUndefined();
+    expect(items[1]!.error).toContain("banana");
+  });
+
+  it("a segment with a ref but no date at all is reported with a reason, not silently dropped", () => {
+    const items = parseDueBatchItems("t21 banana, t22", REFERENCE);
+    expect(items).toHaveLength(2);
+    expect(items[1]!.label).toBe("t22");
+    expect(items[1]!.dueDate).toBeUndefined();
+    expect(items[1]!.error).toBeTruthy();
+  });
+
+  it("an empty argument string yields no items", () => {
+    expect(parseDueBatchItems("", REFERENCE)).toEqual([]);
   });
 });
