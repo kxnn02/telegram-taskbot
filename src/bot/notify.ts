@@ -16,12 +16,14 @@ export async function notifyUser(
   username: string,
   text: string,
   keyboard?: InlineKeyboard,
+  options?: { parse_mode?: "HTML" },
 ): Promise<boolean> {
   try {
     const telegramId = await registrations.findTelegramId(username);
     if (!telegramId) return false;
     await bot.api.sendMessage(telegramId, text, {
       reply_markup: keyboard,
+      parse_mode: options?.parse_mode,
     });
     return true;
   } catch {

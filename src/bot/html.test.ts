@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { esc } from "./html.js";
+import { esc, escAttr } from "./html.js";
 
 /**
  * Issue #124 stage S3: the one consolidated HTML-escape helper, replacing
@@ -36,5 +36,16 @@ describe("esc", () => {
     expect(esc("<")).toBe("&lt;");
     expect(esc(">")).toBe("&gt;");
     expect(esc("&<>")).toBe("&amp;&lt;&gt;");
+  });
+
+});
+
+describe("escAttr", () => {
+  it("escapes & < > like esc", () => {
+    expect(escAttr("<b>a & b</b>")).toBe("&lt;b&gt;a &amp; b&lt;/b&gt;");
+  });
+
+  it("also escapes a double quote, so a value dropped into an href=\"...\" attribute can't break out of it (issue #202)", () => {
+    expect(escAttr('a "quoted" url')).toBe("a &quot;quoted&quot; url");
   });
 });

@@ -42,9 +42,9 @@ describe("buildStandupOverviewCard — person-first layout (#165 S2)", () => {
     expect(card).toContain(standupSummaryLine(report.tasks));
     for (const stale of [
       "📊 <b>Overview</b>",
-      "🔄 In progress:",
-      "👀 In review:",
-      "📝 To do:",
+      "🔄 In Progress:",
+      "👀 In Review:",
+      "📝 To Do:",
       "📦 Backlog:",
       "✅ Done:",
       "🚧 Blocked:",
@@ -91,7 +91,7 @@ describe("buildStandupOverviewCard — person-first layout (#165 S2)", () => {
     expect(card.split("👤 <b>@carla</b>")).toHaveLength(2);
   });
 
-  it("renders the three bucket headings with counts, in order, within a member's block", async () => {
+  it("renders the two bucket headings with counts, in order, within a member's block (For approval is dedup'd into the queue, #210)", async () => {
     const service = makeService();
     const alice = await service.assignTask(carla, {
       assigneeUsername: "alice",
@@ -124,13 +124,14 @@ describe("buildStandupOverviewCard — person-first layout (#165 S2)", () => {
 
     const overdueIdx = card.indexOf("⚠️ <b>Overdue (1)</b>");
     const doingIdx = card.indexOf("🔄 <b>Doing (2)</b>");
-    const approvalIdx = card.indexOf("👀 <b>For approval (1)</b>");
     expect(overdueIdx).toBeGreaterThan(-1);
     expect(doingIdx).toBeGreaterThan(overdueIdx);
-    expect(approvalIdx).toBeGreaterThan(doingIdx);
+    // The in_review task is de-duplicated out of alice's own bucket — it
+    // belongs to the review queue only.
+    expect(card).not.toContain("👀 <b>For approval");
   });
 
-  it("an overdue in_review task appears under Overdue only in its member bucket, not For approval", async () => {
+  it("a task that is both Overdue and in review appears exactly once in the whole card: in the queue, not the member's Overdue bucket (the three-way trap, #210)", async () => {
     const service = makeService();
     const created = await service.assignTask(carla, {
       assigneeUsername: "alice",
@@ -143,10 +144,15 @@ describe("buildStandupOverviewCard — person-first layout (#165 S2)", () => {
     const report = await buildStandup(service, carla, NOW);
     const card = buildStandupOverviewCard(report, { now: NOW, quote: "", certTip: CERT_TIP_HTML });
 
-    expect(card).toContain("⚠️ <b>Overdue (1)</b>");
+    // Still counted as Overdue in the summary (classification is unchanged)...
+    expect(card).toContain("⚠️ 1 overdue");
+    // ...but is not rendered as a member bucket at all: alice's only task is
+    // this one, and it's entirely owned by the queue now.
+    expect(card).not.toContain("⚠️ <b>Overdue (1)</b>");
     expect(card).not.toContain("👀 <b>For approval");
-    // The task appears in Overdue in the member block AND in the review section
-    expect(card.split("Overdue review task")).toHaveLength(3);
+    // The task's title appears exactly once in the whole card — in the
+    // queue — not three times (Overdue bucket + For approval bucket + queue).
+    expect(card.split("Overdue review task")).toHaveLength(2);
   });
 
   it("a member holding only backlog and done tasks is absent, but is still counted in the summary", async () => {
@@ -181,10 +187,12 @@ describe("buildStandupOverviewCard — person-first layout (#165 S2)", () => {
 
     expect(card).toContain("<i>No open tasks right now.</i>");
     expect(card.startsWith("Good afternoon, team!")).toBe(true);
-    expect(card).toContain("✅ <b>Done this week");
-    expect(card).toContain("🗓️ <b>Done last week");
-    expect(card).toContain("<i>No tasks completed this week yet.</i>");
-    expect(card).toContain("<i>Nothing completed last week.</i>");
+    // Issue #210: empty "done this week"/"done last week" blocks are
+    // omitted entirely, not rendered with a placeholder sentence.
+    expect(card).not.toContain("Done this week");
+    expect(card).not.toContain("Done last week");
+    expect(card).not.toContain("No tasks completed this week.");
+    expect(card).not.toContain("No tasks completed last week.");
     expect(card.endsWith(CERT_TIP_HTML)).toBe(true);
   });
 
@@ -268,7 +276,11 @@ describe("buildStandupOverviewCard", () => {
     expect(card).not.toContain("cohort-9");
   });
 
-  it("the review section appears after Done last week and before the quote", async () => {
+  // Issue #210: the review queue now renders above the per-person buckets,
+  // reversing issue #186's bottom placement — agreed explicitly for this
+  // ticket, not an oversight. It therefore comes before "Done this week"/
+  // "Done last week" too, not after.
+  it("the review section appears before the per-person buckets and Done last week, and before the quote", async () => {
     const service = makeService();
     const review = await service.assignTask(carla, {
       assigneeUsername: "alice",
@@ -277,17 +289,33 @@ describe("buildStandupOverviewCard", () => {
     });
     if (!review.ok) throw new Error("setup failed");
     await service.setStatus(carla, review.value.id, "in_review");
+    // A second, non-review task for alice, so her member heading still
+    // appears (the review task alone would otherwise be fully dedup'd out).
+    await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "Doing task",
+      dueDate: "2026-09-10",
+    });
+    const done = await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "Done task",
+      dueDate: "2026-09-05",
+    });
+    if (!done.ok) throw new Error("setup failed");
+    await service.setStatus(carla, done.value.id, "done");
 
     const report = await buildStandup(service, carla, NOW);
     const quote = '<i>"Ship it."</i>';
     const card = buildStandupOverviewCard(report, { now: NOW, quote, certTip: CERT_TIP_HTML });
 
-    const doneLastWeekIdx = card.indexOf("🗓️ <b>Done last week");
-    const reviewIdx = card.indexOf("👀 <b>For Review and Approval");
+    const reviewIdx = card.indexOf("👀 <b>FOR REVIEW AND APPROVAL");
+    const memberIdx = card.indexOf("👤 <b>@alice</b>");
+    const doneThisWeekIdx = card.indexOf("✅ <b>Done this week");
     const quoteIdx = card.indexOf(quote);
-    expect(doneLastWeekIdx).toBeGreaterThan(-1);
-    expect(reviewIdx).toBeGreaterThan(doneLastWeekIdx);
-    expect(quoteIdx).toBeGreaterThan(reviewIdx);
+    expect(reviewIdx).toBeGreaterThan(-1);
+    expect(reviewIdx).toBeLessThan(memberIdx);
+    expect(reviewIdx).toBeLessThan(doneThisWeekIdx);
+    expect(quoteIdx).toBeGreaterThan(doneThisWeekIdx);
   });
 
   it("the review section is present even without a quote, still preceding the cert tip", async () => {
@@ -303,18 +331,20 @@ describe("buildStandupOverviewCard", () => {
     const report = await buildStandup(service, carla, NOW);
     const card = buildStandupOverviewCard(report, { now: NOW, quote: "", certTip: CERT_TIP_HTML });
 
-    const reviewIdx = card.indexOf("👀 <b>For Review and Approval");
+    const reviewIdx = card.indexOf("👀 <b>FOR REVIEW AND APPROVAL");
     const tipIdx = card.indexOf(CERT_TIP_HTML);
     expect(reviewIdx).toBeGreaterThan(-1);
     expect(tipIdx).toBeGreaterThan(reviewIdx);
     expect(card.endsWith(CERT_TIP_HTML)).toBe(true);
   });
 
-  it("an in_review task appears twice: once under its member, once in the review section", async () => {
+  // Issue #210: this used to pin the opposite (the task appearing twice) —
+  // that was exactly the bug this ticket fixes. It now appears exactly once.
+  it("an in_review task appears exactly once: in the review section, not under its member", async () => {
     const service = makeService();
     const review = await service.assignTask(carla, {
       assigneeUsername: "alice",
-      title: "Review task appears twice",
+      title: "Review task appears once now",
       dueDate: "2026-09-12",
     });
     if (!review.ok) throw new Error("setup failed");
@@ -323,10 +353,10 @@ describe("buildStandupOverviewCard", () => {
     const report = await buildStandup(service, carla, NOW);
     const card = buildStandupOverviewCard(report, { now: NOW, quote: "", certTip: CERT_TIP_HTML });
 
-    expect(card.split("Review task appears twice")).toHaveLength(3); // once for each occurrence plus the string itself
+    expect(card.split("Review task appears once now")).toHaveLength(2);
   });
 
-  it("an overdue in_review task appears in the review section AND only under Overdue in its member block, not For approval", async () => {
+  it("an overdue in_review task appears exactly once, in the review section, before the member buckets", async () => {
     const service = makeService();
     const review = await service.assignTask(carla, {
       assigneeUsername: "alice",
@@ -339,16 +369,31 @@ describe("buildStandupOverviewCard", () => {
     const report = await buildStandup(service, carla, NOW);
     const card = buildStandupOverviewCard(report, { now: NOW, quote: "", certTip: CERT_TIP_HTML });
 
-    const doneLastWeekIdx = card.indexOf("🗓️ <b>Done last week");
-    const reviewSectionIdx = card.indexOf("👀 <b>For Review and Approval");
-    expect(reviewSectionIdx).toBeGreaterThan(doneLastWeekIdx);
+    const reviewSectionIdx = card.indexOf("👀 <b>FOR REVIEW AND APPROVAL");
+    expect(reviewSectionIdx).toBeGreaterThan(-1);
     expect(card).toContain("Overdue review");
-    expect(card).toContain("⚠️ <b>Overdue (1)</b>");
-    // The task should appear under Overdue in the member's section
-    const overdueSectionStart = card.indexOf("⚠️ <b>Overdue (1)</b>");
-    const nextBucketStart = card.indexOf("🔄 <b>Doing") > overdueSectionStart && card.indexOf("🔄 <b>Doing") || 99999;
-    const overdueSectionEnd = nextBucketStart > overdueSectionStart ? nextBucketStart : reviewSectionIdx;
-    const overdueSection = card.substring(overdueSectionStart, overdueSectionEnd);
-    expect(overdueSection).toContain("Overdue review");
+    // Still counted as Overdue in the summary — classification is unchanged.
+    expect(card).toContain("⚠️ 1 overdue");
+    // But not rendered as a member bucket at all: alice has no other task.
+    expect(card).not.toContain("⚠️ <b>Overdue (1)</b>");
+    expect(card.split("Overdue review")).toHaveLength(2);
+  });
+
+  it("a non-empty week is still rendered with its heading and tasks", async () => {
+    const service = makeService();
+    const done = await service.assignTask(carla, {
+      assigneeUsername: "alice",
+      title: "Finished this week",
+      dueDate: "2026-08-30",
+    });
+    if (!done.ok) throw new Error("setup failed");
+    await service.setStatus(carla, done.value.id, "done");
+
+    const report = await buildStandup(service, carla, NOW);
+    const card = buildStandupOverviewCard(report, { now: NOW, quote: "", certTip: CERT_TIP_HTML });
+
+    expect(card).toContain("✅ <b>Done this week");
+    expect(card).toContain("Finished this week");
+    expect(card).not.toContain("Done last week");
   });
 });

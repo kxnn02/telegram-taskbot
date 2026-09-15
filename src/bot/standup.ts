@@ -1,8 +1,10 @@
 import type { TaskService, TaskWithFlags } from "../service/taskService.js";
 import type { Caller, TaskStatus } from "../domain/types.js";
-import { formatTaskLine } from "./format.js";
+import { esc } from "./html.js";
+import { taskLine } from "./standupCard.js";
+import { formatTaskRefHtml } from "./taskRef.js";
 import { MANILA_ZONE } from "../domain/overdue.js";
-import { renderMemberBucketsPlain, standupSummaryLine, renderReviewQueuePlain } from "./standupBuckets.js";
+import { renderMemberBucketsHtml, standupSummaryLine, renderReviewQueueHtml } from "./standupBuckets.js";
 
 const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
 
@@ -167,38 +169,54 @@ function standupHeaderLines(report: StandupReport): string[] {
  * Overdue/Doing/For approval/Backlog/Done summary, the person-first
  * Overdue/Doing/For approval breakdown, and a "done this week" list. Its
  * own formatter, built on `StandupReport` rather than the digest's own
- * shape. Person-first layout per #165; the plain-text mirror of the scheduled
- * HTML card's `buildStandupOverviewCard` (#165 S2).
+ * shape. Person-first layout per #165.
  *
- * Issue #180: `certTipPlain`, when given, is appended as the last line,
- * preceded by a blank line — the caller renders it (`renderCertTipPlain`,
+ * Issue #209 (spec #201): unified onto the same HTML markup path as the
+ * scheduled push card's `buildStandupOverviewCard` — same identifier, date,
+ * status, priority and bullet vocabulary (`renderMemberBucketsHtml`,
+ * `renderReviewQueueHtml`, `taskLine`), sent with `parse_mode: "HTML"` by
+ * the caller. Buckets, ordering, section order and content are unchanged;
+ * only the vocabulary and send path moved. This used to be a separate
+ * plain-text formatter (`renderMemberBucketsPlain`/`renderReviewQueuePlain`,
+ * now deleted) so the two standup surfaces no longer read as two different
+ * reports.
+ *
+ * Issue #180: `certTipHtml`, when given, is appended as the last line,
+ * preceded by a blank line — the caller renders it (`renderCertTipHtml`,
  * same pre-rendered pattern as the pushed card's `certTip`/`quote`), so this
- * function stays synchronous. Only the unfiltered `/standup` command passes
- * one; `formatStandupFiltered`'s `overview` branch calls this with no tip at
- * all, since tapping a filter button — including the Overview button itself
- * — drops the tip. There is no quote here: unlike the pushed card, `/standup`
- * never calls the model, so it always returns instantly from cached data.
+ * function stays synchronous. The unfiltered `/standup` command passes one
+ * directly; `formatStandupFiltered`'s `overview` branch (issue #202) passes
+ * the *original* tip back through on re-render — looked up by the id
+ * `/standup` recorded, never re-selected, so tapping Overview after another
+ * filter restores the same tip rather than silently swapping it. There is
+ * no quote here: unlike the pushed card, `/standup` never calls the model,
+ * so it always returns instantly from cached data.
+ *
+ * Issue #210 (spec #201): the review queue now renders immediately under
+ * the summary line, above the person-first buckets — reversing the bottom
+ * placement issue #186 chose, deliberately and by agreement, to keep this
+ * surface in step with the pushed card's own reordering. Do not "restore"
+ * the bottom placement.
  */
-export function formatStandup(report: StandupReport, certTipPlain?: string): string {
+export function formatStandup(report: StandupReport, certTipHtml?: string): string {
   const lines: string[] = [
     ...standupHeaderLines(report),
     standupSummaryLine(report.tasks),
-    ...renderMemberBucketsPlain(report.tasks),
+    ...renderReviewQueueHtml(report.tasks, report.today),
+    ...renderMemberBucketsHtml(report.tasks, report.today),
   ];
 
-  lines.push("", `✅ Done this week (${report.doneThisWeek.length})`);
+  lines.push("", `✅ <b>Done this week (${report.doneThisWeek.length})</b>`);
   if (report.doneThisWeek.length === 0) {
-    lines.push("No tasks completed this week yet.");
+    lines.push("<i>No tasks completed this week.</i>");
   } else {
     for (const t of report.doneThisWeek) {
-      lines.push(`- #${t.id} ${t.title} (@${t.assigneeUsername})`);
+      lines.push(`▸ ${formatTaskRefHtml(t.id)} ${esc(t.title)} (@${esc(t.assigneeUsername)})`);
     }
   }
 
-  lines.push(...renderReviewQueuePlain(report.tasks));
-
-  if (certTipPlain) {
-    lines.push("", certTipPlain);
+  if (certTipHtml) {
+    lines.push("", certTipHtml);
   }
 
   return lines.join("\n");
@@ -265,27 +283,33 @@ export function buildStandupKeyboard(
 
 /** Devie's per-tab section headings and empty-state strings
  * (`lib/standup.ts:266-300`), copied verbatim apart from the HTML tags —
- * this bot's standup is plain text, so the `<b>`/`<i>` wrappers are the one
- * thing dropped. */
+ * these headings/empty states stay unwrapped plain text even though the
+ * surrounding card is now sent as HTML (issue #209); they carry no markup
+ * either bot renders.
+ *
+ * Issue #208: the heading labels (including "Active", carbon-copied from
+ * the bot this repo is modelled on — see `buildStandupKeyboard` above) are
+ * left untouched; only the empty-state sentences are collapsed onto the
+ * shared `No <thing>.` shape. */
 const FILTER_SECTION: Record<
   Exclude<StandupFilter, "overview">,
   { heading: (report: StandupReport) => string; empty: string }
 > = {
   active: {
     heading: (r) => `🔄 Active (${countFor(r, STANDUP_ACTIVE_COUNT_STATUSES)})`,
-    empty: "No active tasks right now.",
+    empty: "No open tasks right now.",
   },
   backlog: {
     heading: (r) => `📦 Backlog (${r.counts.backlog})`,
-    empty: "Backlog is clear!",
+    empty: "No backlog tasks.",
   },
   review: {
     heading: (r) => `👀 For Review (${r.counts.in_review})`,
-    empty: "Nothing waiting for review right now.",
+    empty: "No tasks waiting for review right now.",
   },
   done: {
     heading: (r) => `✅ Done this week (${r.doneThisWeek.length})`,
-    empty: "No tasks completed this week yet.",
+    empty: "No tasks completed this week.",
   },
 };
 
@@ -299,8 +323,12 @@ const FILTER_SECTION: Record<
  * Pure, like `formatStandup`: everything it needs is already on the report,
  * which is what lets the callback handler re-render any tab from one fetch.
  */
-export function formatStandupFiltered(report: StandupReport, filter: StandupFilter): string {
-  if (filter === "overview") return formatStandup(report);
+export function formatStandupFiltered(
+  report: StandupReport,
+  filter: StandupFilter,
+  certTipHtml?: string,
+): string {
+  if (filter === "overview") return formatStandup(report, certTipHtml);
 
   const section = FILTER_SECTION[filter];
   // The Done tab is this week's completions, not every done task ever —
@@ -317,9 +345,12 @@ export function formatStandupFiltered(report: StandupReport, filter: StandupFilt
     lines.push(section.empty);
     return lines.join("\n");
   }
+  // Issue #209: the same shared vocabulary as the overview — `taskLine`
+  // (monospace id, priority badge, status emoji, the shared short-form due
+  // date) instead of the old plain-text `formatTaskLine`.
   for (const member of groupByAssignee(tasks)) {
-    lines.push(`@${member.username}:`);
-    for (const t of member.tasks) lines.push("  - " + formatTaskLine(t));
+    lines.push(`@${esc(member.username)}:`);
+    for (const t of member.tasks) lines.push("  " + taskLine(t, report.today));
   }
   return lines.join("\n");
 }

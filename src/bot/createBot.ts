@@ -16,7 +16,9 @@ import { suggestClosestUsername } from "./usernameSuggest.js";
 import { parseStatusWord, VALID_STATUS_WORDS_TEXT } from "./statusParse.js";
 import { parseRefListItems, parseUpdateItems, type BatchItem } from "./updateBatch.js";
 import { findTaskByRef, type TaskLookup } from "./taskLookup.js";
-import { formatTaskRef } from "./taskRef.js";
+import { formatTaskRef, formatTaskRefHtml } from "./taskRef.js";
+import { renderDueDate } from "../date/renderDueDate.js";
+import { esc } from "./html.js";
 import {
   shouldTriggerBulkCreate,
   resolveBulkAssignee,
@@ -40,6 +42,7 @@ import {
   formatDeadlines,
   formatDoneOk,
   formatHelp,
+  formatStart,
   formatTaskAdded,
   formatTaskNotFound,
   formatUpdateOk,
@@ -59,7 +62,7 @@ import {
   formatStandupFiltered,
   parseStandupCallback,
 } from "./standup.js";
-import { renderCertTipPlain, selectRandomCertTip } from "./certTips.js";
+import { getCertTipById, renderCertTipHtml, selectRandomCertTip } from "./certTips.js";
 import {
   buildTasksPage,
   fetchTaskPages,
@@ -206,8 +209,10 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   // bot/index.ts for how production wires this to SupabaseTaskStore.
   const service = new TaskService(options.taskStore, roster, clock);
 
+  // Issue #208: one failure marker (❌), one warning marker (⚠️), nothing
+  // else prefixes an error.
   const NEEDS_USERNAME_TEXT =
-    "You'll need a Telegram username first — set one in Telegram's settings, then try again.";
+    "❌ You'll need a Telegram username first — set one in Telegram's settings, then try again.";
 
   /** Auto-registers the sender (ADR-0013 — matches Devie's `syncMember`:
    * insert on first contact, update on every later one, no gate of any
@@ -256,7 +261,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       console.error(err);
       try {
         await ctx.reply(
-          "Something went wrong on my end — that didn't go through. Try again in a moment.",
+          "❌ Something went wrong on my end — that didn't go through. Try again in a moment.",
         );
       } catch (replyErr) {
         console.error(replyErr);
@@ -265,24 +270,34 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   });
 
   // ---- /start and /help --------------------------------------------------
-  // Issue #124 stage S3: Devie's /start is a pure alias for /help — no role
-  // question, no hello message of its own, no group-membership check.
-  // Registered on the same handler, exactly like /complete and /completed
-  // share `completeHandler` below.
+  // Issue #211: /start is a real onboarding message, not a /help alias
+  // (reversing issue #124 stage S3's deliberate alias) — a brand-new
+  // cohort member's first contact with the bot shouldn't be a twenty-five
+  // line command reference.
+
+  const startHandler = withCaller(async (ctx: import("grammy").Context) => {
+    await ctx.reply(formatStart(bot.botInfo.first_name), { parse_mode: "HTML" as const });
+  });
 
   const helpHandler = withCaller(async (ctx: import("grammy").Context) => {
     await ctx.reply(formatHelp(bot.botInfo.first_name), { parse_mode: "HTML" as const });
   });
 
-  bot.command("start", helpHandler);
+  bot.command("start", startHandler);
   bot.command("help", helpHandler);
 
   /** Sends `text` as one or more Telegram-sized messages (issue #55/F8):
    * several unbounded list commands could otherwise throw
-   * `Bad Request: message is too long`. */
-  async function replyChunked(ctx: import("grammy").Context, text: string): Promise<void> {
+   * `Bad Request: message is too long`. `html` defaults to `false` for the
+   * plain-text callers already using this; issue #205's `/deadlines` is the
+   * first to render markup through it. */
+  async function replyChunked(
+    ctx: import("grammy").Context,
+    text: string,
+    html = false,
+  ): Promise<void> {
     for (const chunk of chunkMessage(text)) {
-      await ctx.reply(chunk);
+      await ctx.reply(chunk, html ? { parse_mode: "HTML" as const } : undefined);
     }
   }
 
@@ -322,25 +337,46 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   /** Edits a card in place, falling back to a fresh message if the edit is
    * refused — Devie's `editWithKeyboard` (`route.ts:85-105`), including its
    * treatment of Telegram's "message is not modified" 400 as success, which
-   * is what clicking the page you are already on produces. */
+   * is what clicking the page you are already on produces.
+   *
+   * Issue #202: a page/tab long enough to exceed Telegram's edit-size limit
+   * used to be rejected silently — a button press that looked dead, with no
+   * error surfaced to anyone. Splits exactly like `sendCard`: when there is
+   * more than one chunk, the first is edited into the existing message (no
+   * keyboard — it isn't the last chunk) and the rest are sent as new
+   * messages, with the keyboard only on the final one. */
   async function editCard(
     ctx: import("grammy").Context,
     text: string,
     keyboard: InlineKeyboardMarkup,
     html: boolean,
   ): Promise<void> {
-    const options = {
-      ...(html ? { parse_mode: "HTML" as const } : {}),
-      reply_markup: keyboard,
-    };
+    const parseModeOpt = html ? { parse_mode: "HTML" as const } : {};
+    const chunks = chunkMessage(text);
+    const [first, ...rest] = chunks;
+
     try {
-      await ctx.editMessageText(text, options);
+      await ctx.editMessageText(first!, {
+        ...parseModeOpt,
+        ...(rest.length === 0 ? { reply_markup: keyboard } : {}),
+      });
     } catch (err) {
       if (err instanceof GrammyError && err.description.includes("message is not modified")) {
         return;
       }
       console.error(err);
-      await ctx.reply(text, options);
+      await ctx.reply(first!, {
+        ...parseModeOpt,
+        ...(rest.length === 0 ? { reply_markup: keyboard } : {}),
+      });
+    }
+
+    for (let i = 0; i < rest.length; i++) {
+      const isLast = i === rest.length - 1;
+      await ctx.reply(rest[i]!, {
+        ...parseModeOpt,
+        ...(isLast ? { reply_markup: keyboard } : {}),
+      });
     }
   }
 
@@ -348,7 +384,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     "tasks",
     withCaller(async (ctx, caller) => {
       const filter = parseTasksFilter(matchToString(ctx.match));
-      const { pages, allRoles } = await fetchTaskPages(service, caller, roster, filter);
+      const { pages, allRoles } = await fetchTaskPages(service, caller, roster, filter, clock.now());
       const { text, keyboard } = buildTasksPage(pages, 0, filter.roleFilter, allRoles);
       await sendCard(ctx, text, keyboard, true);
     }),
@@ -358,16 +394,23 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     "deadlines",
     withCaller(async (ctx, caller) => {
       const result = await service.listDeadlines(caller);
-      await replyChunked(ctx, result.ok ? formatDeadlines(result.value) : result.error);
+      await replyChunked(
+        ctx,
+        result.ok ? formatDeadlines(result.value, clock.now()) : `❌ ${result.error}`,
+        result.ok,
+      );
     }),
   );
 
-  // `/standup` gains Devie's five filter buttons (#103 item 3). It stays
-  // plain text — only `/tasks` copies Devie's HTML — so the keyboard is the
-  // whole change here; the overview body is the existing `formatStandup`.
+  // `/standup` gains Devie's five filter buttons (#103 item 3).
+  //
+  // Issue #209 (spec #201): the overview body — `formatStandup` — is now
+  // sent through the same markup path as `/tasks` and the scheduled push
+  // card, so the on-demand reply and the pushed card read as one report
+  // instead of two.
   //
   // Issue #180: the initial `/standup` reply calls `formatStandup` directly
-  // (not `formatStandupFiltered`) so it alone can pass today's plain-text
+  // (not `formatStandupFiltered`) so it alone can pass today's rendered
   // cert tip. Tapping a filter button — including Overview — re-renders
   // through `formatStandupFiltered` below with no tip, per spec.
   bot.command(
@@ -378,12 +421,12 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       const lastTipId = await options.certTipHistoryStore.getLastTipId(caller.cohortId);
       const tip = selectRandomCertTip(lastTipId);
       await options.certTipHistoryStore.setLastTipId(caller.cohortId, tip.id);
-      const certTipPlain = renderCertTipPlain(tip);
+      const certTipHtml = renderCertTipHtml(tip);
       await sendCard(
         ctx,
-        formatStandup(report, certTipPlain),
+        formatStandup(report, certTipHtml),
         buildStandupKeyboard(report, "overview"),
-        false,
+        true,
       );
     }),
   );
@@ -402,10 +445,13 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     if (tasksCb) {
       const caller = await requireCaller(ctx);
       if (caller) {
-        const { pages, allRoles } = await fetchTaskPages(service, caller, roster, {
-          roleFilter: tasksCb.roleFilter,
-          assigneeFilter: null,
-        });
+        const { pages, allRoles } = await fetchTaskPages(
+          service,
+          caller,
+          roster,
+          { roleFilter: tasksCb.roleFilter, assigneeFilter: null },
+          clock.now(),
+        );
         const { text, keyboard } = buildTasksPage(
           pages,
           tasksCb.page,
@@ -421,11 +467,17 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       const caller = await requireCaller(ctx);
       if (caller) {
         const report = await buildStandup(service, caller, clock.now());
+        // Issue #202: Overview must restore the *original* cert tip, not
+        // re-select one — look up the id `/standup` already recorded for
+        // this cohort rather than calling `selectRandomCertTip` again.
+        const lastTipId = await options.certTipHistoryStore.getLastTipId(caller.cohortId);
+        const tip = lastTipId !== null ? getCertTipById(lastTipId) : undefined;
+        const certTipHtml = tip ? renderCertTipHtml(tip) : undefined;
         await editCard(
           ctx,
-          formatStandupFiltered(report, standupCb.filter),
+          formatStandupFiltered(report, standupCb.filter, certTipHtml),
           buildStandupKeyboard(report, standupCb.filter),
-          false,
+          true,
         );
       }
     }
@@ -493,7 +545,10 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   ) {
     const result = await service.setStatus(caller, id, status);
     if (!result.ok) {
-      await ctx.reply(result.error);
+      // Issue #208: the service layer's own failure text carries no prefix
+      // (its own tests pin the bare string) — the shared failure marker is
+      // added here, where it's actually surfaced to a member.
+      await ctx.reply(`❌ ${result.error}`);
       return;
     }
     const metaSuffix = meta ? await attachUpdateMeta(caller, id, meta) : "";
@@ -573,7 +628,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
           continue;
         }
         if (lookup.kind === "none") {
-          outcomes.push({ label: `"${item.label}"`, ok: false, message: "no active task found" });
+          outcomes.push({ label: `"${item.label}"`, ok: false, message: "no open task found" });
           continue;
         }
         ref = lookup.task.id;
@@ -696,7 +751,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         const aliasStatus = parseStatusWord(statusText);
         if (!aliasStatus && isExactInreview(statusText)) {
           await ctx.reply(
-            `• <b>${item.label}</b> → invalid status <b>${statusText.trim()}</b> (use <b>review</b>)`,
+            `❌ <b>${item.label}</b> → invalid status <b>${statusText.trim()}</b> (use <b>review</b>)`,
             { parse_mode: "HTML" as const },
           );
           return;
@@ -707,7 +762,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         const status = aliasStatus ?? (await parseStatus(statusText, options.model)) ?? undefined;
         if (!status) {
           await ctx.reply(
-            `I don't recognize "${statusText.trim()}" as a status — valid ones are: ${VALID_STATUS_WORDS_TEXT}`,
+            `❌ I don't recognize "${statusText.trim()}" as a status — valid ones are: ${VALID_STATUS_WORDS_TEXT}`,
           );
           return;
         }
@@ -803,10 +858,16 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       .map((entry) => entry.username);
   }
 
+  /** Issue #208: always names a next step — a spelling suggestion when one
+   * is close enough, or (since ADR-0013's auto-registration means there's
+   * nothing to "add" — someone just has to message the bot once) a nudge to
+   * have them do that when there isn't. */
   function unknownRosterMemberReply(username: string, cohortId: string): string {
     const suggestion = suggestClosestUsername(username, memberUsernamesInCohort(cohortId));
-    const suggestionText = suggestion ? ` Did you mean @${suggestion}?` : "";
-    return `I don't see @${username} on this cohort's roster.${suggestionText}`;
+    const nextStep = suggestion
+      ? ` Did you mean @${suggestion}?`
+      : " Ask them to message me once, then try again.";
+    return `❌ I don't see @${username} on this cohort's roster.${nextStep}`;
   }
 
   /**
@@ -849,6 +910,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
           title: result.value.title,
           assigneeUsername: result.value.assigneeUsername,
           dueDate: result.value.dueDate,
+          priority: result.value.priority,
           description: result.value.description,
         });
       }
@@ -859,7 +921,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       return;
     }
 
-    await ctx.reply(formatBulkCreateReply(created), { parse_mode: "HTML" as const });
+    await ctx.reply(formatBulkCreateReply(created, new Date()), { parse_mode: "HTML" as const });
   }
 
   /**
@@ -905,7 +967,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
 
     const parsed = parseAddTaskArgs(raw, new Date());
     if ("error" in parsed) {
-      await ctx.reply(parsed.error);
+      await ctx.reply(parsed.error, { parse_mode: "HTML" as const });
       return;
     }
 
@@ -984,28 +1046,37 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       priority,
     });
     if (!result.ok) {
-      await ctx.reply(`Couldn't create the task: ${result.error}`);
+      await ctx.reply(`❌ Couldn't create the task: ${result.error}`);
       return;
     }
-    let reply = formatTaskAdded({
-      id: result.value.id,
-      title: result.value.title,
-      priority: result.value.priority,
-      assigneeUsername: result.value.assigneeUsername,
-      dueDate: result.value.dueDate,
-    });
+    let reply = formatTaskAdded(
+      {
+        id: result.value.id,
+        title: result.value.title,
+        priority: result.value.priority,
+        assigneeUsername: result.value.assigneeUsername,
+        dueDate: result.value.dueDate,
+      },
+      new Date(),
+    );
     if (isPastDate(result.value.dueDate, new Date())) {
       reply += `\n${PAST_DUE_WARNING}`;
     }
     if (result.value.assigneeUsername !== normalizeUsername(caller.username)) {
+      const ref = formatTaskRef(result.value.id);
+      const rendered = renderDueDate(result.value.dueDate, new Date(), false, "long");
       const notified = await notifyUser(
         bot,
         registrations,
         result.value.assigneeUsername,
-        `You've been assigned Task ${result.value.id}: "${result.value.title}" (due ${result.value.dueDate}). Send /done ${result.value.id} when you're ready for review.`,
+        `You've been assigned Task ${formatTaskRefHtml(result.value.id)}: "${esc(result.value.title)}" — due ${rendered}. Send /done ${ref} when you're ready for review.`,
+        undefined,
+        { parse_mode: "HTML" },
       );
       if (!notified) {
-        reply += `\nHeads-up: @${result.value.assigneeUsername} hasn't messaged me yet, so I couldn't notify them.`;
+        // Issue #208: this is a warning, not a failure — the task was
+        // created; only the DM notification didn't go out.
+        reply += `\n⚠️ @${result.value.assigneeUsername} hasn't messaged me yet, so I couldn't notify them.`;
       }
     }
     await ctx.reply(reply, { parse_mode: "HTML" as const });
@@ -1084,7 +1155,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     // not just ones meant for it — only DMs can assume every message is
     // addressed to the bot, so only reply with the fallback there.
     if (ctx.chat.type === "private") {
-      await ctx.reply("Not sure what you're asking — try /help to see what I can do.");
+      await ctx.reply("❌ Not sure what you're asking — try /help to see what I can do.");
     }
   });
 
@@ -1101,7 +1172,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     if (isAddressedToOtherBot(text, bot.botInfo.username)) return;
     const commandName = parseCommandName(text);
     if (!HANDLED_COMMANDS.has(commandName)) return;
-    await ctx.reply("I don't pick up edits — send that as a new message.");
+    await ctx.reply("❌ I don't pick up edits — send that as a new message.");
   });
 
   return { bot, service, roster, registrations };

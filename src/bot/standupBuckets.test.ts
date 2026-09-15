@@ -5,17 +5,21 @@ import {
   bucketByMember,
   bucketOf,
   NO_OPEN_TASKS_HTML,
-  NO_OPEN_TASKS_PLAIN,
   renderMemberBucketsHtml,
-  renderMemberBucketsPlain,
   standupSummaryLine,
   reviewQueue,
   renderReviewQueueHtml,
-  renderReviewQueuePlain,
+  REVIEW_QUEUE_RULE,
+  STANDUP_APPROVERS,
 } from "./standupBuckets.js";
 
+const NOW = new Date("2026-09-01T00:00:00.000Z");
+
 // Issue #166 (S1 of #165): the shared Overdue / Doing / For approval bucket
-// rules, the summary line, and both member renderers. Pure functions only.
+// rules, the summary line, and the HTML member renderer. Pure functions
+// only. Issue #209: the plain-text renderers this file used to also cover
+// (`renderMemberBucketsPlain`/`renderReviewQueuePlain`) are gone — both
+// standup surfaces render through this HTML vocabulary now.
 
 function baseTask(overrides: Partial<TaskWithFlags> = {}): TaskWithFlags {
   return {
@@ -177,7 +181,7 @@ describe("renderMemberBucketsHtml", () => {
         status: "in_progress",
         overdue: true,
         priority: "urgent",
-        dueDate: "2026-09-07", // Monday
+        dueDate: "2026-08-25", // 7 days before NOW
       }),
       baseTask({
         id: 1,
@@ -197,69 +201,34 @@ describe("renderMemberBucketsHtml", () => {
       }),
     ];
 
-    expect(renderMemberBucketsHtml(tasks)).toEqual([
+    // Issue #209: the due date renders through the shared date renderer, so
+    // the overdue task reads as elapsed time ("7 days ago") rather than a
+    // calendar date — the trap this ticket exists to fix.
+    //
+    // Issue #210: task #2 is `in_review`, so it's now de-duplicated out of
+    // this member's "For approval" bucket entirely — it belongs to the
+    // review queue only (`renderReviewQueueHtml`), which is what makes "For
+    // approval" never appear in a member's block any more.
+    expect(renderMemberBucketsHtml(tasks, NOW)).toEqual([
       "",
       "👤 <b>@alice</b>",
       "⚠️ <b>Overdue (1)</b>",
-      "▸ <code>T-007</code> Finalize demo slides 🔴 🔄 · Mon, Sep 7",
+      "▸ <code>T-007</code> Finalize demo slides 🔴 🔄 · 7 days ago",
       "🔄 <b>Doing (1)</b>",
       "▸ <code>T-001</code> Fix login redirect 🔴 🔄 · Fri, Sep 11",
-      "👀 <b>For approval (1)</b>",
-      "▸ <code>T-002</code> Ship tasks API 👀 · Wed, Sep 9",
     ]);
   });
 
   it("escapes the username via esc", () => {
-    const tasks = [baseTask({ assigneeUsername: "a<b", status: "in_progress", overdue: true })];
-    const lines = renderMemberBucketsHtml(tasks);
+    const tasks = [
+      baseTask({ assigneeUsername: "a<b", status: "in_progress", overdue: true, dueDate: "2026-08-25" }),
+    ];
+    const lines = renderMemberBucketsHtml(tasks, NOW);
     expect(lines[1]).toBe(`👤 <b>@${esc("a<b")}</b>`);
   });
 
   it("empty input -> the no-open-tasks html line", () => {
-    expect(renderMemberBucketsHtml([])).toEqual(["", NO_OPEN_TASKS_HTML]);
-  });
-});
-
-describe("renderMemberBucketsPlain", () => {
-  it("renders one member with two buckets exactly", () => {
-    const tasks = [
-      baseTask({
-        id: 5,
-        title: "Deploy staging",
-        status: "in_progress",
-        overdue: false,
-        dueDate: "2026-09-10",
-      }),
-      baseTask({
-        id: 11,
-        title: "Refactor auth module",
-        status: "in_review",
-        overdue: false,
-        dueDate: "2026-09-11",
-      }),
-    ];
-
-    expect(renderMemberBucketsPlain(tasks)).toEqual([
-      "",
-      "👤 @alice",
-      "🔄 Doing (1)",
-      "  - #5 Deploy staging — 🔄 In progress (due 2026-09-10)",
-      "👀 For approval (1)",
-      "  - #11 Refactor auth module — 👀 In review (due 2026-09-11)",
-    ]);
-  });
-
-  it("no line contains HTML tags", () => {
-    const tasks = [baseTask({ status: "in_progress", overdue: true })];
-    for (const line of renderMemberBucketsPlain(tasks)) {
-      expect(line).not.toContain("<b>");
-      expect(line).not.toContain("<i>");
-      expect(line).not.toContain("<code>");
-    }
-  });
-
-  it("empty input -> the no-open-tasks plain line", () => {
-    expect(renderMemberBucketsPlain([])).toEqual(["", NO_OPEN_TASKS_PLAIN]);
+    expect(renderMemberBucketsHtml([], NOW)).toEqual(["", NO_OPEN_TASKS_HTML]);
   });
 });
 
@@ -306,14 +275,22 @@ describe("reviewQueue", () => {
 });
 
 describe("renderReviewQueueHtml", () => {
-  it("renders the header with task count", () => {
+  // Issue #210: the queue's distinguishing devices — a rule heavier than
+  // the light one used elsewhere in the product, an uppercase heading, a
+  // count in that heading, and a quote block giving the section its own
+  // vertical rail. Present whether the queue is empty or not.
+  it("renders the heavier rule, uppercase heading with count, and a blockquote", () => {
     const tasks = [
       baseTask({ id: 1, status: "in_review", overdue: false }),
       baseTask({ id: 2, status: "in_review", overdue: false }),
     ];
-    const lines = renderReviewQueueHtml(tasks);
+    const lines = renderReviewQueueHtml(tasks, NOW);
     expect(lines[0]).toBe("");
-    expect(lines[1]).toBe("👀 <b>For Review and Approval — Dom / Jedd</b>");
+    expect(lines[1]).toBe(REVIEW_QUEUE_RULE);
+    expect(lines[1]).not.toBe("─────────────────────"); // heavier than tasksPage.ts's light rule
+    expect(lines[2]).toBe("👀 <b>FOR REVIEW AND APPROVAL (2)</b>");
+    expect(lines[3]).toBe("<blockquote>");
+    expect(lines.at(-1)).toBe("</blockquote>");
   });
 
   it("renders one task with showStatus=false", () => {
@@ -327,24 +304,30 @@ describe("renderReviewQueueHtml", () => {
         dueDate: "2026-09-12",
       }),
     ];
-    const lines = renderReviewQueueHtml(tasks);
-    expect(lines[2]).toContain("T-014");
-    expect(lines[2]).toContain("Module 3 slide deck");
-    expect(lines[2]).toContain("@alice");
-    expect(lines[2]).not.toContain("👀");
+    const lines = renderReviewQueueHtml(tasks, NOW);
+    expect(lines[4]).toContain("T-014");
+    expect(lines[4]).toContain("Module 3 slide deck");
+    expect(lines[4]).toContain("@alice");
+    expect(lines[4]).not.toContain("👀");
   });
 
-  it("renders overdue task with ⚠️", () => {
+  // Issue #209: an overdue queued task used to carry both a due date and a
+  // trailing ⚠️ flag suffix — a date the reader still had to decode, plus a
+  // marker that only restated what the date already implied. The shared
+  // date renderer already turns an overdue due date into elapsed time
+  // ("4 days ago"), so that alone carries the lateness now; the flag is gone.
+  it("renders an overdue task's lateness as elapsed time, with no ⚠️ flag suffix", () => {
     const tasks = [
       baseTask({
         id: 1,
         status: "in_review",
         overdue: true,
-        dueDate: "2026-09-05",
+        dueDate: "2026-08-28",
       }),
     ];
-    const lines = renderReviewQueueHtml(tasks);
-    expect(lines[2]).toContain("⚠️");
+    const lines = renderReviewQueueHtml(tasks, NOW);
+    expect(lines[4]).toContain("4 days ago");
+    expect(lines[4]).not.toContain("⚠️");
   });
 
   it("HTML-escapes title and username", () => {
@@ -357,78 +340,76 @@ describe("renderReviewQueueHtml", () => {
         overdue: false,
       }),
     ];
-    const lines = renderReviewQueueHtml(tasks);
-    expect(lines[2]).toContain(esc("Test <b>bold</b> & amp"));
-    expect(lines[2]).toContain(esc("a<b"));
+    const lines = renderReviewQueueHtml(tasks, NOW);
+    expect(lines[4]).toContain(esc("Test <b>bold</b> & amp"));
+    expect(lines[4]).toContain(esc("a<b"));
   });
 
-  it("empty state: renders header with (0) and empty message", () => {
-    const lines = renderReviewQueueHtml([]);
+  it("empty state: renders header with (0) and empty message, still inside the blockquote", () => {
+    const lines = renderReviewQueueHtml([], NOW);
     expect(lines[0]).toBe("");
-    expect(lines[1]).toBe("👀 <b>For Review and Approval — Dom / Jedd</b>");
-    expect(lines[2]).toBe("<i>Nothing waiting for review right now.</i>");
+    expect(lines[1]).toBe(REVIEW_QUEUE_RULE);
+    expect(lines[2]).toBe("👀 <b>FOR REVIEW AND APPROVAL (0)</b>");
+    expect(lines[3]).toBe("<blockquote>");
+    expect(lines[4]).toBe("<i>No tasks waiting for review right now.</i>");
+    expect(lines[5]).toBe("</blockquote>");
+  });
+
+  // #210's fifth device, as a plain named line rather than a Telegram
+  // mention: no real handles exist, and naming them is what the card did
+  // before the restructure, so dropping the names entirely would lose
+  // information the cohort already had.
+  it("names the reviewers on its own line when the queue is non-empty", () => {
+    const tasks = [
+      baseTask({ id: 1, title: "Write onboarding doc", assigneeUsername: "alice", status: "in_review" }),
+    ];
+    const lines = renderReviewQueueHtml(tasks, NOW);
+    const closing = lines.indexOf("</blockquote>");
+    expect(lines[closing - 1]).toBe(`<i>Waiting on ${STANDUP_APPROVERS}.</i>`);
+  });
+
+  it("omits the reviewer line when the queue is empty", () => {
+    const lines = renderReviewQueueHtml([], NOW);
+    expect(lines.join("\n")).not.toContain(STANDUP_APPROVERS);
   });
 });
 
-describe("renderReviewQueuePlain", () => {
-  it("renders the header with task count", () => {
-    const tasks = [
-      baseTask({ id: 1, status: "in_review", overdue: false }),
-      baseTask({ id: 2, status: "in_review", overdue: false }),
-    ];
-    const lines = renderReviewQueuePlain(tasks);
-    expect(lines[0]).toBe("");
-    expect(lines[1]).toBe("👀 For Review and Approval — Dom / Jedd");
-  });
-
-  it("renders one task with due date and assignee", () => {
+describe("renderMemberBucketsHtml — de-duplication against the review queue (#210)", () => {
+  it("a task that is both Overdue and in review appears exactly once in the whole card: in the queue, not the member's Overdue bucket", () => {
     const tasks = [
       baseTask({
-        id: 5,
-        title: "Fix something",
-        status: "in_review",
-        overdue: false,
-        dueDate: "2026-09-12",
-        assigneeUsername: "alice",
-      }),
-    ];
-    const lines = renderReviewQueuePlain(tasks);
-    expect(lines[2]).toBe("  - #5 Fix something (@alice) — due 2026-09-12");
-  });
-
-  it("renders overdue task with [⚠️ OVERDUE Xd]", () => {
-    const tasks = [
-      baseTask({
-        id: 1,
-        title: "Overdue review",
+        id: 42,
+        title: "Overdue and in review",
         status: "in_review",
         overdue: true,
-        daysOverdue: 2,
-        dueDate: "2026-09-05",
+        dueDate: "2026-08-20",
       }),
     ];
-    const lines = renderReviewQueuePlain(tasks);
-    expect(lines[2]).toContain("[⚠️ OVERDUE 2d]");
+    const memberLines = renderMemberBucketsHtml(tasks, NOW);
+    const queueLines = renderReviewQueueHtml(tasks, NOW);
+
+    // Omitted from the member's bucket entirely (falls back to the
+    // no-open-tasks line, since this was the member's only task).
+    expect(memberLines).toEqual(["", NO_OPEN_TASKS_HTML]);
+    expect(memberLines.join("\n")).not.toContain("Overdue and in review");
+
+    // Present exactly once, in the queue.
+    expect(queueLines.join("\n").split("Overdue and in review")).toHaveLength(2);
   });
 
-  it("does not HTML-escape in plain output", () => {
+  it("a plain in_review (not overdue) task is omitted from its owner's For approval bucket", () => {
     const tasks = [
+      baseTask({ id: 1, title: "Also has doing work", status: "in_progress", overdue: false }),
       baseTask({
-        id: 1,
-        title: "Test <b>bold</b> & amp",
+        id: 2,
+        title: "Needs review",
         status: "in_review",
         overdue: false,
       }),
     ];
-    const lines = renderReviewQueuePlain(tasks);
-    expect(lines[2]).toContain("Test <b>bold</b> & amp");
-    expect(lines[2]).not.toContain("&lt;");
-  });
-
-  it("empty state: renders header with (0) and empty message", () => {
-    const lines = renderReviewQueuePlain([]);
-    expect(lines[0]).toBe("");
-    expect(lines[1]).toBe("👀 For Review and Approval — Dom / Jedd");
-    expect(lines[2]).toBe("Nothing waiting for review right now.");
+    const lines = renderMemberBucketsHtml(tasks, NOW);
+    expect(lines.join("\n")).not.toContain("Needs review");
+    expect(lines.join("\n")).not.toContain("For approval");
+    expect(lines.join("\n")).toContain("Also has doing work");
   });
 });

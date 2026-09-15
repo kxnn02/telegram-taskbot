@@ -38,14 +38,18 @@ const alice = caller("alice");
 // 2026-09-04 10:00 Asia/Manila
 const NOW = new Date("2026-09-04T02:00:00.000Z");
 
-function makeFakeBot(): NotifierBot & { sent: Array<{ chatId: number | string; text: string }> } {
-  const sent: Array<{ chatId: number | string; text: string }> = [];
+function makeFakeBot(): NotifierBot & {
+  sent: Array<{ chatId: number | string; text: string; parseMode?: string }>;
+} {
+  const sent: Array<{ chatId: number | string; text: string; parseMode?: string }> = [];
   return {
     sent,
     api: {
-      sendMessage: vi.fn(async (chatId: number | string, text: string) => {
-        sent.push({ chatId, text });
-      }),
+      sendMessage: vi.fn(
+        async (chatId: number | string, text: string, options?: { parse_mode?: string }) => {
+          sent.push({ chatId, text, parseMode: options?.parse_mode });
+        },
+      ),
     },
   };
 }
@@ -159,6 +163,20 @@ describe("runOverdueCrossingCheck", () => {
     expect(bot.sent).toHaveLength(0);
   });
 
+  it("renders the identifier through the task-ref renderer and the due date through the due-date renderer (issue #203)", async () => {
+    const past = new Date("2026-09-20T02:00:00.000Z"); // 10 days after the 2026-09-10 due date
+    const { deps, service, bot } = await makeDeps(past);
+    const created = await assign(service);
+    if (!created.ok) throw new Error("setup failed");
+
+    await runOverdueCrossingCheck(deps, COHORT, past);
+
+    expect(bot.sent[0]?.text).toBe(
+      `Task <code>T-${String(created.value.id).padStart(3, "0")}</code> ("Write the onboarding doc") is now overdue — it was due 10 days ago and hasn't been submitted.`,
+    );
+    expect(bot.sent[0]?.parseMode).toBe("HTML");
+  });
+
   it("doesn't notify for a task that isn't overdue yet", async () => {
     const { deps, service, bot } = await makeDeps();
     await assign(service); // due 2026-09-10, NOW is 2026-09-04
@@ -241,10 +259,14 @@ describe("runOverdueCrossingCheck", () => {
 describe("runDueSoonReminderCheck", () => {
   it("reminds the assignee of a task due tomorrow", async () => {
     const { deps, service, bot } = await makeDeps();
-    await assign(service, { dueDate: "2026-09-05" }); // tomorrow relative to NOW
+    const created = await assign(service, { dueDate: "2026-09-05" }); // tomorrow relative to NOW
+    if (!created.ok) throw new Error("setup failed");
     await runDueSoonReminderCheck(deps, COHORT, NOW);
     expect(bot.sent).toHaveLength(1);
-    expect(bot.sent[0]?.text).toContain("Task");
+    expect(bot.sent[0]?.text).toBe(
+      `Task <code>T-${String(created.value.id).padStart(3, "0")}</code> ("Write the onboarding doc") is due tomorrow. Send /done T-${String(created.value.id).padStart(3, "0")} when you're ready for review.`,
+    );
+    expect(bot.sent[0]?.parseMode).toBe("HTML");
   });
 
   it("doesn't remind for a task due further out", async () => {
@@ -282,16 +304,17 @@ describe("runDailyDigest", () => {
     if (!aliceTask.ok || !bobTask.ok) throw new Error("setup failed");
 
     const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
-    await runDailyDigest(deps, digestBuilder, COHORT);
+    await runDailyDigest(deps, digestBuilder, COHORT, past);
 
-    const aliceDm = bot.sent.find((m) => m.text.includes(`#${aliceTask.value.id}`));
-    const bobDm = bot.sent.find((m) => m.text.includes(`#${bobTask.value.id}`));
+    const aliceDm = bot.sent.find((m) => m.text.includes(`T-${String(aliceTask.value.id).padStart(3, "0")}`));
+    const bobDm = bot.sent.find((m) => m.text.includes(`T-${String(bobTask.value.id).padStart(3, "0")}`));
     expect(aliceDm).toBeDefined();
     expect(bobDm).toBeDefined();
-    expect(aliceDm?.text).not.toContain(`#${bobTask.value.id}`);
-    expect(bobDm?.text).not.toContain(`#${aliceTask.value.id}`);
+    expect(aliceDm?.text).not.toContain(`T-${String(bobTask.value.id).padStart(3, "0")}`);
+    expect(bobDm?.text).not.toContain(`T-${String(aliceTask.value.id).padStart(3, "0")}`);
     expect(bot.sent.some((m) => m.text.includes("Awaiting review"))).toBe(false);
     expect(bot.sent.some((m) => m.text.includes("Overdue:"))).toBe(false);
+    expect(aliceDm?.parseMode).toBe("HTML");
   });
 
   it("sends nothing to a member with no open tasks", async () => {
@@ -344,7 +367,8 @@ describe("runDailyDigest", () => {
     // his DM.
     const dmCount = bot.sent.filter((m) => typeof m.chatId === "number").length;
     expect(dmCount).toBe(1);
-    expect(bot.sent[0]?.text).toContain(`#${bobTask.value.id}`);
+    expect(bot.sent[0]?.text).toContain(`T-${String(bobTask.value.id).padStart(3, "0")}`);
+    expect(bot.sent[0]?.parseMode).toBe("HTML");
   });
 });
 
@@ -363,12 +387,13 @@ describe("runWeeklyDigest (#143 D4b / #147: completed-this-week only)", () => {
     const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
     await runWeeklyDigest(deps, digestBuilder, COHORT, NOW);
 
-    const aliceDm = bot.sent.find((m) => m.text.includes(`#${aliceTask.value.id}`));
-    const bobDm = bot.sent.find((m) => m.text.includes(`#${bobTask.value.id}`));
+    const aliceDm = bot.sent.find((m) => m.text.includes(`T-${String(aliceTask.value.id).padStart(3, "0")}`));
+    const bobDm = bot.sent.find((m) => m.text.includes(`T-${String(bobTask.value.id).padStart(3, "0")}`));
     expect(aliceDm).toBeDefined();
     expect(bobDm).toBeDefined();
-    expect(aliceDm?.text).not.toContain(`#${bobTask.value.id}`);
-    expect(bobDm?.text).not.toContain(`#${aliceTask.value.id}`);
+    expect(aliceDm?.text).not.toContain(`T-${String(bobTask.value.id).padStart(3, "0")}`);
+    expect(bobDm?.text).not.toContain(`T-${String(aliceTask.value.id).padStart(3, "0")}`);
+    expect(aliceDm?.parseMode).toBe("HTML");
   });
 
   it("does not include a member's still-open tasks (dropped per #143 D4b — would duplicate the daily digest)", async () => {
@@ -385,8 +410,8 @@ describe("runWeeklyDigest (#143 D4b / #147: completed-this-week only)", () => {
     await runWeeklyDigest(deps, digestBuilder, COHORT, NOW);
 
     const aliceDm = bot.sent.find((m) => m.text.includes("Weekly digest"));
-    expect(aliceDm?.text).toContain(`#${doneTask.value.id}`);
-    expect(aliceDm?.text).not.toContain(`#${openTask.value.id}`);
+    expect(aliceDm?.text).toContain(`T-${String(doneTask.value.id).padStart(3, "0")}`);
+    expect(aliceDm?.text).not.toContain(`T-${String(openTask.value.id).padStart(3, "0")}`);
   });
 
   it("sends nothing to a member who completed nothing this week", async () => {
@@ -417,7 +442,7 @@ describe("runWeeklyDigest (#143 D4b / #147: completed-this-week only)", () => {
     const digestBuilder = new DigestBuilder({ service: deps.service, roster: deps.roster });
     await runWeeklyDigest(deps, digestBuilder, COHORT, NOW);
 
-    const daveDm = bot.sent.find((m) => m.text.includes(`#${daveTask.value.id}`));
+    const daveDm = bot.sent.find((m) => m.text.includes(`T-${String(daveTask.value.id).padStart(3, "0")}`));
     expect(daveDm).toBeDefined();
   });
 });

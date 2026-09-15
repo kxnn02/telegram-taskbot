@@ -3,6 +3,8 @@ import type { TaskWithFlags } from "../service/taskService.js";
 import type { Task, TaskPriority, TaskStatus } from "../domain/types.js";
 import { MANILA_ZONE } from "../domain/overdue.js";
 import { esc } from "./html.js";
+import { formatTaskRefHtml } from "./taskRef.js";
+import { renderDueDate } from "../date/renderDueDate.js";
 
 /** Display labels for the six free-set statuses (#27's normative status
  * table) — the only place this vocabulary is spelled out for user-facing
@@ -10,9 +12,9 @@ import { esc } from "./html.js";
  * snake_case stored value. */
 const STATUS_LABELS: Record<TaskStatus, string> = {
   backlog: "Backlog",
-  todo: "To do",
-  in_progress: "In progress",
-  in_review: "In review",
+  todo: "To Do",
+  in_progress: "In Progress",
+  in_review: "In Review",
   blocked: "Blocked",
   done: "Done",
 };
@@ -66,27 +68,23 @@ function paginate<T>(items: T[], requestedPage: number, pageSize = PAGE_SIZE): P
   return { items: items.slice(start, start + pageSize), page, totalPages };
 }
 
-function paginationFooter(
-  commandName: string,
-  page: number,
-  totalPages: number,
-  hintPrefix = "",
-): string | null {
+function paginationFooter(commandName: string, page: number, totalPages: number): string | null {
   if (totalPages <= 1) return null;
-  const prefix = hintPrefix ? `${hintPrefix} ` : "";
   if (page < totalPages) {
-    return `Page ${page} of ${totalPages} — send /${commandName} ${prefix}${page + 1} for more`;
+    return `Page ${page} of ${totalPages} — send /${commandName} for more`;
   }
   return `Page ${page} of ${totalPages}.`;
 }
 
 /** Devie's "no active task found" card (issue #124 stage S1,
- * `route.ts:952`/`:1012`), sent with `parse_mode: "HTML"`. */
+ * `route.ts:952`/`:1012`), sent with `parse_mode: "HTML"`. Issue #208: "active"
+ * renamed to "open" throughout, matching the vocabulary used everywhere else
+ * for a not-done task. */
 export function formatTaskNotFound(input: string): string {
   return [
-    `❌ No active task found matching <b>"${esc(input)}"</b>.`,
+    `❌ No open task found matching <b>"${esc(input)}"</b>.`,
     "",
-    "<i>Use /tasks to see all active tasks.</i>",
+    "<i>Use /tasks to see all open tasks.</i>",
   ].join("\n");
 }
 
@@ -111,36 +109,58 @@ export function formatAmbiguousTaskMatches(
   ].join("\n");
 }
 
-export function formatTaskLine(task: TaskWithFlags): string {
-  const flags: string[] = [];
-  if (task.overdue) flags.push(`⚠️ OVERDUE ${task.daysOverdue}d`);
-  if (task.status === "blocked") flags.push("🚧 BLOCKED");
-  const flagText = flags.length > 0 ? ` [${flags.join(", ")}]` : "";
-  return `#${task.id}${PRIORITY_BADGE[task.priority]} ${task.title} — ${STATUS_EMOJI[task.status]} ${statusLabel(task.status)} (due ${task.dueDate})${flagText}`;
+/** One task's line on the daily digest (issue #206, spec #201's short
+ * form): the shared monospace identifier, priority badge and bullet, plus
+ * the shared due-date renderer in short form — which already reads as
+ * "3 days ago"/"yesterday"/"today" for anything late or due soon, so the
+ * old bracketed `[⚠️ OVERDUE 5d]` flag is gone; the date text itself now
+ * carries that. Distinct from `taskLine` (the standup card's own line,
+ * `standupCard.ts`) so the digest and the card stay independently
+ * adjustable. */
+function formatDigestTaskLine(task: TaskWithFlags, now: Date): string {
+  const due = renderDueDate(task.dueDate, now, task.overdue, "short");
+  return `• ${formatTaskRefHtml(task.id)}${PRIORITY_BADGE[task.priority]} ${esc(task.title)} — ${STATUS_EMOJI[task.status]} ${statusLabel(task.status)} (due ${due})`;
 }
 
-export function formatMyTasks(tasks: TaskWithFlags[], page = 1): string {
+/** Daily digest content (issue #206, spec #201): shared identifier, date,
+ * priority and bullet vocabulary, in short form (several tasks listed at
+ * once). Sent with `parse_mode: "HTML"`. */
+export function formatMyTasks(tasks: TaskWithFlags[], now: Date, page = 1): string {
   if (tasks.length === 0) {
-    return "You're all clear — no tasks right now.";
+    return "No open tasks.";
   }
   const paged = paginate(tasks, page);
   const lines = [
     "Your open tasks:",
-    ...paged.items.map((t) => "- " + formatTaskLine(t)),
+    ...paged.items.map((t) => formatDigestTaskLine(t, now)),
   ];
-  const footer = paginationFooter("mytasks", paged.page, paged.totalPages);
+  const footer = paginationFooter("tasks", paged.page, paged.totalPages);
   if (footer) lines.push("", footer);
   return lines.join("\n");
 }
 
-export function formatDeadlines(tasks: TaskWithFlags[]): string {
+/** Issue #205 (spec #201's density reduction): grouped by day so the date
+ * is stated once per group rather than once per task, dropping the
+ * per-line status label, status glyph and "assigned to" wrapper. `tasks`
+ * is assumed already sorted by due date (as `listDeadlines` returns it) —
+ * grouping here only clusters adjacent same-day entries, it does not sort.
+ * Sent with `parse_mode: "HTML"`. */
+export function formatDeadlines(tasks: TaskWithFlags[], now: Date): string {
   if (tasks.length === 0) {
-    return "Nothing due in the next 7 days.";
+    return "No deadlines due in the next 7 days.";
   }
-  return [
-    "Due in the next 7 days:",
-    ...tasks.map((t) => `- ⏰ ${formatTaskLine(t)} (assigned to @${t.assigneeUsername})`),
-  ].join("\n");
+  const lines = ["Due in the next 7 days:"];
+  let currentDueDate: string | undefined;
+  for (const t of tasks) {
+    if (t.dueDate !== currentDueDate) {
+      currentDueDate = t.dueDate;
+      lines.push("", `<b>${renderDueDate(t.dueDate, now, false, "short")}</b>`);
+    }
+    lines.push(
+      `• ${formatTaskRefHtml(t.id)}${PRIORITY_BADGE[t.priority]} ${esc(t.title)} — @${t.assigneeUsername}`,
+    );
+  }
+  return lines.join("\n");
 }
 
 /** Short Manila-resolved date for the weekly digest's "marked done" lines
@@ -159,19 +179,20 @@ function formatShortDate(isoDate: string): string {
  * not a variant of either. */
 export function formatWeeklyCompleted(tasks: TaskWithFlags[]): string {
   if (tasks.length === 0) {
-    return "Nothing completed this week.";
+    return "No tasks completed this week.";
   }
   return [
     `✅ Completed this week (${tasks.length}):`,
     ...tasks.map(
-      (t) => `- #${t.id} ${t.title} (marked done ${formatShortDate(t.updatedAt)})`,
+      (t) =>
+        `• ${formatTaskRefHtml(t.id)}${PRIORITY_BADGE[t.priority]} ${esc(t.title)} (marked done ${formatShortDate(t.updatedAt)})`,
     ),
   ].join("\n");
 }
 
 export function formatApproved(tasks: TaskWithFlags[]): string {
   if (tasks.length === 0) {
-    return "Nothing was approved in the past week.";
+    return "No tasks approved in the past week.";
   }
   return [
     "Marked done this past week:",
@@ -199,7 +220,7 @@ export function formatTaskDetail(task: TaskWithFlags): string {
 
   const notesText =
     task.notes.length === 0
-      ? "No notes yet."
+      ? "No notes."
       : task.notes
           .map((n) => `  [${formatNoteTimestamp(n.createdAt)}] @${n.authorUsername}: ${n.text}`)
           .join("\n");
@@ -253,16 +274,16 @@ const HELP_SECTIONS: { heading: string; lines: string[] }[] = [
     ],
   },
   {
+    // Issue #211: bulk syntax used to be enumerated per command (eight
+    // near-identical lines). It's a property shared by all three update
+    // commands, so it's stated once here instead.
     heading: "✏️ <b>Update</b>",
     lines: [
-      "/done &lt;ref&gt; — mark as in review (e.g. /done 23)",
-      "/done t21,t22,t23 — bulk mark as in review",
-      "/complete &lt;ref&gt; (or /completed &lt;ref&gt;) — mark as done (e.g. /complete 23)",
-      "/complete t21,t22,t23 — bulk mark as done",
+      `/done &lt;ref&gt; — mark as in review (e.g. /done ${formatTaskRefHtml(23)})`,
+      "/complete &lt;ref&gt; (or /completed &lt;ref&gt;) — mark as done",
       "/update &lt;ref&gt; &lt;status&gt; — single update",
-      "/update t21,t22,t23 done — bulk shared status",
-      "/update t21 done, t22 review, t23 inprogress — bulk mixed status",
-      "/update, one ref+status per line — bulk multiline",
+      `/done, /complete and /update all accept a comma- or newline-separated list of refs for bulk updates (e.g. /done ${formatTaskRefHtml(21)},${formatTaskRefHtml(22)},${formatTaskRefHtml(23)})`,
+      "⚠️ /done marks In Review, not Done — use /complete to mark a task actually finished.",
     ],
   },
 ];
@@ -273,10 +294,22 @@ const HELP_SECTIONS: { heading: string; lines: string[] }[] = [
  * throw `Bad Request: message is too long`. `limit` defaults to 4000, not
  * 4096, to leave headroom for Telegram's own overhead. The single shared
  * implementation for every chunked reply, including the `/update` batch
- * summary — one rule, one place. */
+ * summary and the standup card's `<blockquote>` review queue (issue #210)
+ * — one rule, one place.
+ *
+ * Issue #210: a plain running-length split has no awareness of the
+ * `<blockquote>`/`</blockquote>` pair the standup card now always emits
+ * around its review queue, and Telegram rejects the *entire* message on a
+ * split that severs the pair. So while inside that region, the ordinary
+ * overflow checks below are suppressed — the region is left to grow past
+ * `limit` rather than split (a degraded, oversized chunk is safe; a
+ * malformed tag pair is not) — and only resume once `</blockquote>` closes
+ * it, which naturally forces a flush at that boundary on the very next
+ * line. A normal, blockquote-free message chunks exactly as before. */
 export function chunkMessage(text: string, limit = 4000): string[] {
   const chunks: string[] = [];
   let current = "";
+  let insideBlockquote = false;
 
   function flush() {
     if (current.length > 0) chunks.push(current);
@@ -284,7 +317,9 @@ export function chunkMessage(text: string, limit = 4000): string[] {
   }
 
   for (const line of text.split("\n")) {
-    if (line.length > limit) {
+    const trimmed = line.trim();
+
+    if (line.length > limit && !insideBlockquote) {
       flush();
       for (let i = 0; i < line.length; i += limit) {
         chunks.push(line.slice(i, i + limit));
@@ -292,12 +327,15 @@ export function chunkMessage(text: string, limit = 4000): string[] {
       continue;
     }
     const candidate = current.length === 0 ? line : `${current}\n${line}`;
-    if (candidate.length > limit) {
+    if (candidate.length > limit && !insideBlockquote) {
       flush();
       current = line;
     } else {
       current = candidate;
     }
+
+    if (trimmed === "<blockquote>") insideBlockquote = true;
+    else if (trimmed === "</blockquote>") insideBlockquote = false;
   }
   flush();
 
@@ -324,17 +362,27 @@ export function formatHelp(botDisplayName: string): string {
   ].join("\n");
 }
 
-// ---- Devie's taskAddedMsg (issue #124 stage S3) --------------------------
+/** Issue #211: a new member's first message, distinct from `formatHelp`.
+ * `/start` used to be a byte-identical alias of `/help` (issue #124 stage
+ * S3) — that's reversed here, so this is what a brand-new cohort member
+ * sees on first contact instead of the full command reference.
+ * `botDisplayName` is passed the same way `formatHelp` is. */
+export function formatStart(botDisplayName: string): string {
+  return [
+    `👋 <b>Hi, I'm ${botDisplayName}!</b> I track this cohort's tasks.`,
+    "",
+    "Three commands to try right away:",
+    "/addtask &lt;title&gt; — add a task",
+    "/tasks — see what's open",
+    `/done &lt;ref&gt; — send a task for review (e.g. /done ${formatTaskRefHtml(23)})`,
+    "",
+    "I'll DM you when a task's assigned to you, and post a standup here each morning.",
+    "",
+    "Send /help for the full command list.",
+  ].join("\n");
+}
 
-/** Devie's `PRIORITY_EMOJI` (issue #124 stage S3) — deliberately distinct
- * from `PRIORITY_BADGE` above, which stays as-is for the standup card and
- * every other view. Used only by `formatTaskAdded`. */
-const TASK_ADDED_PRIORITY_EMOJI: Record<TaskPriority, string> = {
-  urgent: "🔴",
-  high: "🟠",
-  medium: "🔵",
-  low: "⚪",
-};
+// ---- Devie's taskAddedMsg (issue #124 stage S3) --------------------------
 
 function capitalizeFirst(word: string): string {
   return word.length === 0 ? word : word[0]!.toUpperCase() + word.slice(1);
@@ -355,21 +403,30 @@ export interface TaskAddedInput {
  * `parse_mode: "HTML"`. This repo's kept extras (the past-due warning and
  * the couldn't-notify notice) are appended by `createBot.ts`'s addtask
  * handler, after this card's italic closing line — not part of this
- * function. */
-export function formatTaskAdded(input: TaskAddedInput): string {
-  const dot = TASK_ADDED_PRIORITY_EMOJI[input.priority];
+ * function.
+ *
+ * Issue #207 (spec #201's shared vocabulary): the priority dot now comes
+ * from the shared `PRIORITY_BADGE` table (medium/low carry none, replacing
+ * the second priority table this card used to keep for itself), the
+ * identifier renders through the shared `formatTaskRefHtml`, and the due
+ * date renders through the shared `renderDueDate` in long form — this card
+ * concerns a single task, matching every other single-task message. `now`
+ * is required for that renderer, same as every other formatter here that
+ * calls it. */
+export function formatTaskAdded(input: TaskAddedInput, now: Date): string {
+  const dot = PRIORITY_BADGE[input.priority];
   const lines = [
-    `${dot} Task added · ${capitalizeFirst(input.priority)}:`,
+    `Task added${dot} · ${capitalizeFirst(input.priority)}:`,
     `<b>${esc(input.title)}</b>`,
   ];
   if (input.assigneeUsername) {
     lines.push(`👤 Assigned to: @${esc(input.assigneeUsername)}`);
   }
   if (input.dueDate) {
-    const due = DateTime.fromISO(input.dueDate, { zone: MANILA_ZONE }).toFormat("LLL d, yyyy");
+    const due = renderDueDate(input.dueDate, now, false, "long");
     lines.push(`📅 Due: ${due}`);
   }
-  lines.push(`🪪 ID: <code>t${input.id}</code>`);
+  lines.push(`🪪 ID: ${formatTaskRefHtml(input.id)}`);
   lines.push("", "<i>Refresh the dashboard to see your changes.</i>");
   return lines.join("\n");
 }
@@ -385,8 +442,13 @@ export function formatCompleteOk(title: string): string {
 }
 
 /** `status` renders with underscores swapped for spaces, per issue #124
- * stage S3 — deliberately not `statusLabel`'s Title Case rendering. */
+ * stage S3 — deliberately not `statusLabel`'s Title Case rendering. Issue
+ * #207: `/done` and `/update <ref> review` produce the same outcome
+ * (`in_review`), so this delegates to `formatDoneOk` for that one status,
+ * making the two commands' confirmations byte-identical rather than merely
+ * similar. */
 export function formatUpdateOk(title: string, status: TaskStatus): string {
+  if (status === "in_review") return formatDoneOk(title);
   const emoji = STATUS_EMOJI[status] ?? "📌";
   return `${emoji} <b>${esc(title)}</b>\nUpdated to: <b>${status.replace(/_/g, " ")}</b>`;
 }
@@ -420,7 +482,14 @@ function pluralize(n: number, word: string): string {
 /** Devie's batch reply shapes (issue #124 stage S3): a per-kind success
  * header and line style, failures grouped at the end under a `⚠️ Skipped`
  * header, and — when nothing at all succeeded — the dedicated
- * "no tasks were updated" block instead of any per-command usage text. */
+ * "no tasks were updated" block instead of any per-command usage text.
+ *
+ * Issue #207 (spec #201's density reduction): when every success shares one
+ * status, the header already names it (`/done`/`/complete` always share
+ * one; `/update` gains it here), so each line's own trailing
+ * `→ <b>status</b>` is dropped — at twenty tasks that was twenty identical
+ * trailing phrases. It's retained only when a mixed-status `/update` batch
+ * makes the lines genuinely differ. */
 export function formatBatchReply(
   kind: "done" | "complete" | "update",
   successes: BatchSuccessLine[],
@@ -435,17 +504,24 @@ export function formatBatchReply(
     return lines.join("\n");
   }
 
+  const uniformStatusWord = successes.every((s) => s.statusWord === successes[0]!.statusWord)
+    ? successes[0]!.statusWord
+    : undefined;
+
   const header =
     kind === "done"
       ? `👀 <b>Moved ${pluralize(successes.length, "task")} to In Review.</b>`
       : kind === "complete"
         ? `✅ <b>Marked ${pluralize(successes.length, "task")} as done.</b>`
-        : `✅ <b>Updated ${pluralize(successes.length, "task")}.</b>`;
+        : uniformStatusWord !== undefined
+          ? `✅ <b>Updated ${pluralize(successes.length, "task")} to ${uniformStatusWord}.</b>`
+          : `✅ <b>Updated ${pluralize(successes.length, "task")}.</b>`;
 
   const lines = [header];
   for (const s of successes) {
+    const statusSuffix = uniformStatusWord !== undefined ? "" : ` → <b>${s.statusWord}</b>`;
     lines.push(
-      `• ${s.emoji} <code>${s.ref}</code> ${esc(s.title)} → <b>${s.statusWord}</b>${s.metaSuffix ?? ""}`,
+      `• ${s.emoji} <code>${s.ref}</code> ${esc(s.title)}${statusSuffix}${s.metaSuffix ?? ""}`,
     );
   }
   if (failures.length > 0) {
@@ -485,24 +561,31 @@ export const COMPLETE_USAGE = [
 /** This repo's longer variant of Devie's `/update` usage block (issue #124
  * stage S3): includes the `link:`/`note:` rider example line and both
  * italic closing lines, since this repo carries those riders and Devie's
- * own shorter base variant doesn't. */
+ * own shorter base variant doesn't.
+ *
+ * Issue #208: trimmed down from the redundant mixed-status and single-word
+ * examples a bare `/update` used to spell out, and the newline-separated
+ * bulk example — which used to read as three separate commands — is now
+ * labelled as the one message it actually is. */
 export const UPDATE_USAGE = [
   "Usage: <code>/update &lt;number or keyword&gt; &lt;status&gt;</code>",
   "",
   "<b>Examples:</b>",
   "/update 23 in review",
-  "/update login blocked",
   "/update t21,t22,t23 done",
-  "/update t21 done, t22 review, t23 inprogress",
-  "/update t31 done",
+  "/update T-001 done link:https://github.com/... note: ready for QA",
+  "",
+  "<b>Or, one status per line in a single message:</b>",
+  "t31 done",
   "t30 done",
   "t32 done",
-  "/update T-001 done link:https://github.com/... note: ready for QA",
   "",
   "<i>Valid statuses: backlog · todo · in progress · in review · blocked · done</i>",
   "<i>Optionally append <code>link:&lt;url&gt;</code> and/or <code>note:&lt;text&gt;</code>.</i>",
 ].join("\n");
 
 /** Devie's unknown-command reply (issue #124 stage S3), sent with
- * `parse_mode: "HTML"`. Replaces this bot's old plain-text fallback. */
-export const UNKNOWN_COMMAND_REPLY = "❓ Unknown command. Try /help to see what's available.";
+ * `parse_mode: "HTML"`. Replaces this bot's old plain-text fallback. Issue
+ * #208: the `❓` prefix is replaced with the shared failure marker — nothing
+ * else prefixes an error. */
+export const UNKNOWN_COMMAND_REPLY = "❌ Unknown command. Try /help to see what's available.";

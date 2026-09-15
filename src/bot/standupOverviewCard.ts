@@ -32,6 +32,14 @@ import type { TaskWithFlags } from "../service/taskService.js";
  * `/standup`'s `formatStandup` never calls the model — but the tip itself is
  * no longer exclusive to this card: `formatStandup`'s unfiltered view also
  * appends its own plain-text render of the same day's tip.
+ *
+ * Issue #210 (spec #201): the review queue (`renderReviewQueueHtml`) now
+ * renders immediately under the summary line, *above* the person-first
+ * buckets — reversing the bottom placement issue #186 deliberately chose.
+ * That reversal was agreed explicitly for this ticket and is not an
+ * oversight; do not move it back to the bottom. The "Done this week"/"Done
+ * last week" blocks are now omitted entirely when empty, rather than
+ * rendered with a placeholder sentence.
  */
 
 export interface StandupOverviewCardOptions {
@@ -75,7 +83,8 @@ export function buildStandupOverviewCard(
     standupSummaryLine(report.tasks),
   ];
 
-  lines.push(...renderMemberBucketsHtml(report.tasks));
+  lines.push(...renderReviewQueueHtml(report.tasks, opts.now));
+  lines.push(...renderMemberBucketsHtml(report.tasks, opts.now));
 
   const bounds = getWeekBounds(manilaISODate(opts.now));
   const thisWeekLabel = formatWeekLabel(bounds.thisWeekStart, bounds.thisWeekEnd);
@@ -83,21 +92,18 @@ export function buildStandupOverviewCard(
   const doneThisWeek = doneInRange(report.tasks, bounds.thisWeekStart, bounds.thisWeekEnd);
   const doneLastWeek = doneInRange(report.tasks, bounds.lastWeekStart, bounds.lastWeekEnd);
 
-  lines.push("", `✅ <b>Done this week (${thisWeekLabel})</b>`);
-  if (doneThisWeek.length === 0) {
-    lines.push("<i>No tasks completed this week yet.</i>");
-  } else {
+  // Issue #210: an empty week block is omitted entirely rather than
+  // rendered with a placeholder sentence — boilerplate no longer sits above
+  // the section people act on.
+  if (doneThisWeek.length > 0) {
+    lines.push("", `✅ <b>Done this week (${thisWeekLabel})</b>`);
     for (const t of doneThisWeek) lines.push(`▸ ${esc(t.title)} (@${esc(t.assigneeUsername)})`);
   }
 
-  lines.push("", `🗓️ <b>Done last week (${lastWeekLabel})</b>`);
-  if (doneLastWeek.length === 0) {
-    lines.push("<i>Nothing completed last week.</i>");
-  } else {
+  if (doneLastWeek.length > 0) {
+    lines.push("", `🗓️ <b>Done last week (${lastWeekLabel})</b>`);
     for (const t of doneLastWeek) lines.push(`▸ ${esc(t.title)} (@${esc(t.assigneeUsername)})`);
   }
-
-  lines.push(...renderReviewQueueHtml(report.tasks));
 
   if (opts.quote) {
     lines.push("", opts.quote);

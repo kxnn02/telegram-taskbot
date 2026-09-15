@@ -294,8 +294,8 @@ describe("BOT_COMMANDS / HANDLED_COMMANDS", () => {
   });
 });
 
-describe("/start (issue #124 stage S3: a pure alias for /help)", () => {
-  it("registers the sender and sends byte-identical output to /help — no role question, no hello, no group check", async () => {
+describe("/start (issue #211: a real onboarding message, not a /help alias)", () => {
+  it("registers the sender and sends formatStart's output, not formatHelp's", async () => {
     const roster = new Roster([]);
     const testBot = makeTestBot(roster);
     const userId = nextUserId();
@@ -303,8 +303,9 @@ describe("/start (issue #124 stage S3: a pure alias for /help)", () => {
     await testBot.bot.handleUpdate(messageUpdate(userId, "newbie", userId, "/start"));
 
     const text = lastReplyText(testBot.calls);
-    const { formatHelp } = await import("./format.js");
-    expect(text).toBe(formatHelp("TestBot"));
+    const { formatStart, formatHelp } = await import("./format.js");
+    expect(text).toBe(formatStart("TestBot"));
+    expect(text).not.toBe(formatHelp("TestBot"));
     expect(text.toLowerCase()).not.toContain("intern");
     expect(text.toLowerCase()).not.toContain("higher-up");
     expect(await testBot.registrations.findUsername(userId)).toBe("newbie");
@@ -375,6 +376,33 @@ describe("auto-registration (ADR-0013) — every surviving command works for a n
     expect(text).toContain("@freshuser");
   });
 
+  it("assigns to someone else and DMs them through the due-date renderer and the task-ref renderer (issue #203)", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const bobId = nextUserId();
+    await testBot.bot.handleUpdate(messageUpdate(bobId, "bob", bobId, "/help"));
+
+    const creatorId = nextUserId();
+    await testBot.bot.handleUpdate(
+      messageUpdate(
+        creatorId,
+        "creator",
+        creatorId,
+        "/addtask Write the report @bob by 2026-09-18",
+      ),
+    );
+
+    // Fixed test time is 2026-09-05T02:00:00Z (2026-09-05 10:00 Manila); the
+    // task, id 1, is the first one created in this test.
+    expect(lastReplyTextIn(testBot.calls, bobId)).toBe(
+      "You've been assigned Task <code>T-001</code>: \"Write the report\" — due Friday, September 18. Send /done T-001 when you're ready for review.",
+    );
+    const bobCalls = testBot.calls.filter(
+      (c) => c.method === "sendMessage" && c.payload.chat_id === bobId,
+    );
+    expect(bobCalls.at(-1)?.payload.parse_mode).toBe("HTML");
+  });
+
   it("/done, /complete, /completed, /update all work for a never-before-seen assignee", async () => {
     const roster = new Roster([]);
     const testBot = makeTestBot(roster);
@@ -426,6 +454,19 @@ describe("/addtask bare command (no wizard, #106, Devie's block per issue #124 s
     expect(text).toBe(ADDTASK_USAGE);
     expect(call.payload.parse_mode).toBe("HTML");
   });
+
+  it("a mention with no title also gets the rendered usage block, not raw markup (issue #202)", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/addtask @dale"));
+
+    const { ADDTASK_USAGE } = await import("./addTaskParse.js");
+    const call = lastCall(testBot.calls, "sendMessage")!;
+    expect(call.payload.text).toBe(ADDTASK_USAGE);
+    expect(call.payload.parse_mode).toBe("HTML");
+  });
 });
 
 describe("removed commands get Telegram's default unknown-command fallback, not a stack trace", () => {
@@ -455,7 +496,7 @@ describe("removed commands get Telegram's default unknown-command fallback, not 
     await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/roster"));
 
     const call = lastCall(testBot.calls, "sendMessage")!;
-    expect(call.payload.text).toBe("❓ Unknown command. Try /help to see what's available.");
+    expect(call.payload.text).toBe("❌ Unknown command. Try /help to see what's available.");
     expect(call.payload.parse_mode).toBe("HTML");
   });
 });
@@ -616,7 +657,7 @@ describe("paged /tasks (issue #103 items 1 and 2)", () => {
 
     await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/tasks cohort-9"));
     expect(lastCall(testBot.calls, "sendMessage")!.payload.text).toBe(
-      "📋 <b>Tasks — cohort-9</b>\n\n<i>No active tasks for this filter.</i>",
+      "📋 <b>Tasks — cohort-9</b>\n\n<i>No open tasks for this filter.</i>",
     );
   });
 
@@ -638,6 +679,37 @@ describe("paged /tasks (issue #103 items 1 and 2)", () => {
     expect(allReplyTexts(testBot.calls).join("")).not.toContain("Secret task");
   });
 
+  it("paging onto a member with enough tasks to exceed Telegram's limit renders the page instead of doing nothing (issue #202)", async () => {
+    const roster = new Roster([
+      { username: "alice", cohortId: COHORT },
+      { username: "bob", cohortId: COHORT },
+    ]);
+    const testBot = makeTestBot(roster);
+    const caller = { username: "alice", cohortId: COHORT };
+    for (let i = 0; i < 100; i++) {
+      const created = await testBot.service.assignTask(caller, {
+        assigneeUsername: "bob",
+        title: `A fairly long task title for entry number ${i} so the page grows large`,
+        dueDate: "2026-09-10",
+      });
+      if (!created.ok) throw new Error("setup failed");
+    }
+    const userId = nextUserId();
+
+    // Page 0 is alice's (empty) page; Next (page 1) is bob's long page.
+    await testBot.bot.handleUpdate(callbackUpdate(userId, "alice", userId, "tasks|all|1", 777));
+
+    const sendOrEdit = testBot.calls.filter(
+      (c) => c.method === "sendMessage" || c.method === "editMessageText",
+    );
+    expect(sendOrEdit.length).toBeGreaterThan(0);
+    for (const call of sendOrEdit) {
+      const text = call.payload.text as string;
+      expect(text.length).toBeLessThanOrEqual(4000);
+    }
+    expect(sendOrEdit.some((c) => (c.payload.text as string).includes("@bob"))).toBe(true);
+  });
+
   it("ignores a malformed tasks callback but still answers it", async () => {
     const testBot = threeMemberBot();
     const userId = nextUserId();
@@ -650,6 +722,33 @@ describe("paged /tasks (issue #103 items 1 and 2)", () => {
 });
 
 describe("standup filters (issue #103 item 3)", () => {
+  // Issue #209 (spec #201): the on-demand `/standup` reply now unifies onto
+  // the same markup send path as the scheduled push card and `/tasks`,
+  // instead of the plain-text send this used to be.
+  it("/standup is sent with parse_mode HTML, matching the scheduled card", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/standup"));
+
+    const call = lastCall(testBot.calls, "sendMessage")!;
+    expect(call.payload.parse_mode).toBe("HTML");
+  });
+
+  it("a standup filter edit is also sent with parse_mode HTML", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      callbackUpdate(userId, "alice", userId, "standup|backlog|0", 888),
+    );
+
+    const edit = lastCall(testBot.calls, "editMessageText")!;
+    expect(edit.payload.parse_mode).toBe("HTML");
+  });
+
   it("/standup sends the overview with Devie's five filter buttons", async () => {
     const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
     const testBot = makeTestBot(roster);
@@ -741,6 +840,28 @@ describe("standup filters (issue #103 item 3)", () => {
     expect(edit.payload.text).toContain("📦 Backlog (1)");
     expect(edit.payload.text).toContain("Parked idea");
     expect(keyboardOf(edit).inline_keyboard[0]!.map((b) => b.text)).toContain("· Backlog (1)");
+  });
+
+  it("tapping Overview after another filter restores the card with the original cert tip, not a re-selected one (issue #202)", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/standup"));
+    const originalText = lastCall(testBot.calls, "sendMessage")!.payload.text as string;
+    const originalTip = originalText.split("🎓 CCA-F Cert Tip")[1];
+    expect(originalTip).toBeDefined();
+
+    await testBot.bot.handleUpdate(
+      callbackUpdate(userId, "alice", userId, "standup|backlog|0", 888),
+    );
+    await testBot.bot.handleUpdate(
+      callbackUpdate(userId, "alice", userId, "standup|overview|0", 888),
+    );
+
+    const restored = lastCall(testBot.calls, "editMessageText")!.payload.text as string;
+    expect(restored).toContain("🎓 CCA-F Cert Tip");
+    expect(restored.split("🎓 CCA-F Cert Tip")[1]).toEqual(originalTip);
   });
 
   it("ignores an unknown standup filter but still answers the callback", async () => {
@@ -991,7 +1112,7 @@ describe("keyword task lookup for /done, /complete, /update (issue #124 stage S1
     expect(secondTask.value.status).not.toBe("in_review");
   });
 
-  it("a numeric miss replies 'no active task found' and never falls through to keyword search", async () => {
+  it("a numeric miss replies 'no open task found' and never falls through to keyword search", async () => {
     const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
     const testBot = makeTestBot(roster);
     await seedTask(testBot, "999");
@@ -999,7 +1120,7 @@ describe("keyword task lookup for /done, /complete, /update (issue #124 stage S1
 
     await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/done 999"));
 
-    expect(lastReplyText(testBot.calls)).toContain("No active task found");
+    expect(lastReplyText(testBot.calls)).toContain("No open task found");
   });
 
   it("/done t21,t22 (comma bulk) still works", async () => {
@@ -1063,7 +1184,7 @@ describe("Devie's batch reply shape (issue #124 stage S3)", () => {
     expect(call.payload.parse_mode).toBe("HTML");
     const text = call.payload.text as string;
     expect(text).toContain("👀 <b>Moved 1 task to In Review.</b>");
-    expect(text).toContain(`<code>T-${String(id).padStart(3, "0")}</code> Fix the login bug → <b>in review</b>`);
+    expect(text).toContain(`<code>T-${String(id).padStart(3, "0")}</code> Fix the login bug`);
     expect(text).toContain("⚠️ <b>Skipped 1 item:</b>");
     expect(text).toContain("t999");
   });
@@ -1103,7 +1224,7 @@ describe("Devie's batch reply shape (issue #124 stage S3)", () => {
 
     const call = lastCall(testBot.calls, "sendMessage")!;
     const text = call.payload.text as string;
-    expect(text).toContain("✅ <b>Updated 2 tasks.</b>");
+    expect(text).toContain("✅ <b>Updated 2 tasks to done.</b>");
     expect(text).toContain("  🔗 https://example.com/pr/1");
   });
 
@@ -1841,5 +1962,130 @@ describe("CreatedBot shape", () => {
     const roster = new Roster([]);
     const testBot = makeTestBot(roster);
     expect((testBot as unknown as Record<string, unknown>).wizards).toBeUndefined();
+  });
+});
+
+// Issue #208: one failure-marker rule, one warning-marker rule, and no
+// prefix left unmarked or carrying anything else.
+describe("issue #208 — one error-prefix rule and one empty-state shape", () => {
+  function editedMessageUpdate(userId: number, username: string, chatId: number, text: string): Update {
+    return {
+      update_id: updateIdSeq++,
+      edited_message: {
+        message_id: messageIdSeq++,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: chatId, type: "private" },
+        from: { id: userId, is_bot: false, first_name: "Test", username },
+        text,
+      },
+    } as Update;
+  }
+
+  it("the no-username reply carries the shared failure marker", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(noUsernameMessageUpdate(userId, userId, "/start"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/^❌ /);
+  });
+
+  it("an unrecognized status word on /update carries the failure marker", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const created = await testBot.service.assignTask(
+      { username: "alice", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Some task", dueDate: "2026-09-10" },
+    );
+    if (!created.ok) throw new Error("setup failed");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, `/update ${created.value.id} zzznotastatus`),
+    );
+
+    expect(lastReplyText(testBot.calls)).toMatch(/^❌ /);
+    expect(lastReplyText(testBot.calls)).toContain("don't recognize");
+  });
+
+  it("the /update <ref> inreview rejection carries the failure marker", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const created = await testBot.service.assignTask(
+      { username: "alice", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Some task", dueDate: "2026-09-10" },
+    );
+    if (!created.ok) throw new Error("setup failed");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, `/update ${created.value.id} inreview`),
+    );
+
+    expect(lastReplyText(testBot.calls)).toMatch(/^❌ /);
+  });
+
+  it("the roster-miss reply carries the failure marker and always names a next step, even with no spelling suggestion", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster, COHORT);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, "/addtask Fix the login page @zzzznobodyclose"),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/^❌ /);
+    // No roster member is anywhere close to "zzzznobodyclose", so there's no
+    // spelling suggestion — the reply must still name a next step.
+    expect(text.toLowerCase()).toMatch(/message me|try again|check|roster/);
+  });
+
+  it("the DM-only 'not sure what you're asking' fallback carries the failure marker", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "just chatting, not a command"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/^❌ /);
+  });
+
+  it("editing a handled command is refused with the failure marker", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(editedMessageUpdate(userId, "alice", userId, "/help"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/^❌ /);
+  });
+
+  it("a created task whose assignee hasn't registered yet appends the warning marker, not 'Heads-up:'", async () => {
+    const roster = new Roster([
+      { username: "alice", cohortId: COHORT },
+      { username: "bob", cohortId: COHORT },
+    ]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, "/addtask Fix the login page @bob"),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("⚠️ @bob hasn't messaged me yet, so I couldn't notify them.");
+    expect(text).not.toContain("Heads-up:");
+  });
+
+  it("UNKNOWN_COMMAND_REPLY dispatched for an unrecognized slash command carries the failure marker", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/nosuchcommand"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/^❌ /);
   });
 });

@@ -132,23 +132,23 @@ describe("buildTasksPage — the filter row (issue #103 items 1 and 2)", () => {
 });
 
 describe("buildTasksPage — empty and no-task cases", () => {
-  it("no pages at all gets Devie's no-active-tasks text and only a filter row", () => {
+  it("no pages at all gets the shared no-open-tasks text and only a filter row", () => {
     const { text, keyboard } = buildTasksPage([], 0, "all", [COHORT]);
-    expect(text).toBe("📋 <b>Tasks</b>\n\n<i>No active tasks for this filter.</i>");
+    expect(text).toBe("📋 <b>Tasks</b>\n\n<i>No open tasks for this filter.</i>");
     expect(keyboard.inline_keyboard).toHaveLength(1);
   });
 
   it("names the active role filter in the empty text", () => {
     const { text } = buildTasksPage([], 0, COHORT, [COHORT]);
     expect(text).toBe(
-      `📋 <b>Tasks — ${COHORT}</b>\n\n<i>No active tasks for this filter.</i>`,
+      `📋 <b>Tasks — ${COHORT}</b>\n\n<i>No open tasks for this filter.</i>`,
     );
   });
 
-  it("a member whose page holds no tasks still renders, with Devie's per-page empty line", () => {
+  it("a member whose page holds no tasks still renders, with the shared per-page empty line", () => {
     const { text } = buildTasksPage([page("alice")], 0, "all", [COHORT]);
     expect(text).toContain("👤 <b>@alice</b>");
-    expect(text).toContain("<i>No active tasks.</i>");
+    expect(text).toContain("<i>No open tasks.</i>");
   });
 });
 
@@ -183,7 +183,7 @@ describe("buildTasksPage — status sections", () => {
     );
     expect(text).toContain("📝 <i>To Do</i>");
     expect(text).not.toContain("📦 <i>Backlog</i>");
-    expect(text).not.toContain("<i>No active tasks.</i>");
+    expect(text).not.toContain("<i>No open tasks.</i>");
   });
 
   it("never renders a Done section — Devie's list is non-done only", () => {
@@ -194,7 +194,7 @@ describe("buildTasksPage — status sections", () => {
       [COHORT],
     );
     expect(text).not.toContain("Done");
-    expect(text).toContain("<i>No active tasks.</i>");
+    expect(text).toContain("<i>No open tasks.</i>");
   });
 });
 
@@ -307,10 +307,13 @@ describe("fetchTaskPages (issue #103 items 1 and 2)", () => {
     await seed(service, "bob", "Bob's task");
     await seed(service, "alice", "Alice's task");
 
-    const { pages } = await fetchTaskPages(service, carla, roster, {
-      roleFilter: "all",
-      assigneeFilter: null,
-    });
+    const { pages } = await fetchTaskPages(
+      service,
+      carla,
+      roster,
+      { roleFilter: "all", assigneeFilter: null },
+      NOW,
+    );
     expect(pages.map((p) => p.name)).toEqual(["alice", "bob"]);
     expect(pages.every((p) => p.role === COHORT)).toBe(true);
   });
@@ -323,10 +326,13 @@ describe("fetchTaskPages (issue #103 items 1 and 2)", () => {
     await seed(service, "alice", "Finished", "done");
     await seed(service, "carla", "Still going", "in_progress");
 
-    const { pages } = await fetchTaskPages(service, carla, roster, {
-      roleFilter: "all",
-      assigneeFilter: null,
-    });
+    const { pages } = await fetchTaskPages(
+      service,
+      carla,
+      roster,
+      { roleFilter: "all", assigneeFilter: null },
+      NOW,
+    );
     expect(pages.map((p) => p.name)).toEqual(["carla"]);
   });
 
@@ -334,10 +340,13 @@ describe("fetchTaskPages (issue #103 items 1 and 2)", () => {
     const { service, roster } = makeService();
     const id = await seed(service, "carla", "Fix the login bug", "in_progress", "urgent");
 
-    const { pages } = await fetchTaskPages(service, carla, roster, {
-      roleFilter: "all",
-      assigneeFilter: null,
-    });
+    const { pages } = await fetchTaskPages(
+      service,
+      carla,
+      roster,
+      { roleFilter: "all", assigneeFilter: null },
+      NOW,
+    );
     expect(pages[0]!.byStatus.in_progress).toEqual([
       `  • <code>T-${String(id).padStart(3, "0")}</code> Fix the login bug`,
     ]);
@@ -347,11 +356,52 @@ describe("fetchTaskPages (issue #103 items 1 and 2)", () => {
     const { service, roster } = makeService();
     await seed(service, "carla", "Fix <b>bold</b> & co");
 
-    const { pages } = await fetchTaskPages(service, carla, roster, {
-      roleFilter: "all",
-      assigneeFilter: null,
-    });
+    const { pages } = await fetchTaskPages(
+      service,
+      carla,
+      roster,
+      { roleFilter: "all", assigneeFilter: null },
+      NOW,
+    );
     expect(pages[0]!.byStatus.todo![0]).toContain("Fix &lt;b&gt;bold&lt;/b&gt; &amp; co");
+  });
+
+  it("an overdue task gains a short rider naming how late it is (issue #204)", async () => {
+    const { service, roster } = makeService();
+    const created = await service.assignTask(carla, {
+      assigneeUsername: "carla",
+      title: "Fix the login bug",
+      dueDate: "2026-08-27", // 5 days before NOW (2026-09-01)
+    });
+    if (!created.ok) throw new Error("setup failed: " + created.error);
+
+    const { pages } = await fetchTaskPages(
+      service,
+      carla,
+      roster,
+      { roleFilter: "all", assigneeFilter: null },
+      NOW,
+    );
+    const line = pages[0]!.byStatus.todo![0]!;
+    expect(line).toBe(
+      `  • <code>T-${String(created.value.id).padStart(3, "0")}</code> Fix the login bug · <i>5 days ago</i>`,
+    );
+  });
+
+  it("an on-time task gains no rider at all", async () => {
+    const { service, roster } = makeService();
+    const id = await seed(service, "carla", "Fix the login bug"); // due 2026-09-05, after NOW
+
+    const { pages } = await fetchTaskPages(
+      service,
+      carla,
+      roster,
+      { roleFilter: "all", assigneeFilter: null },
+      NOW,
+    );
+    expect(pages[0]!.byStatus.todo![0]).toBe(
+      `  • <code>T-${String(id).padStart(3, "0")}</code> Fix the login bug`,
+    );
   });
 
   it("hangs the latest link and the latest note off the task line", async () => {
@@ -360,13 +410,33 @@ describe("fetchTaskPages (issue #103 items 1 and 2)", () => {
     await service.addNote(carla, id, "https://example.com/pr/1");
     await service.addNote(carla, id, "ready for QA");
 
-    const { pages } = await fetchTaskPages(service, carla, roster, {
-      roleFilter: "all",
-      assigneeFilter: null,
-    });
+    const { pages } = await fetchTaskPages(
+      service,
+      carla,
+      roster,
+      { roleFilter: "all", assigneeFilter: null },
+      NOW,
+    );
     const line = pages[0]!.byStatus.todo![0]!;
     expect(line).toContain('· <a href="https://example.com/pr/1">🔗</a>');
     expect(line).toContain("\n    📝 ready for QA");
+  });
+
+  it("escapes a note URL containing a double quote so the link markup survives", async () => {
+    const { service, roster } = makeService();
+    const id = await seed(service, "carla", "Fix the login bug");
+    await service.addNote(carla, id, 'https://example.com/pr/1?x="y"');
+
+    const { pages } = await fetchTaskPages(
+      service,
+      carla,
+      roster,
+      { roleFilter: "all", assigneeFilter: null },
+      NOW,
+    );
+    const line = pages[0]!.byStatus.todo![0]!;
+    expect(line).toContain('<a href="https://example.com/pr/1?x=&quot;y&quot;">🔗</a>');
+    expect(line).not.toContain('x="y"');
   });
 
   it("filters to one member with an assignee filter", async () => {
@@ -377,10 +447,13 @@ describe("fetchTaskPages (issue #103 items 1 and 2)", () => {
     await seed(service, "alice", "Alice's task");
     await seed(service, "carla", "Carla's task");
 
-    const { pages } = await fetchTaskPages(service, carla, roster, {
-      roleFilter: "all",
-      assigneeFilter: "alice",
-    });
+    const { pages } = await fetchTaskPages(
+      service,
+      carla,
+      roster,
+      { roleFilter: "all", assigneeFilter: "alice" },
+      NOW,
+    );
     expect(pages.map((p) => p.name)).toEqual(["alice"]);
   });
 
@@ -388,10 +461,13 @@ describe("fetchTaskPages (issue #103 items 1 and 2)", () => {
     const { service, roster } = makeService();
     await seed(service, "carla", "Carla's task");
 
-    const { pages } = await fetchTaskPages(service, carla, roster, {
-      roleFilter: COHORT,
-      assigneeFilter: null,
-    });
+    const { pages } = await fetchTaskPages(
+      service,
+      carla,
+      roster,
+      { roleFilter: COHORT, assigneeFilter: null },
+      NOW,
+    );
     expect(pages.map((p) => p.name)).toEqual(["carla"]);
   });
 
@@ -399,10 +475,13 @@ describe("fetchTaskPages (issue #103 items 1 and 2)", () => {
     const { service, roster } = makeService();
     await seed(service, "carla", "Carla's task");
 
-    const { pages } = await fetchTaskPages(service, carla, roster, {
-      roleFilter: "cohort-9",
-      assigneeFilter: null,
-    });
+    const { pages } = await fetchTaskPages(
+      service,
+      carla,
+      roster,
+      { roleFilter: "cohort-9", assigneeFilter: null },
+      NOW,
+    );
     expect(pages).toEqual([]);
   });
 
@@ -413,10 +492,13 @@ describe("fetchTaskPages (issue #103 items 1 and 2)", () => {
     ]);
     await seed(service, "carla", "Carla's task");
 
-    const { allRoles } = await fetchTaskPages(service, carla, roster, {
-      roleFilter: "all",
-      assigneeFilter: null,
-    });
+    const { allRoles } = await fetchTaskPages(
+      service,
+      carla,
+      roster,
+      { roleFilter: "all", assigneeFilter: null },
+      NOW,
+    );
     expect(allRoles).toEqual([COHORT]);
   });
 
@@ -431,10 +513,13 @@ describe("fetchTaskPages (issue #103 items 1 and 2)", () => {
     );
     await seed(service, "carla", "Carla's task");
 
-    const { pages } = await fetchTaskPages(service, carla, roster, {
-      roleFilter: "all",
-      assigneeFilter: null,
-    });
+    const { pages } = await fetchTaskPages(
+      service,
+      carla,
+      roster,
+      { roleFilter: "all", assigneeFilter: null },
+      NOW,
+    );
     expect(pages.map((p) => p.name)).toEqual(["carla"]);
     expect(JSON.stringify(pages)).not.toContain("Secret task");
   });
@@ -446,10 +531,13 @@ describe("fetchTaskPages (issue #103 items 1 and 2)", () => {
     await seed(service, "carla", "Medium one", "todo", "medium");
     await seed(service, "carla", "High one", "todo", "high");
 
-    const { pages } = await fetchTaskPages(service, carla, roster, {
-      roleFilter: "all",
-      assigneeFilter: null,
-    });
+    const { pages } = await fetchTaskPages(
+      service,
+      carla,
+      roster,
+      { roleFilter: "all", assigneeFilter: null },
+      NOW,
+    );
     const titles = pages[0]!.byStatus.todo!.map((l) => l.replace(/^.*<\/code> /, ""));
     expect(titles).toEqual(["Urgent one", "High one", "Medium one", "Low one"]);
   });

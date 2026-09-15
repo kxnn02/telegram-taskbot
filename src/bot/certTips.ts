@@ -260,17 +260,22 @@ export function selectRandomCertTip(
   return pool[index]!;
 }
 
-/** Mirrors `renderMemberBucketsHtml`/`renderMemberBucketsPlain` (this
- * codebase's existing HTML/plain rendering-pair pattern, `standupBuckets.ts`):
- * one function per surface, both driven off the same data. */
+/**
+ * Looks up a previously-selected tip by id (issue #202) — used to carry the
+ * *same* tip through a standup card's Overview re-render rather than
+ * calling `selectRandomCertTip` again, which would silently swap it.
+ * `undefined` when the id doesn't match any tip (defensive: it never should
+ * once written by `selectRandomCertTip`).
+ */
+export function getCertTipById(id: number): CertTip | undefined {
+  return CERT_TIPS.find((t) => t.id === id);
+}
+
+/** Both standup surfaces render the tip through `renderCertTipHtml` since
+ * #209 put them on one send path; the plain-text twin went with them. */
 const CERT_TIP_HEADER = "🎓 CCA-F Cert Tip";
 
 export function renderCertTipHtml(tip: CertTip): string {
   const bodyPart = tip.body ? ` ${esc(tip.body)}` : "";
   return `${CERT_TIP_HEADER}\n💡 <b>${esc(tip.lead)}</b>${bodyPart}\n— <i>${esc(tip.from)}</i>`;
-}
-
-export function renderCertTipPlain(tip: CertTip): string {
-  const bodyPart = tip.body ? ` ${tip.body}` : "";
-  return `${CERT_TIP_HEADER}\n💡 ${tip.lead}${bodyPart}\n— ${tip.from}`;
 }

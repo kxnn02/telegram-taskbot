@@ -120,48 +120,67 @@ describe("resolveBulkAssignee", () => {
 // that sends HTML and emoji outside of `/tasks`/`/standup` (#103's existing
 // carve-out for a carbon-copied Devie view).
 describe("formatBulkCreateReply", () => {
+  const now = new Date("2026-09-01T00:00:00Z");
   const baseTask: BulkCreatedTask = {
     id: 1,
     title: "Summarize recommendations into slides",
     assigneeUsername: "dale",
     dueDate: "2026-09-05",
+    priority: "medium",
   };
 
   it("uses singular wording for exactly one task", () => {
-    const reply = formatBulkCreateReply([baseTask]);
+    const reply = formatBulkCreateReply([baseTask], now);
     expect(reply).toContain("<b>1 task added.</b>");
   });
 
   it("uses plural wording for more than one task", () => {
-    const reply = formatBulkCreateReply([baseTask, { ...baseTask, id: 2 }]);
+    const reply = formatBulkCreateReply([baseTask, { ...baseTask, id: 2 }], now);
     expect(reply).toContain("<b>2 tasks added.</b>");
   });
 
   it("groups tasks under their assignee, one @-header per group", () => {
-    const reply = formatBulkCreateReply([
-      baseTask,
-      { ...baseTask, id: 2, assigneeUsername: "kien", title: "Review PR" },
-    ]);
+    const reply = formatBulkCreateReply(
+      [baseTask, { ...baseTask, id: 2, assigneeUsername: "kien", title: "Review PR" }],
+      now,
+    );
     expect(reply).toContain("@dale");
     expect(reply).toContain("@kien");
   });
 
-  it("renders each task's ref, title, and due date", () => {
-    const reply = formatBulkCreateReply([baseTask]);
-    expect(reply).toContain("T-001");
+  it("renders each task's ref through the shared monospace renderer, title, and due date in short form", () => {
+    const reply = formatBulkCreateReply([baseTask], now);
+    expect(reply).toContain("<code>T-001</code>");
     expect(reply).toContain("Summarize recommendations into slides");
     expect(reply).toContain("Sep 5");
   });
 
+  it("renders no due-date suffix when the task carries no due date", () => {
+    const reply = formatBulkCreateReply([{ ...baseTask, dueDate: undefined }], now);
+    expect(reply).not.toContain(" · ");
+  });
+
+  it("renders a shared priority badge for urgent, and no dot for medium/low", () => {
+    const urgent = formatBulkCreateReply([{ ...baseTask, priority: "urgent" }], now);
+    expect(urgent).toContain("🔴");
+    const medium = formatBulkCreateReply([{ ...baseTask, priority: "medium" }], now);
+    expect(medium).not.toContain("🔴");
+    expect(medium).not.toContain("🟠");
+  });
+
   it("flags a task whose description carries a URL", () => {
-    const reply = formatBulkCreateReply([
-      { ...baseTask, description: "https://docs.google.com/doc" },
-    ]);
+    const reply = formatBulkCreateReply(
+      [{ ...baseTask, description: "https://docs.google.com/doc" }],
+      now,
+    );
     expect(reply).toContain("🔗");
   });
 
   it("does not flag a task with no URL in its description", () => {
-    const reply = formatBulkCreateReply([{ ...baseTask, description: "just some notes" }]);
+    const reply = formatBulkCreateReply(
+      [{ ...baseTask, description: "just some notes" }],
+      now,
+    );
     expect(reply).not.toContain("🔗");
   });
 });

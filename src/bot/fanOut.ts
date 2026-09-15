@@ -53,7 +53,7 @@ export function formatAllAssignedReply(members: string[], title: string): string
   return (
     `✅ Task assigned to all <b>${members.length}</b> member${members.length !== 1 ? "s" : ""}\n\n` +
     `📝 <b>${esc(title)}</b>\n${memberList(members)}\n\n` +
-    `<i>Refresh the dashboard to see the changes.</i>`
+    `<i>Refresh the dashboard to see your changes.</i>`
   );
 }
 
@@ -69,7 +69,7 @@ export function formatRoleAssignedReply(
   return (
     `✅ Task assigned to <b>${members.length}</b> member${members.length !== 1 ? "s" : ""} in <b>${esc(roleSlug)}</b> · <code>${formatTaskRefEllipsis(firstCreatedId)}</code>\n\n` +
     `📝 <b>${esc(title)}</b>\n${memberList(members)}\n\n` +
-    `<i>Refresh the dashboard to see the changes.</i>`
+    `<i>Refresh the dashboard to see your changes.</i>`
   );
 }
 

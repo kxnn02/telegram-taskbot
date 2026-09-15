@@ -68,6 +68,11 @@ describe("formatAllAssignedReply", () => {
     expect(reply).toContain("• @alice");
     expect(reply).toContain("• @bob");
   });
+
+  it("issue #207: the dashboard-refresh sentence matches every other formatter's wording", () => {
+    const reply = formatAllAssignedReply(["alice"], "Fix the login page");
+    expect(reply).toContain("<i>Refresh the dashboard to see your changes.</i>");
+  });
 });
 
 describe("NO_MEMBERS_TO_ASSIGN_REPLY", () => {
@@ -89,5 +94,10 @@ describe("formatRoleAssignedReply", () => {
   it("uses singular wording for exactly one member", () => {
     const reply = formatRoleAssignedReply(["alice"], "Fix the login page", "cohort-5", 7);
     expect(reply).toContain("✅ Task assigned to <b>1</b> member in <b>cohort-5</b>");
+  });
+
+  it("issue #207: the dashboard-refresh sentence matches every other formatter's wording", () => {
+    const reply = formatRoleAssignedReply(["alice"], "Fix the login page", "cohort-5", 7);
+    expect(reply).toContain("<i>Refresh the dashboard to see your changes.</i>");
   });
 });

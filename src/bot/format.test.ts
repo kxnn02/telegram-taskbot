@@ -11,18 +11,19 @@ import {
   formatCompleteOk,
   formatMyTasks,
   formatTaskAdded,
-  formatTaskLine,
   formatTaskDetail,
   formatTaskNotFound,
   formatUpdateOk,
   formatWeeklyCompleted,
   formatHelp,
+  formatStart,
   statusLabel,
   UNKNOWN_COMMAND_REPLY,
   DONE_USAGE,
   COMPLETE_USAGE,
   UPDATE_USAGE,
 } from "./format.js";
+import { formatTaskRefHtml } from "./taskRef.js";
 
 function task(overrides: Partial<TaskWithFlags> = {}): TaskWithFlags {
   return {
@@ -57,9 +58,9 @@ describe("formatTaskNotFound (issue #124 stage S1, Devie route.ts:952/1012)", ()
   it("renders the not-found card, HTML-escaping the input", () => {
     expect(formatTaskNotFound(`login <script>`)).toBe(
       [
-        `❌ No active task found matching <b>"login &lt;script&gt;"</b>.`,
+        `❌ No open task found matching <b>"login &lt;script&gt;"</b>.`,
         "",
-        "<i>Use /tasks to see all active tasks.</i>",
+        "<i>Use /tasks to see all open tasks.</i>",
       ].join("\n"),
     );
   });
@@ -91,49 +92,135 @@ describe("formatAmbiguousTaskMatches (issue #124 stage S1, Devie route.ts:957-96
   });
 });
 
-describe("formatMyTasks pagination", () => {
+describe("formatMyTasks (issue #206 — shared vocabulary, short form)", () => {
+  const NOW = new Date("2026-08-25T02:00:00.000Z");
+
+  it("says no open tasks when the list is empty, per the shared empty-state shape", () => {
+    expect(formatMyTasks([], NOW)).toBe("No open tasks.");
+  });
+
+  it("renders the shared identifier, priority badge, status and short due-date form, HTML-escaping the title", () => {
+    const text = formatMyTasks(
+      [
+        task({
+          id: 1,
+          title: "<b>fix</b> & ship",
+          dueDate: "2026-09-01",
+          status: "todo",
+          previousStatus: null,
+          blockedReason: null,
+          priority: "high",
+        }),
+      ],
+      NOW,
+    );
+    expect(text).toBe(
+      [
+        "Your open tasks:",
+        "• <code>T-001</code> 🟠 &lt;b&gt;fix&lt;/b&gt; &amp; ship — 📝 To Do (due Tue, Sep 1)",
+      ].join("\n"),
+    );
+  });
+
   it("shows no pagination footer when everything fits on one page", () => {
-    const text = formatMyTasks(tasks(10));
+    const text = formatMyTasks(tasks(10), NOW);
     expect(text).not.toMatch(/Page \d+ of \d+/);
-    expect(text).toContain("#1");
-    expect(text).toContain("#10");
+    expect(text).toContain("T-001");
+    expect(text).toContain("T-010");
   });
 
   it("splits into pages of 10 once the list exceeds the page size", () => {
-    const text = formatMyTasks(tasks(11));
+    const text = formatMyTasks(tasks(11), NOW);
     expect(text).toContain("Page 1 of 2");
-    expect(text).toContain("/mytasks 2");
-    expect(text).toContain("#1");
-    expect(text).toContain("#10");
-    expect(text).not.toContain("#11");
+    expect(text).toContain("/tasks");
+    expect(text).not.toContain("/mytasks");
+    expect(text).toContain("T-001");
+    expect(text).toContain("T-010");
+    expect(text).not.toContain("T-011");
   });
 
   it("returns the requested page's slice", () => {
-    const text = formatMyTasks(tasks(11), 2);
+    const text = formatMyTasks(tasks(11), NOW, 2);
     expect(text).toContain("Page 2 of 2");
-    expect(text).toContain("#11");
-    expect(text).not.toContain("#10");
+    expect(text).toContain("T-011");
+    expect(text).not.toContain("T-010");
   });
 });
 
-describe("formatDeadlines", () => {
-  it("says nothing is due when the list is empty", () => {
-    expect(formatDeadlines([])).toBe("Nothing due in the next 7 days.");
+describe("formatDeadlines (issue #205 — grouped by day, shared vocabulary)", () => {
+  const NOW = new Date("2026-08-25T02:00:00.000Z");
+
+  it("says no deadlines are due when the list is empty, per the shared empty-state shape", () => {
+    expect(formatDeadlines([], NOW)).toBe("No deadlines due in the next 7 days.");
   });
 
-  it("lists upcoming tasks with assignee, soonest first as given", () => {
-    const text = formatDeadlines([
-      task({ id: 1, title: "sooner", dueDate: "2026-09-01", status: "todo", previousStatus: null, blockedReason: null }),
-      task({ id: 2, title: "later", dueDate: "2026-09-05", status: "todo", previousStatus: null, blockedReason: null }),
-    ]);
-    expect(text.indexOf("#1")).toBeLessThan(text.indexOf("#2"));
-    expect(text).toContain("@alice");
+  it("HTML-escapes the title", () => {
+    const text = formatDeadlines(
+      [
+        task({
+          id: 1,
+          title: "<b>fix</b> & ship",
+          dueDate: "2026-09-01",
+          status: "todo",
+          previousStatus: null,
+          blockedReason: null,
+        }),
+      ],
+      NOW,
+    );
+    expect(text).toContain("&lt;b&gt;fix&lt;/b&gt; &amp; ship");
+    expect(text).not.toContain("<b>fix</b>");
+  });
+
+  it("groups tasks under one day heading each, in the order given, with bare handles and no per-line status", () => {
+    const text = formatDeadlines(
+      [
+        task({
+          id: 1,
+          title: "sooner",
+          dueDate: "2026-09-01",
+          status: "todo",
+          previousStatus: null,
+          blockedReason: null,
+          priority: "high",
+        }),
+        task({
+          id: 2,
+          title: "also sooner",
+          dueDate: "2026-09-01",
+          status: "in_progress",
+          previousStatus: null,
+          blockedReason: null,
+        }),
+        task({
+          id: 3,
+          title: "later",
+          dueDate: "2026-09-05",
+          status: "todo",
+          previousStatus: null,
+          blockedReason: null,
+        }),
+      ],
+      NOW,
+    );
+    expect(text).toBe(
+      [
+        "Due in the next 7 days:",
+        "",
+        "<b>Tue, Sep 1</b>",
+        "• <code>T-001</code> 🟠 sooner — @alice",
+        "• <code>T-002</code> also sooner — @alice",
+        "",
+        "<b>Sat, Sep 5</b>",
+        "• <code>T-003</code> later — @alice",
+      ].join("\n"),
+    );
   });
 });
 
 describe("formatApproved", () => {
-  it("says nothing when the list is empty", () => {
-    expect(formatApproved([])).toBe("Nothing was approved in the past week.");
+  it("says no tasks were approved when the list is empty, per the shared empty-state shape", () => {
+    expect(formatApproved([])).toBe("No tasks approved in the past week.");
   });
 
   it("lists approved tasks with assignee", () => {
@@ -150,11 +237,11 @@ describe("formatApproved", () => {
 });
 
 describe("formatWeeklyCompleted (#143 D4b / #147)", () => {
-  it("says nothing was completed when the list is empty", () => {
-    expect(formatWeeklyCompleted([])).toBe("Nothing completed this week.");
+  it("says nothing was completed when the list is empty, per the shared empty-state shape", () => {
+    expect(formatWeeklyCompleted([])).toBe("No tasks completed this week.");
   });
 
-  it("heads the list with a count and lists each task with its marked-done date", () => {
+  it("heads the list with a count and lists each task with the shared identifier and its marked-done date", () => {
     const text = formatWeeklyCompleted([
       task({
         id: 1,
@@ -176,9 +263,26 @@ describe("formatWeeklyCompleted (#143 D4b / #147)", () => {
     expect(text).toBe(
       [
         "✅ Completed this week (2):",
-        "- #1 Get design from Zendy (marked done Sep 3)",
-        "- #4 Draft welcome email copy (marked done Sep 5)",
+        "• <code>T-001</code> Get design from Zendy (marked done Sep 3)",
+        "• <code>T-004</code> Draft welcome email copy (marked done Sep 5)",
       ].join("\n"),
+    );
+  });
+
+  it("HTML-escapes the title and renders the priority badge", () => {
+    const text = formatWeeklyCompleted([
+      task({
+        id: 2,
+        title: "<b>fix</b> & ship",
+        status: "done",
+        previousStatus: null,
+        blockedReason: null,
+        priority: "urgent",
+        updatedAt: "2026-09-03T00:00:00.000Z",
+      }),
+    ]);
+    expect(text).toBe(
+      "✅ Completed this week (1):\n• <code>T-002</code> 🔴 &lt;b&gt;fix&lt;/b&gt; &amp; ship (marked done Sep 3)",
     );
   });
 
@@ -195,9 +299,9 @@ describe("statusLabel", () => {
   it("maps every stored status to #27's display label", () => {
     const expected: Record<TaskStatus, string> = {
       backlog: "Backlog",
-      todo: "To do",
-      in_progress: "In progress",
-      in_review: "In review",
+      todo: "To Do",
+      in_progress: "In Progress",
+      in_review: "In Review",
       blocked: "Blocked",
       done: "Done",
     };
@@ -207,42 +311,16 @@ describe("statusLabel", () => {
   });
 });
 
-describe("formatTaskLine", () => {
-  it("renders the display label, not the raw snake_case status", () => {
-    const text = formatTaskLine(task({ status: "in_progress", previousStatus: null, blockedReason: null }));
-    expect(text).toContain("In progress");
-    expect(text).not.toContain("in_progress");
-  });
-
-  it("renders an urgent task's priority badge with a leading space (issue #101)", () => {
-    const text = formatTaskLine(task({ priority: "urgent" }));
-    expect(text).toContain("#1 🔴");
-  });
-
-  it("renders a high task's priority badge with a leading space", () => {
-    const text = formatTaskLine(task({ priority: "high" }));
-    expect(text).toContain("#1 🟠");
-  });
-
-  it("renders nothing at all for medium priority — absence is the case to assert", () => {
-    const text = formatTaskLine(task({ priority: "medium" }));
-    expect(text).not.toContain("🔴");
-    expect(text).not.toContain("🟠");
-    expect(text).toContain(`#1 ${task().title}`);
-  });
-
-  it("renders nothing at all for low priority", () => {
-    const text = formatTaskLine(task({ priority: "low" }));
-    expect(text).not.toContain("🔴");
-    expect(text).not.toContain("🟠");
-    expect(text).toContain(`#1 ${task().title}`);
-  });
-});
-
 describe("formatTaskDetail", () => {
   it("renders the display label in the Status line", () => {
     const text = formatTaskDetail(task({ status: "in_review", previousStatus: null, blockedReason: null }));
-    expect(text).toContain("Status: In review");
+    expect(text).toContain("Status: In Review");
+  });
+
+  it("says no notes when there are none, per the shared empty-state shape (no trailing 'yet')", () => {
+    const text = formatTaskDetail(task({ notes: [] }));
+    expect(text).toContain("No notes.");
+    expect(text).not.toContain("No notes yet.");
   });
 
   describe("note timestamps are Manila-resolved, not raw UTC ISO instants (H12)", () => {
@@ -296,14 +374,11 @@ describe("formatHelp (issue #124 stage S3: Devie's HTML card, verbatim)", () => 
     '@-mention the bot, "add task &lt;title&gt; @username" — tag + assign in one go',
     "",
     "✏️ <b>Update</b>",
-    "/done &lt;ref&gt; — mark as in review (e.g. /done 23)",
-    "/done t21,t22,t23 — bulk mark as in review",
-    "/complete &lt;ref&gt; (or /completed &lt;ref&gt;) — mark as done (e.g. /complete 23)",
-    "/complete t21,t22,t23 — bulk mark as done",
+    "/done &lt;ref&gt; — mark as in review (e.g. /done <code>T-023</code>)",
+    "/complete &lt;ref&gt; (or /completed &lt;ref&gt;) — mark as done",
     "/update &lt;ref&gt; &lt;status&gt; — single update",
-    "/update t21,t22,t23 done — bulk shared status",
-    "/update t21 done, t22 review, t23 inprogress — bulk mixed status",
-    "/update, one ref+status per line — bulk multiline",
+    "/done, /complete and /update all accept a comma- or newline-separated list of refs for bulk updates (e.g. /done <code>T-021</code>,<code>T-022</code>,<code>T-023</code>)",
+    "⚠️ /done marks In Review, not Done — use /complete to mark a task actually finished.",
     "",
     "<i>Statuses: backlog · todo · in progress · in review · blocked · done</i>",
   ].join("\n");
@@ -328,6 +403,46 @@ describe("formatHelp (issue #124 stage S3: Devie's HTML card, verbatim)", () => 
 
   it("has no access-control wording of any kind", () => {
     const text = formatHelp("Test Bot").toLowerCase();
+    expect(text).not.toContain("higher-up");
+    expect(text).not.toContain("intern");
+    expect(text).not.toContain("restricted");
+  });
+});
+
+describe("formatStart (issue #211: a real onboarding message, not a /help alias)", () => {
+  it("differs from formatHelp", () => {
+    expect(formatStart("Test Bot")).not.toBe(formatHelp("Test Bot"));
+  });
+
+  it("names three commands a new member can try immediately", () => {
+    const text = formatStart("Test Bot");
+    expect(text).toContain("/addtask");
+    expect(text).toContain("/tasks");
+    expect(text).toContain("/done");
+  });
+
+  it("states that the bot DMs on assignment and posts a standup each morning", () => {
+    const text = formatStart("Test Bot").toLowerCase();
+    expect(text).toContain("dm");
+    expect(text).toContain("assign");
+    expect(text).toContain("standup");
+    expect(text).toContain("morning");
+  });
+
+  it("points at /help for the full list", () => {
+    expect(formatStart("Test Bot")).toContain("/help");
+  });
+
+  it("uses the shared monospace task-identifier vocabulary in its example", () => {
+    expect(formatStart("Test Bot")).toContain("<code>T-023</code>");
+  });
+
+  it("interpolates whatever display name it's given, unescaped", () => {
+    expect(formatStart("Cohort 5 Bot")).toContain("Cohort 5 Bot");
+  });
+
+  it("has no access-control wording of any kind", () => {
+    const text = formatStart("Test Bot").toLowerCase();
     expect(text).not.toContain("higher-up");
     expect(text).not.toContain("intern");
     expect(text).not.toContain("restricted");
@@ -412,55 +527,114 @@ describe("chunkMessage (issue #55/F8)", () => {
       }
     }
   });
+
+  it("never splits inside a <blockquote> region, even when the region alone forces an over-limit chunk (issue #210)", () => {
+    // A standup-shaped card: some lines above the review queue, then a
+    // <blockquote> region long enough on its own to cross the limit,
+    // followed by more content after it closes.
+    const before = Array.from({ length: 20 }, (_, i) => `Above line ${i} padded out a bit`).join("\n");
+    const blockquoteBody = Array.from({ length: 150 }, (_, i) => `Queued task ${i} padded out to add length`).join("\n");
+    const after = Array.from({ length: 20 }, (_, i) => `Below line ${i} padded out a bit`).join("\n");
+    const text = [before, "<blockquote>", blockquoteBody, "</blockquote>", after].join("\n");
+
+    const chunks = chunkMessage(text, 4000);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      const opens = (chunk.match(/<blockquote>/g) ?? []).length;
+      const closes = (chunk.match(/<\/blockquote>/g) ?? []).length;
+      expect(opens).toBe(closes);
+    }
+    expect(chunks.join("\n")).toBe(text);
+  });
+
+  it("ordinary text with no <blockquote> still chunks exactly as before (no behavior change for a normal cohort)", () => {
+    const lines = Array.from({ length: 500 }, (_, i) => `Task #${i} — some line of text to pad it out`);
+    const text = lines.join("\n");
+
+    const chunks = chunkMessage(text, 4000);
+
+    expect(chunks.join("\n")).toBe(text);
+    for (const chunk of chunks) {
+      expect(chunk.length).toBeLessThanOrEqual(4000);
+    }
+  });
 });
 
-describe("formatTaskAdded (issue #124 stage S3, Devie's taskAddedMsg)", () => {
+describe("formatTaskAdded (issue #207 — shared vocabulary: shared identifier renderer, shared priority table, long-form due date)", () => {
+  const NOW = new Date("2026-09-09T12:00:00Z");
+
   it("renders every line when assignee and due date are both present", () => {
-    const text = formatTaskAdded({
-      id: 42,
-      title: "Fix the login bug",
-      priority: "medium",
-      assigneeUsername: "dale",
-      dueDate: "2026-09-09",
-    });
+    const text = formatTaskAdded(
+      {
+        id: 42,
+        title: "Fix the login bug",
+        priority: "medium",
+        assigneeUsername: "dale",
+        dueDate: "2026-09-10",
+      },
+      NOW,
+    );
     expect(text).toBe(
       [
-        "🔵 Task added · Medium:",
+        "Task added · Medium:",
         "<b>Fix the login bug</b>",
         "👤 Assigned to: @dale",
-        "📅 Due: Sep 9, 2026",
-        "🪪 ID: <code>t42</code>",
+        "📅 Due: tomorrow",
+        `🪪 ID: ${formatTaskRefHtml(42)}`,
         "",
         "<i>Refresh the dashboard to see your changes.</i>",
       ].join("\n"),
     );
   });
 
-  it("maps every priority to Devie's PRIORITY_EMOJI dot, not this repo's PRIORITY_BADGE", () => {
-    expect(formatTaskAdded({ id: 1, title: "t", priority: "urgent" })).toContain("🔴 Task added · Urgent:");
-    expect(formatTaskAdded({ id: 1, title: "t", priority: "high" })).toContain("🟠 Task added · High:");
-    expect(formatTaskAdded({ id: 1, title: "t", priority: "medium" })).toContain("🔵 Task added · Medium:");
-    expect(formatTaskAdded({ id: 1, title: "t", priority: "low" })).toContain("⚪ Task added · Low:");
+  it("renders the due date in long form (weekday + month name), via the shared renderer", () => {
+    const text = formatTaskAdded(
+      { id: 1, title: "t", priority: "medium", dueDate: "2026-09-25" },
+      NOW,
+    );
+    expect(text).toContain("📅 Due: Friday, September 25");
+  });
+
+  it("follows the shared priority table: urgent and high carry a dot, medium and low carry none", () => {
+    expect(formatTaskAdded({ id: 1, title: "t", priority: "urgent" }, NOW)).toContain(
+      "Task added 🔴 · Urgent:",
+    );
+    expect(formatTaskAdded({ id: 1, title: "t", priority: "high" }, NOW)).toContain(
+      "Task added 🟠 · High:",
+    );
+    expect(formatTaskAdded({ id: 1, title: "t", priority: "medium" }, NOW)).toContain(
+      "Task added · Medium:",
+    );
+    expect(formatTaskAdded({ id: 1, title: "t", priority: "low" }, NOW)).toContain(
+      "Task added · Low:",
+    );
   });
 
   it("omits the Assigned-to line when there is no assignee", () => {
-    const text = formatTaskAdded({ id: 1, title: "t", priority: "medium" });
+    const text = formatTaskAdded({ id: 1, title: "t", priority: "medium" }, NOW);
     expect(text).not.toContain("Assigned to");
   });
 
   it("omits the Due line when there is no due date", () => {
-    const text = formatTaskAdded({ id: 1, title: "t", priority: "medium", assigneeUsername: "dale" });
+    const text = formatTaskAdded(
+      { id: 1, title: "t", priority: "medium", assigneeUsername: "dale" },
+      NOW,
+    );
     expect(text).not.toContain("📅 Due");
   });
 
-  it("always renders the lowercase t{id} form, never the T-001 form", () => {
-    const text = formatTaskAdded({ id: 7, title: "t", priority: "medium" });
-    expect(text).toContain("<code>t7</code>");
-    expect(text).not.toContain("T-007");
+  it("renders the identifier through the shared monospace T-0xx renderer, not the lowercase t{id} form", () => {
+    const text = formatTaskAdded({ id: 7, title: "t", priority: "medium" }, NOW);
+    expect(text).toContain(formatTaskRefHtml(7));
+    expect(text).not.toContain("<code>t7</code>");
   });
 
   it("HTML-escapes a title containing < > &", () => {
-    const text = formatTaskAdded({ id: 1, title: "Fix <script> & \"bug\"", priority: "medium" });
+    const text = formatTaskAdded(
+      { id: 1, title: "Fix <script> & \"bug\"", priority: "medium" },
+      NOW,
+    );
     expect(text).toContain("<b>Fix &lt;script&gt; &amp; \"bug\"</b>");
   });
 });
@@ -498,6 +672,12 @@ describe("formatDoneOk / formatCompleteOk / formatUpdateOk (issue #124 stage S3)
     expect(formatCompleteOk(title)).toContain("&lt;b&gt;x&lt;/b&gt; &amp; y");
     expect(formatUpdateOk(title, "done")).toContain("&lt;b&gt;x&lt;/b&gt; &amp; y");
   });
+
+  it("issue #207: /done and /update <ref> review produce an identical confirmation sentence and leading emoji", () => {
+    expect(formatUpdateOk("Fix the login bug", "in_review")).toBe(
+      formatDoneOk("Fix the login bug"),
+    );
+  });
 });
 
 describe("formatBatchReply (issue #124 stage S3)", () => {
@@ -510,7 +690,7 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
     expect(text).toBe(
       [
         "👀 <b>Moved 1 task to In Review.</b>",
-        "• 👀 <code>T-001</code> Fix the login bug → <b>in review</b>",
+        "• 👀 <code>T-001</code> Fix the login bug",
       ].join("\n"),
     );
   });
@@ -536,7 +716,7 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
     expect(text).toBe(
       [
         "✅ <b>Marked 1 task as done.</b>",
-        "• ✅ <code>T-001</code> Fix the login bug → <b>done</b>",
+        "• ✅ <code>T-001</code> Fix the login bug",
       ].join("\n"),
     );
   });
@@ -557,8 +737,8 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
     );
     expect(text).toBe(
       [
-        "✅ <b>Updated 1 task.</b>",
-        "• ✅ <code>T-001</code> Fix the login bug → <b>done</b>",
+        "✅ <b>Updated 1 task to done.</b>",
+        "• ✅ <code>T-001</code> Fix the login bug",
         "  🔗 https://example.com/pr/1",
         "  📝 ready for QA",
       ].join("\n"),
@@ -582,8 +762,8 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
     );
     expect(text).toBe(
       [
-        "✅ <b>Updated 1 task.</b>",
-        "• ✅ <code>T-001</code> Fix the login bug → <b>done</b>",
+        "✅ <b>Updated 1 task to done.</b>",
+        "• ✅ <code>T-001</code> Fix the login bug",
         "",
         "⚠️ <b>Skipped 1 item:</b>",
         "• <b>t22</b> → no active task found",
@@ -628,6 +808,83 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
     expect(text).toContain("&lt;x&gt;");
     expect(text).toContain("a &amp; b");
   });
+
+  it("issue #207: a single-status bulk reply omits the trailing status on each line", () => {
+    const text = formatBatchReply(
+      "update",
+      [
+        { ref: "T-001", title: "First", statusWord: "done", emoji: "✅" },
+        { ref: "T-002", title: "Second", statusWord: "done", emoji: "✅" },
+      ],
+      [],
+    );
+    expect(text).toBe(
+      [
+        "✅ <b>Updated 2 tasks to done.</b>",
+        "• ✅ <code>T-001</code> First",
+        "• ✅ <code>T-002</code> Second",
+      ].join("\n"),
+    );
+  });
+
+  it("issue #207: a mixed-status bulk update retains the trailing status on every line", () => {
+    const text = formatBatchReply(
+      "update",
+      [
+        { ref: "T-001", title: "First", statusWord: "done", emoji: "✅" },
+        { ref: "T-002", title: "Second", statusWord: "in review", emoji: "👀" },
+      ],
+      [],
+    );
+    expect(text).toBe(
+      [
+        "✅ <b>Updated 2 tasks.</b>",
+        "• ✅ <code>T-001</code> First → <b>done</b>",
+        "• 👀 <code>T-002</code> Second → <b>in review</b>",
+      ].join("\n"),
+    );
+  });
+
+  it("issue #207: /done and /complete batches (always single-status) also omit the trailing status", () => {
+    const text = formatBatchReply(
+      "done",
+      [
+        { ref: "T-001", title: "First", statusWord: "in review", emoji: "👀" },
+        { ref: "T-002", title: "Second", statusWord: "in review", emoji: "👀" },
+      ],
+      [],
+    );
+    expect(text).toBe(
+      [
+        "👀 <b>Moved 2 tasks to In Review.</b>",
+        "• 👀 <code>T-001</code> First",
+        "• 👀 <code>T-002</code> Second",
+      ].join("\n"),
+    );
+  });
+
+  it("issue #207: a single-success update batch still retains a link/note rider suffix", () => {
+    const text = formatBatchReply(
+      "update",
+      [
+        {
+          ref: "T-001",
+          title: "Fix the login bug",
+          statusWord: "done",
+          emoji: "✅",
+          metaSuffix: "\n  🔗 https://example.com/pr/1",
+        },
+      ],
+      [],
+    );
+    expect(text).toBe(
+      [
+        "✅ <b>Updated 1 task to done.</b>",
+        "• ✅ <code>T-001</code> Fix the login bug",
+        "  🔗 https://example.com/pr/1",
+      ].join("\n"),
+    );
+  });
 });
 
 describe("usage blocks (issue #124 stage S3, Devie's verbatim text)", () => {
@@ -662,20 +919,20 @@ describe("usage blocks (issue #124 stage S3, Devie's verbatim text)", () => {
     );
   });
 
-  it("UPDATE_USAGE, this repo's longer variant with the link:/note: rider example", () => {
+  it("UPDATE_USAGE, trimmed (issue #208) with the multiline bulk example labelled as one message", () => {
     expect(UPDATE_USAGE).toBe(
       [
         "Usage: <code>/update &lt;number or keyword&gt; &lt;status&gt;</code>",
         "",
         "<b>Examples:</b>",
         "/update 23 in review",
-        "/update login blocked",
         "/update t21,t22,t23 done",
-        "/update t21 done, t22 review, t23 inprogress",
-        "/update t31 done",
+        "/update T-001 done link:https://github.com/... note: ready for QA",
+        "",
+        "<b>Or, one status per line in a single message:</b>",
+        "t31 done",
         "t30 done",
         "t32 done",
-        "/update T-001 done link:https://github.com/... note: ready for QA",
         "",
         "<i>Valid statuses: backlog · todo · in progress · in review · blocked · done</i>",
         "<i>Optionally append <code>link:&lt;url&gt;</code> and/or <code>note:&lt;text&gt;</code>.</i>",
@@ -684,8 +941,8 @@ describe("usage blocks (issue #124 stage S3, Devie's verbatim text)", () => {
   });
 });
 
-describe("UNKNOWN_COMMAND_REPLY (issue #124 stage S3)", () => {
-  it("matches Devie's exact wording", () => {
-    expect(UNKNOWN_COMMAND_REPLY).toBe("❓ Unknown command. Try /help to see what's available.");
+describe("UNKNOWN_COMMAND_REPLY (issue #208 — shared failure marker)", () => {
+  it("carries the shared failure marker, not the removed ❓ prefix", () => {
+    expect(UNKNOWN_COMMAND_REPLY).toBe("❌ Unknown command. Try /help to see what's available.");
   });
 });

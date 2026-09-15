@@ -1,8 +1,11 @@
-import { DateTime } from "luxon";
 import { normalizeUsername } from "../domain/roster.js";
 import { BULLET_LINE_RE } from "../nlp/parse.js";
-import { formatTaskRef } from "./taskRef.js";
+import { formatTaskRefHtml } from "./taskRef.js";
 import { esc } from "./html.js";
+import { PRIORITY_BADGE } from "./format.js";
+import { renderDueDate } from "../date/renderDueDate.js";
+import { isPastDate } from "../domain/overdue.js";
+import type { TaskPriority } from "../domain/types.js";
 
 /**
  * The paste-in bulk task capture path (issue #104), ported from DevieBot's
@@ -66,7 +69,8 @@ export interface BulkCreatedTask {
   id: number;
   title: string;
   assigneeUsername: string;
-  dueDate: string;
+  dueDate: string | null | undefined;
+  priority: TaskPriority;
   description?: string;
 }
 
@@ -77,8 +81,19 @@ const URL_RE = /https?:\/\//;
  * and emoji copied verbatim (issue #104 carbon-copy rule 1) — sent with
  * `parse_mode: "HTML"`, the same carve-out `/tasks`/`/standup` already use
  * (#103) for a view copied straight from Devie.
+ *
+ * Issue #212 (spec #201's shared vocabulary, missed by #207): the
+ * identifier renders through the shared monospace `formatTaskRefHtml`, the
+ * due date through the shared `renderDueDate` in short form (this is a list
+ * of several tasks, not a single-task message like `/addtask`'s own
+ * confirmation), and the priority carries the shared `PRIORITY_BADGE` dot.
+ * A freshly bulk-created task is never `done`, so "overdue" here is just
+ * "due date already in the past" (`isPastDate`) — there's no stored status
+ * to consult. `dueDate` can be absent; `renderDueDate` already renders that
+ * as an empty string, so the ` · ` separator is only added when there's
+ * something to show.
  */
-export function formatBulkCreateReply(tasks: BulkCreatedTask[]): string {
+export function formatBulkCreateReply(tasks: BulkCreatedTask[], now: Date): string {
   const grouped = new Map<string, BulkCreatedTask[]>();
   for (const task of tasks) {
     const group = grouped.get(task.assigneeUsername) ?? [];
@@ -91,10 +106,11 @@ export function formatBulkCreateReply(tasks: BulkCreatedTask[]): string {
     msg += `@${esc(assignee)}\n`;
     msg += group
       .map((t) => {
-        const code = formatTaskRef(t.id);
-        const due = ` · ${DateTime.fromISO(t.dueDate).toFormat("LLL d")}`;
+        const overdue = t.dueDate ? isPastDate(t.dueDate, now) : false;
+        const dueText = renderDueDate(t.dueDate, now, overdue, "short");
+        const due = dueText ? ` · ${dueText}` : "";
         const hasLink = t.description && URL_RE.test(t.description) ? " 🔗" : "";
-        return `• <code>${code}</code> ${esc(t.title)}${due}${hasLink}`;
+        return `• ${formatTaskRefHtml(t.id)}${PRIORITY_BADGE[t.priority]} ${esc(t.title)}${due}${hasLink}`;
       })
       .join("\n");
     msg += "\n\n";

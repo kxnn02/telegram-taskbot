@@ -3,6 +3,9 @@ import type { OverdueNotificationStorePort } from "../storage/overdueNotificatio
 import type { Roster } from "../domain/roster.js";
 import type { Caller } from "../domain/types.js";
 import type { TaskService } from "../service/taskService.js";
+import { renderDueDate } from "../date/renderDueDate.js";
+import { formatTaskRef, formatTaskRefHtml } from "../bot/taskRef.js";
+import { esc } from "../bot/html.js";
 import { DigestBuilder } from "./digestBuilder.js";
 import { findNewOverdueCrossings } from "./overdueCrossing.js";
 import { findDueTomorrow } from "./dueSoonReminder.js";
@@ -56,11 +59,12 @@ export async function sendDM(
   registrations: RegistrationStorePort,
   username: string,
   text: string,
+  options?: { parse_mode?: "HTML" },
 ): Promise<boolean> {
   try {
     const telegramId = await registrations.findTelegramId(username);
     if (!telegramId) return false;
-    await bot.api.sendMessage(telegramId, text);
+    await bot.api.sendMessage(telegramId, text, options);
     return true;
   } catch {
     // Best-effort — never let a notification failure propagate.
@@ -84,9 +88,11 @@ export async function runOverdueCrossingCheck(
   );
   for (const task of crossings) {
     try {
-      const text = `Task ${task.id} ("${task.title}") is now overdue — it was due ${task.dueDate} and hasn't been submitted.`;
-      const assigneeSent = await sendDM(deps.bot, deps.registrations, task.assigneeUsername, text);
-      const assignerSent = await sendDM(deps.bot, deps.registrations, task.assignedByUsername, text);
+      const rendered = renderDueDate(task.dueDate, now, true, "long");
+      const text = `Task ${formatTaskRefHtml(task.id)} ("${esc(task.title)}") is now overdue — it was due ${rendered} and hasn't been submitted.`;
+      const opts = { parse_mode: "HTML" as const };
+      const assigneeSent = await sendDM(deps.bot, deps.registrations, task.assigneeUsername, text, opts);
+      const assignerSent = await sendDM(deps.bot, deps.registrations, task.assignedByUsername, text, opts);
       if (!assigneeSent && !assignerSent) {
         // Nobody could be reached — leave the task unmarked so it's
         // re-checked (and, once someone registers, finally notified) on
@@ -122,11 +128,13 @@ export async function runDueSoonReminderCheck(
   const dueSoon = findDueTomorrow(tasks, now);
   for (const task of dueSoon) {
     try {
+      const ref = formatTaskRef(task.id);
       await sendDM(
         deps.bot,
         deps.registrations,
         task.assigneeUsername,
-        `Reminder: Task ${task.id} ("${task.title}") is due tomorrow (${task.dueDate}).`,
+        `Task ${formatTaskRefHtml(task.id)} ("${esc(task.title)}") is due tomorrow. Send /done ${ref} when you're ready for review.`,
+        { parse_mode: "HTML" },
       );
     } catch (err) {
       console.error(`runDueSoonReminderCheck: task ${task.id} failed`, err);
@@ -144,17 +152,19 @@ export async function runDailyDigest(
   deps: SchedulerDeps,
   digestBuilder: DigestBuilder,
   cohortId: string,
+  now: Date = new Date(),
 ): Promise<void> {
   const entries = deps.roster.all().filter((e) => e.cohortId === cohortId);
   for (const entry of entries) {
     try {
-      const text = await digestBuilder.ownTasksDigest(entry.username, cohortId);
+      const text = await digestBuilder.ownTasksDigest(entry.username, cohortId, now);
       if (text) {
         await sendDM(
           deps.bot,
           deps.registrations,
           entry.username,
           `Daily digest:\n\n${text}`,
+          { parse_mode: "HTML" },
         );
       }
     } catch (err) {
@@ -188,6 +198,7 @@ export async function runWeeklyDigest(
           deps.registrations,
           entry.username,
           `Weekly digest:\n\n${text}`,
+          { parse_mode: "HTML" },
         );
       }
     } catch (err) {

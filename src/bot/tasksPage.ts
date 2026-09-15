@@ -1,8 +1,10 @@
 import type { TaskService, TaskWithFlags } from "../service/taskService.js";
-import type { Caller, Note, TaskPriority } from "../domain/types.js";
+import type { Caller, Note, TaskPriority, TaskStatus } from "../domain/types.js";
 import { normalizeUsername, type Roster } from "../domain/roster.js";
 import { formatTaskRef } from "./taskRef.js";
-import { esc } from "./html.js";
+import { esc, escAttr } from "./html.js";
+import { statusLabel, STATUS_EMOJI } from "./format.js";
+import { renderDueDate } from "../date/renderDueDate.js";
 
 /**
  * DevieBot's paged `/tasks` browser (issue #103 items 1 and 2), ported from
@@ -26,26 +28,12 @@ import { esc } from "./html.js";
  * comparison on data that is already cohort-scoped.
  */
 
-/** Devie's own status vocabulary for this view (`route.ts:117-124`) —
- * Title Case (`To Do`, `In Progress`), unlike `format.ts`'s sentence-case
- * `STATUS_LABELS`, and with no `done` entry at all because the list is
- * non-done only. Kept local rather than folded into `format.ts` so the
- * carbon copy can't drift when this repo's own labels change. */
-const TASK_STATUS_EMOJI: Record<string, string> = {
-  backlog: "📦",
-  todo: "📝",
-  in_progress: "🔄",
-  in_review: "👀",
-  blocked: "🚧",
-};
-const TASK_STATUS_LABEL: Record<string, string> = {
-  backlog: "Backlog",
-  todo: "To Do",
-  in_progress: "In Progress",
-  in_review: "In Review",
-  blocked: "Blocked",
-};
-const TASK_STATUS_ORDER = ["blocked", "in_progress", "in_review", "todo", "backlog"];
+/** Issue #204 (spec #201): the private status-label/emoji table this view
+ * used to keep (Title Case, no `done` entry) is gone — labels and emoji now
+ * come from `format.ts`'s shared `statusLabel`/`STATUS_EMOJI`, the same ones
+ * every other formatter uses. The grouping order itself is unchanged and
+ * stays local: it's a view-specific ordering, not a vocabulary table. */
+const TASK_STATUS_ORDER: TaskStatus[] = ["blocked", "in_progress", "in_review", "todo", "backlog"];
 
 /** Devie sorts its task query by `priority` descending, which on a Postgres
  * text column is alphabetical (`urgent`, `medium`, `low`, `high`) rather
@@ -146,13 +134,20 @@ function commentMeta(notes: Note[]): { link?: string; note?: string } {
   return current;
 }
 
-/** One task's line on a page (`route.ts:211-217`). */
-function taskLine(task: TaskWithFlags): string {
+/** One task's line on a page (`route.ts:211-217`). Issue #204: an overdue
+ * task gains a short rider naming how late it is, via the shared date
+ * renderer's short form (this view lists several tasks at once). An
+ * on-time task gets no rider at all — the rider's mere presence is the
+ * signal that something has slipped, per spec #201. */
+function taskLine(task: TaskWithFlags, now: Date): string {
   const code = formatTaskRef(task.id);
   const { link, note } = commentMeta(task.notes);
-  const linkPart = link ? ` · <a href="${link}">🔗</a>` : "";
+  const overduePart = task.overdue
+    ? ` · <i>${renderDueDate(task.dueDate, now, task.overdue, "short")}</i>`
+    : "";
+  const linkPart = link ? ` · <a href="${escAttr(link)}">🔗</a>` : "";
   const notePart = note ? `\n    📝 ${esc(note)}` : "";
-  return `  • <code>${code}</code> ${esc(task.title)}${linkPart}${notePart}`;
+  return `  • <code>${code}</code> ${esc(task.title)}${overduePart}${linkPart}${notePart}`;
 }
 
 /**
@@ -171,6 +166,7 @@ export async function fetchTaskPages(
   caller: Caller,
   roster: Roster,
   filter: TasksFilter,
+  now: Date,
 ): Promise<{ pages: TaskPage[]; allRoles: string[] }> {
   const all = await service.listAllTasks(caller);
   const tasks = (all.ok ? all.value : [])
@@ -201,7 +197,7 @@ export async function fetchTaskPages(
 
     if (!memberBuckets.has(name)) memberBuckets.set(name, { name, role, byStatus: {} });
     const bucket = memberBuckets.get(name)!;
-    (bucket.byStatus[task.status] ??= []).push(taskLine(task));
+    (bucket.byStatus[task.status] ??= []).push(taskLine(task, now));
   }
 
   const pages = [...memberBuckets.values()].sort((a, b) => {
@@ -238,7 +234,7 @@ export function buildTasksPage(
 
   if (total === 0) {
     return {
-      text: `📋 <b>Tasks${roleDisplay}</b>\n\n<i>No active tasks for this filter.</i>`,
+      text: `📋 <b>Tasks${roleDisplay}</b>\n\n<i>No open tasks for this filter.</i>`,
       keyboard: { inline_keyboard: [filterRow] },
     };
   }
@@ -255,10 +251,10 @@ export function buildTasksPage(
     const lines = current.byStatus[status];
     if (!lines?.length) continue;
     hasAny = true;
-    text += `\n${TASK_STATUS_EMOJI[status]} <i>${TASK_STATUS_LABEL[status]}</i>\n`;
+    text += `\n${STATUS_EMOJI[status]} <i>${statusLabel(status)}</i>\n`;
     text += lines.join("\n") + "\n";
   }
-  if (!hasAny) text += "\n<i>No active tasks.</i>\n";
+  if (!hasAny) text += "\n<i>No open tasks.</i>\n";
 
   const keyboard: InlineKeyboardMarkup = { inline_keyboard: [filterRow] };
   if (total > 1) {

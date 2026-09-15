@@ -26,3 +26,12 @@ export function parseTaskRef(raw: string): number | undefined {
 export function formatTaskRef(id: number): string {
   return `T-${String(id).padStart(3, "0")}`;
 }
+
+/** Issue #203 (spec #201's "one task-identifier renderer, monospace") — the
+ * `T-023` form wrapped for Telegram's HTML parse mode, so a member can tap
+ * to copy it on mobile. The only place permitted to render a task
+ * identifier for display; `formatTaskRef` above stays plain for callers
+ * that build their own markup (e.g. slash-command examples). */
+export function formatTaskRefHtml(id: number): string {
+  return `<code>${formatTaskRef(id)}</code>`;
+}
