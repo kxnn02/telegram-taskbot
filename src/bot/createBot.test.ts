@@ -496,7 +496,7 @@ describe("removed commands get Telegram's default unknown-command fallback, not 
     await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/roster"));
 
     const call = lastCall(testBot.calls, "sendMessage")!;
-    expect(call.payload.text).toBe("❓ Unknown command. Try /help to see what's available.");
+    expect(call.payload.text).toBe("❌ Unknown command. Try /help to see what's available.");
     expect(call.payload.parse_mode).toBe("HTML");
   });
 });
@@ -1085,7 +1085,7 @@ describe("keyword task lookup for /done, /complete, /update (issue #124 stage S1
     expect(secondTask.value.status).not.toBe("in_review");
   });
 
-  it("a numeric miss replies 'no active task found' and never falls through to keyword search", async () => {
+  it("a numeric miss replies 'no open task found' and never falls through to keyword search", async () => {
     const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
     const testBot = makeTestBot(roster);
     await seedTask(testBot, "999");
@@ -1093,7 +1093,7 @@ describe("keyword task lookup for /done, /complete, /update (issue #124 stage S1
 
     await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/done 999"));
 
-    expect(lastReplyText(testBot.calls)).toContain("No active task found");
+    expect(lastReplyText(testBot.calls)).toContain("No open task found");
   });
 
   it("/done t21,t22 (comma bulk) still works", async () => {
@@ -1935,5 +1935,130 @@ describe("CreatedBot shape", () => {
     const roster = new Roster([]);
     const testBot = makeTestBot(roster);
     expect((testBot as unknown as Record<string, unknown>).wizards).toBeUndefined();
+  });
+});
+
+// Issue #208: one failure-marker rule, one warning-marker rule, and no
+// prefix left unmarked or carrying anything else.
+describe("issue #208 — one error-prefix rule and one empty-state shape", () => {
+  function editedMessageUpdate(userId: number, username: string, chatId: number, text: string): Update {
+    return {
+      update_id: updateIdSeq++,
+      edited_message: {
+        message_id: messageIdSeq++,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: chatId, type: "private" },
+        from: { id: userId, is_bot: false, first_name: "Test", username },
+        text,
+      },
+    } as Update;
+  }
+
+  it("the no-username reply carries the shared failure marker", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(noUsernameMessageUpdate(userId, userId, "/start"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/^❌ /);
+  });
+
+  it("an unrecognized status word on /update carries the failure marker", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const created = await testBot.service.assignTask(
+      { username: "alice", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Some task", dueDate: "2026-09-10" },
+    );
+    if (!created.ok) throw new Error("setup failed");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, `/update ${created.value.id} zzznotastatus`),
+    );
+
+    expect(lastReplyText(testBot.calls)).toMatch(/^❌ /);
+    expect(lastReplyText(testBot.calls)).toContain("don't recognize");
+  });
+
+  it("the /update <ref> inreview rejection carries the failure marker", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const created = await testBot.service.assignTask(
+      { username: "alice", cohortId: COHORT },
+      { assigneeUsername: "alice", title: "Some task", dueDate: "2026-09-10" },
+    );
+    if (!created.ok) throw new Error("setup failed");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, `/update ${created.value.id} inreview`),
+    );
+
+    expect(lastReplyText(testBot.calls)).toMatch(/^❌ /);
+  });
+
+  it("the roster-miss reply carries the failure marker and always names a next step, even with no spelling suggestion", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster, COHORT);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, "/addtask Fix the login page @zzzznobodyclose"),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toMatch(/^❌ /);
+    // No roster member is anywhere close to "zzzznobodyclose", so there's no
+    // spelling suggestion — the reply must still name a next step.
+    expect(text.toLowerCase()).toMatch(/message me|try again|check|roster/);
+  });
+
+  it("the DM-only 'not sure what you're asking' fallback carries the failure marker", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "just chatting, not a command"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/^❌ /);
+  });
+
+  it("editing a handled command is refused with the failure marker", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(editedMessageUpdate(userId, "alice", userId, "/help"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/^❌ /);
+  });
+
+  it("a created task whose assignee hasn't registered yet appends the warning marker, not 'Heads-up:'", async () => {
+    const roster = new Roster([
+      { username: "alice", cohortId: COHORT },
+      { username: "bob", cohortId: COHORT },
+    ]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, "/addtask Fix the login page @bob"),
+    );
+
+    const text = lastReplyText(testBot.calls);
+    expect(text).toContain("⚠️ @bob hasn't messaged me yet, so I couldn't notify them.");
+    expect(text).not.toContain("Heads-up:");
+  });
+
+  it("UNKNOWN_COMMAND_REPLY dispatched for an unrecognized slash command carries the failure marker", async () => {
+    const roster = new Roster([]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/nosuchcommand"));
+
+    expect(lastReplyText(testBot.calls)).toMatch(/^❌ /);
   });
 });

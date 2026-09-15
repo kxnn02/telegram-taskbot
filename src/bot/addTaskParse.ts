@@ -151,7 +151,7 @@ export function parseAddTaskArgs(
     const word = priorityMatch[1]!;
     priority = parsePriorityWord(word);
     if (!priority) {
-      return { error: `"${word}" isn't a priority. Use low, medium, high, or urgent.` };
+      return { error: `❌ "${word}" isn't a priority. Use low, medium, high, or urgent.` };
     }
     text = (
       text.slice(0, priorityMatch.index) +

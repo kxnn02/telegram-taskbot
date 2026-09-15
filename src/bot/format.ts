@@ -77,12 +77,14 @@ function paginationFooter(commandName: string, page: number, totalPages: number)
 }
 
 /** Devie's "no active task found" card (issue #124 stage S1,
- * `route.ts:952`/`:1012`), sent with `parse_mode: "HTML"`. */
+ * `route.ts:952`/`:1012`), sent with `parse_mode: "HTML"`. Issue #208: "active"
+ * renamed to "open" throughout, matching the vocabulary used everywhere else
+ * for a not-done task. */
 export function formatTaskNotFound(input: string): string {
   return [
-    `❌ No active task found matching <b>"${esc(input)}"</b>.`,
+    `❌ No open task found matching <b>"${esc(input)}"</b>.`,
     "",
-    "<i>Use /tasks to see all active tasks.</i>",
+    "<i>Use /tasks to see all open tasks.</i>",
   ].join("\n");
 }
 
@@ -198,7 +200,7 @@ export function formatWeeklyCompleted(tasks: TaskWithFlags[]): string {
 
 export function formatApproved(tasks: TaskWithFlags[]): string {
   if (tasks.length === 0) {
-    return "Nothing was approved in the past week.";
+    return "No tasks approved in the past week.";
   }
   return [
     "Marked done this past week:",
@@ -226,7 +228,7 @@ export function formatTaskDetail(task: TaskWithFlags): string {
 
   const notesText =
     task.notes.length === 0
-      ? "No notes yet."
+      ? "No notes."
       : task.notes
           .map((n) => `  [${formatNoteTimestamp(n.createdAt)}] @${n.authorUsername}: ${n.text}`)
           .join("\n");
@@ -550,24 +552,31 @@ export const COMPLETE_USAGE = [
 /** This repo's longer variant of Devie's `/update` usage block (issue #124
  * stage S3): includes the `link:`/`note:` rider example line and both
  * italic closing lines, since this repo carries those riders and Devie's
- * own shorter base variant doesn't. */
+ * own shorter base variant doesn't.
+ *
+ * Issue #208: trimmed down from the redundant mixed-status and single-word
+ * examples a bare `/update` used to spell out, and the newline-separated
+ * bulk example — which used to read as three separate commands — is now
+ * labelled as the one message it actually is. */
 export const UPDATE_USAGE = [
   "Usage: <code>/update &lt;number or keyword&gt; &lt;status&gt;</code>",
   "",
   "<b>Examples:</b>",
   "/update 23 in review",
-  "/update login blocked",
   "/update t21,t22,t23 done",
-  "/update t21 done, t22 review, t23 inprogress",
-  "/update t31 done",
+  "/update T-001 done link:https://github.com/... note: ready for QA",
+  "",
+  "<b>Or, one status per line in a single message:</b>",
+  "t31 done",
   "t30 done",
   "t32 done",
-  "/update T-001 done link:https://github.com/... note: ready for QA",
   "",
   "<i>Valid statuses: backlog · todo · in progress · in review · blocked · done</i>",
   "<i>Optionally append <code>link:&lt;url&gt;</code> and/or <code>note:&lt;text&gt;</code>.</i>",
 ].join("\n");
 
 /** Devie's unknown-command reply (issue #124 stage S3), sent with
- * `parse_mode: "HTML"`. Replaces this bot's old plain-text fallback. */
-export const UNKNOWN_COMMAND_REPLY = "❓ Unknown command. Try /help to see what's available.";
+ * `parse_mode: "HTML"`. Replaces this bot's old plain-text fallback. Issue
+ * #208: the `❓` prefix is replaced with the shared failure marker — nothing
+ * else prefixes an error. */
+export const UNKNOWN_COMMAND_REPLY = "❌ Unknown command. Try /help to see what's available.";

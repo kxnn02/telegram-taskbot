@@ -59,9 +59,9 @@ describe("formatTaskNotFound (issue #124 stage S1, Devie route.ts:952/1012)", ()
   it("renders the not-found card, HTML-escaping the input", () => {
     expect(formatTaskNotFound(`login <script>`)).toBe(
       [
-        `❌ No active task found matching <b>"login &lt;script&gt;"</b>.`,
+        `❌ No open task found matching <b>"login &lt;script&gt;"</b>.`,
         "",
-        "<i>Use /tasks to see all active tasks.</i>",
+        "<i>Use /tasks to see all open tasks.</i>",
       ].join("\n"),
     );
   });
@@ -220,8 +220,8 @@ describe("formatDeadlines (issue #205 — grouped by day, shared vocabulary)", (
 });
 
 describe("formatApproved", () => {
-  it("says nothing when the list is empty", () => {
-    expect(formatApproved([])).toBe("Nothing was approved in the past week.");
+  it("says no tasks were approved when the list is empty, per the shared empty-state shape", () => {
+    expect(formatApproved([])).toBe("No tasks approved in the past week.");
   });
 
   it("lists approved tasks with assignee", () => {
@@ -348,6 +348,12 @@ describe("formatTaskDetail", () => {
   it("renders the display label in the Status line", () => {
     const text = formatTaskDetail(task({ status: "in_review", previousStatus: null, blockedReason: null }));
     expect(text).toContain("Status: In Review");
+  });
+
+  it("says no notes when there are none, per the shared empty-state shape (no trailing 'yet')", () => {
+    const text = formatTaskDetail(task({ notes: [] }));
+    expect(text).toContain("No notes.");
+    expect(text).not.toContain("No notes yet.");
   });
 
   describe("note timestamps are Manila-resolved, not raw UTC ISO instants (H12)", () => {
@@ -914,20 +920,20 @@ describe("usage blocks (issue #124 stage S3, Devie's verbatim text)", () => {
     );
   });
 
-  it("UPDATE_USAGE, this repo's longer variant with the link:/note: rider example", () => {
+  it("UPDATE_USAGE, trimmed (issue #208) with the multiline bulk example labelled as one message", () => {
     expect(UPDATE_USAGE).toBe(
       [
         "Usage: <code>/update &lt;number or keyword&gt; &lt;status&gt;</code>",
         "",
         "<b>Examples:</b>",
         "/update 23 in review",
-        "/update login blocked",
         "/update t21,t22,t23 done",
-        "/update t21 done, t22 review, t23 inprogress",
-        "/update t31 done",
+        "/update T-001 done link:https://github.com/... note: ready for QA",
+        "",
+        "<b>Or, one status per line in a single message:</b>",
+        "t31 done",
         "t30 done",
         "t32 done",
-        "/update T-001 done link:https://github.com/... note: ready for QA",
         "",
         "<i>Valid statuses: backlog · todo · in progress · in review · blocked · done</i>",
         "<i>Optionally append <code>link:&lt;url&gt;</code> and/or <code>note:&lt;text&gt;</code>.</i>",
@@ -936,8 +942,8 @@ describe("usage blocks (issue #124 stage S3, Devie's verbatim text)", () => {
   });
 });
 
-describe("UNKNOWN_COMMAND_REPLY (issue #124 stage S3)", () => {
-  it("matches Devie's exact wording", () => {
-    expect(UNKNOWN_COMMAND_REPLY).toBe("❓ Unknown command. Try /help to see what's available.");
+describe("UNKNOWN_COMMAND_REPLY (issue #208 — shared failure marker)", () => {
+  it("carries the shared failure marker, not the removed ❓ prefix", () => {
+    expect(UNKNOWN_COMMAND_REPLY).toBe("❌ Unknown command. Try /help to see what's available.");
   });
 });

@@ -209,8 +209,10 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   // bot/index.ts for how production wires this to SupabaseTaskStore.
   const service = new TaskService(options.taskStore, roster, clock);
 
+  // Issue #208: one failure marker (❌), one warning marker (⚠️), nothing
+  // else prefixes an error.
   const NEEDS_USERNAME_TEXT =
-    "You'll need a Telegram username first — set one in Telegram's settings, then try again.";
+    "❌ You'll need a Telegram username first — set one in Telegram's settings, then try again.";
 
   /** Auto-registers the sender (ADR-0013 — matches Devie's `syncMember`:
    * insert on first contact, update on every later one, no gate of any
@@ -259,7 +261,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       console.error(err);
       try {
         await ctx.reply(
-          "Something went wrong on my end — that didn't go through. Try again in a moment.",
+          "❌ Something went wrong on my end — that didn't go through. Try again in a moment.",
         );
       } catch (replyErr) {
         console.error(replyErr);
@@ -394,7 +396,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       const result = await service.listDeadlines(caller);
       await replyChunked(
         ctx,
-        result.ok ? formatDeadlines(result.value, clock.now()) : result.error,
+        result.ok ? formatDeadlines(result.value, clock.now()) : `❌ ${result.error}`,
         result.ok,
       );
     }),
@@ -540,7 +542,10 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   ) {
     const result = await service.setStatus(caller, id, status);
     if (!result.ok) {
-      await ctx.reply(result.error);
+      // Issue #208: the service layer's own failure text carries no prefix
+      // (its own tests pin the bare string) — the shared failure marker is
+      // added here, where it's actually surfaced to a member.
+      await ctx.reply(`❌ ${result.error}`);
       return;
     }
     const metaSuffix = meta ? await attachUpdateMeta(caller, id, meta) : "";
@@ -620,7 +625,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
           continue;
         }
         if (lookup.kind === "none") {
-          outcomes.push({ label: `"${item.label}"`, ok: false, message: "no active task found" });
+          outcomes.push({ label: `"${item.label}"`, ok: false, message: "no open task found" });
           continue;
         }
         ref = lookup.task.id;
@@ -743,7 +748,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         const aliasStatus = parseStatusWord(statusText);
         if (!aliasStatus && isExactInreview(statusText)) {
           await ctx.reply(
-            `• <b>${item.label}</b> → invalid status <b>${statusText.trim()}</b> (use <b>review</b>)`,
+            `❌ <b>${item.label}</b> → invalid status <b>${statusText.trim()}</b> (use <b>review</b>)`,
             { parse_mode: "HTML" as const },
           );
           return;
@@ -754,7 +759,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         const status = aliasStatus ?? (await parseStatus(statusText, options.model)) ?? undefined;
         if (!status) {
           await ctx.reply(
-            `I don't recognize "${statusText.trim()}" as a status — valid ones are: ${VALID_STATUS_WORDS_TEXT}`,
+            `❌ I don't recognize "${statusText.trim()}" as a status — valid ones are: ${VALID_STATUS_WORDS_TEXT}`,
           );
           return;
         }
@@ -850,10 +855,16 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       .map((entry) => entry.username);
   }
 
+  /** Issue #208: always names a next step — a spelling suggestion when one
+   * is close enough, or (since ADR-0013's auto-registration means there's
+   * nothing to "add" — someone just has to message the bot once) a nudge to
+   * have them do that when there isn't. */
   function unknownRosterMemberReply(username: string, cohortId: string): string {
     const suggestion = suggestClosestUsername(username, memberUsernamesInCohort(cohortId));
-    const suggestionText = suggestion ? ` Did you mean @${suggestion}?` : "";
-    return `I don't see @${username} on this cohort's roster.${suggestionText}`;
+    const nextStep = suggestion
+      ? ` Did you mean @${suggestion}?`
+      : " Ask them to message me once, then try again.";
+    return `❌ I don't see @${username} on this cohort's roster.${nextStep}`;
   }
 
   /**
@@ -1031,7 +1042,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       priority,
     });
     if (!result.ok) {
-      await ctx.reply(`Couldn't create the task: ${result.error}`);
+      await ctx.reply(`❌ Couldn't create the task: ${result.error}`);
       return;
     }
     let reply = formatTaskAdded(
@@ -1059,7 +1070,9 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         { parse_mode: "HTML" },
       );
       if (!notified) {
-        reply += `\nHeads-up: @${result.value.assigneeUsername} hasn't messaged me yet, so I couldn't notify them.`;
+        // Issue #208: this is a warning, not a failure — the task was
+        // created; only the DM notification didn't go out.
+        reply += `\n⚠️ @${result.value.assigneeUsername} hasn't messaged me yet, so I couldn't notify them.`;
       }
     }
     await ctx.reply(reply, { parse_mode: "HTML" as const });
@@ -1138,7 +1151,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     // not just ones meant for it — only DMs can assume every message is
     // addressed to the bot, so only reply with the fallback there.
     if (ctx.chat.type === "private") {
-      await ctx.reply("Not sure what you're asking — try /help to see what I can do.");
+      await ctx.reply("❌ Not sure what you're asking — try /help to see what I can do.");
     }
   });
 
@@ -1155,7 +1168,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     if (isAddressedToOtherBot(text, bot.botInfo.username)) return;
     const commandName = parseCommandName(text);
     if (!HANDLED_COMMANDS.has(commandName)) return;
-    await ctx.reply("I don't pick up edits — send that as a new message.");
+    await ctx.reply("❌ I don't pick up edits — send that as a new message.");
   });
 
   return { bot, service, roster, registrations };
