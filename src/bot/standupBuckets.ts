@@ -35,6 +35,11 @@ export const NOTHING_FOR_REVIEW_HTML = "<i>No tasks waiting for review right now
  * else in the standup card. */
 export const REVIEW_QUEUE_RULE = "━".repeat(20);
 
+/** Who the review queue is waiting on, named in the card since #186 and kept
+ * by decision when #210 restructured the queue. Plain text, not a mention —
+ * real handles would make it ping. */
+export const STANDUP_APPROVERS = "Dom / Jedd";
+
 export function bucketOf(task: TaskWithFlags): StandupBucket | undefined {
   if (task.status === "done") return undefined;
   if (task.overdue) return "overdue";
@@ -145,15 +150,14 @@ export function reviewQueue(tasks: TaskWithFlags[]): TaskWithFlags[] {
  * distinguishing devices — `REVIEW_QUEUE_RULE` (heavier than the light rule
  * `tasksPage.ts` draws elsewhere), an uppercase heading, a count in that
  * heading, and a `<blockquote>` giving the whole section its own vertical
- * rail, present whether the queue is empty or not. The fifth device — a
- * line @-mentioning the two reviewers so Telegram actually notifies them —
- * is deliberately not built here: the ticket's own fallback is "if the
- * handles are unavailable... keep the other four devices and drop only the
- * mention line", and no real Telegram username for either reviewer exists
- * anywhere in this codebase (only the old hardcoded display string "Dom /
- * Jedd", which is exactly the plain-text naming this device replaces).
- * Wiring the mention back in is a follow-up once real handles are supplied,
- * not a config surface (out of scope, spec #201). */
+ * rail, present whether the queue is empty or not. The fifth device is the
+ * reviewer line, and it names them in plain text rather than @-mentioning
+ * them: no real Telegram handle for either reviewer exists anywhere in this
+ * codebase, and the ticket's own fallback covers that case. Naming them is
+ * what the card did before the restructure (#186), so dropping the names
+ * outright would have lost information the cohort already had. It renders
+ * only when the queue is non-empty, per the ticket. Swapping in real
+ * handles later is a one-line change here. */
 export function renderReviewQueueHtml(tasks: TaskWithFlags[], now: Date): string[] {
   const queue = reviewQueue(tasks);
   const lines: string[] = [
@@ -168,6 +172,7 @@ export function renderReviewQueueHtml(tasks: TaskWithFlags[], now: Date): string
     for (const t of queue) {
       lines.push(`${taskLine(t, now, { showStatus: false })} (@${esc(t.assigneeUsername)})`);
     }
+    lines.push(`<i>Waiting on ${STANDUP_APPROVERS}.</i>`);
   }
   lines.push("</blockquote>");
   return lines;

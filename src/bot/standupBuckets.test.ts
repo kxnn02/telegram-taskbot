@@ -10,6 +10,7 @@ import {
   reviewQueue,
   renderReviewQueueHtml,
   REVIEW_QUEUE_RULE,
+  STANDUP_APPROVERS,
 } from "./standupBuckets.js";
 
 const NOW = new Date("2026-09-01T00:00:00.000Z");
@@ -352,6 +353,24 @@ describe("renderReviewQueueHtml", () => {
     expect(lines[3]).toBe("<blockquote>");
     expect(lines[4]).toBe("<i>No tasks waiting for review right now.</i>");
     expect(lines[5]).toBe("</blockquote>");
+  });
+
+  // #210's fifth device, as a plain named line rather than a Telegram
+  // mention: no real handles exist, and naming them is what the card did
+  // before the restructure, so dropping the names entirely would lose
+  // information the cohort already had.
+  it("names the reviewers on its own line when the queue is non-empty", () => {
+    const tasks = [
+      baseTask({ id: 1, title: "Write onboarding doc", assigneeUsername: "alice", status: "in_review" }),
+    ];
+    const lines = renderReviewQueueHtml(tasks, NOW);
+    const closing = lines.indexOf("</blockquote>");
+    expect(lines[closing - 1]).toBe(`<i>Waiting on ${STANDUP_APPROVERS}.</i>`);
+  });
+
+  it("omits the reviewer line when the queue is empty", () => {
+    const lines = renderReviewQueueHtml([], NOW);
+    expect(lines.join("\n")).not.toContain(STANDUP_APPROVERS);
   });
 });
 
