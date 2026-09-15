@@ -15,6 +15,7 @@ import { notifyUser, notifyStatusChange } from "./notify.js";
 import { suggestClosestUsername } from "./usernameSuggest.js";
 import { parseStatusWord, VALID_STATUS_WORDS_TEXT } from "./statusParse.js";
 import { parseRefListItems, parseUpdateItems, type BatchItem } from "./updateBatch.js";
+import { parseDueArgs, isWholeArgDate } from "./dueParse.js";
 import { findTaskByRef, type TaskLookup } from "./taskLookup.js";
 import { formatTaskRef, formatTaskRefHtml } from "./taskRef.js";
 import { renderDueDate } from "../date/renderDueDate.js";
@@ -41,6 +42,7 @@ import {
   formatCompleteOk,
   formatDeadlines,
   formatDoneOk,
+  formatDueOk,
   formatHelp,
   formatStart,
   formatTaskAdded,
@@ -51,6 +53,7 @@ import {
   COMPLETE_USAGE,
   DONE_USAGE,
   UPDATE_USAGE,
+  DUE_USAGE,
   UNKNOWN_COMMAND_REPLY,
   type BatchFailureLine,
   type BatchSuccessLine,
@@ -172,6 +175,7 @@ export const BOT_COMMANDS = [
   { command: "complete", description: "Mark a task Done" },
   { command: "completed", description: "Mark a task Done" },
   { command: "update", description: "Set a task's status (or bulk-update several)" },
+  { command: "due", description: "Change a task's due date" },
   { command: "standup", description: "On-demand standup report for the cohort" },
 ] as const;
 
@@ -597,6 +601,12 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     id?: number;
     task?: { assigneeUsername: string; assignedByUsername: string; title: string };
     status?: TaskStatus;
+    /** Rendered description of what changed on this item, e.g. `"in
+     * review"` or `"done"` — used to build each recipient's collapsed batch
+     * DM summary line. Not always a status word: a future command (e.g. a
+     * due-date change) populates this with its own change wording instead
+     * of deriving it from `status`. */
+    changeDescription?: string;
     /** The `🔗`/`📝` lines for this item's `/update` riders (#103 item 6),
      * appended to its ✓ line by `finishBatch`. Always `""` for
      * `/done`/`/complete`, whose grammar has no riders. */
@@ -651,6 +661,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         id: ref,
         task: result.value,
         status: resolvedStatus.status,
+        changeDescription: statusLabel(resolvedStatus.status),
         metaSuffix: await attachUpdateMeta(caller, ref, item),
       });
     }
@@ -666,12 +677,12 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   async function sendBatchNotifications(caller: Caller, outcomes: BatchOutcome[]): Promise<void> {
     const perRecipient = new Map<string, string[]>();
     for (const outcome of outcomes) {
-      if (!outcome.ok || !outcome.task || !outcome.status) continue;
+      if (!outcome.ok || !outcome.task || !outcome.changeDescription) continue;
       const recipients = new Set([outcome.task.assigneeUsername, outcome.task.assignedByUsername]);
       recipients.delete(caller.username);
       for (const username of recipients) {
         const changes = perRecipient.get(username) ?? [];
-        changes.push(`${outcome.label} ("${outcome.task.title}") → ${statusLabel(outcome.status)}`);
+        changes.push(`${outcome.label} ("${outcome.task.title}") → ${outcome.changeDescription}`);
         perRecipient.set(username, changes);
       }
     }
@@ -681,11 +692,11 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }
   }
 
-  /** Devie's per-kind batch status word/emoji (issue #124 stage S3):
+  /** Devie's per-kind batch change word/emoji (issue #124 stage S3):
    * `/done` and `/complete` always report their own fixed status, since
    * that's the only status either command can ever set; `/update` reports
    * whatever status each item actually resolved to. */
-  function batchStatusWord(kind: "done" | "complete" | "update", status: TaskStatus): string {
+  function batchChangeWord(kind: "done" | "complete" | "update", status: TaskStatus): string {
     if (kind === "done") return "in review";
     if (kind === "complete") return "done";
     return status.replace(/_/g, " ");
@@ -717,7 +728,7 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       .map((o) => ({
         ref: formatTaskRef(o.id),
         title: o.task.title,
-        statusWord: batchStatusWord(kind, o.status),
+        changeWord: batchChangeWord(kind, o.status),
         emoji: batchEmoji(kind, o.status),
         metaSuffix: o.metaSuffix,
       }));
@@ -847,6 +858,67 @@ export function createBot(options: CreateBotOptions): CreatedBot {
 
   bot.command("complete", completeHandler);
   bot.command("completed", completeHandler);
+
+  // ---- /due (issue #222) — single-item only; bulk is a later ticket -------
+  // No new service method: `service.editTask` already takes a due-date-only
+  // patch and already validates the ISO format. No access check (ADR-0013):
+  // any Caller may re-date any task in their own Cohort.
+  bot.command(
+    "due",
+    withCaller(async (ctx, caller) => {
+      const raw = matchToString(ctx.match).trim();
+      if (raw.length === 0) {
+        await ctx.reply(DUE_USAGE, { parse_mode: "HTML" as const });
+        return;
+      }
+      const parsed = parseDueArgs(raw, clock.now());
+      if (parsed === undefined) {
+        await ctx.reply(DUE_USAGE, { parse_mode: "HTML" as const });
+        return;
+      }
+      if ("error" in parsed) {
+        await ctx.reply(parsed.error);
+        return;
+      }
+      const resolved = await resolveRef(caller, parsed.ref);
+      if (resolved.kind !== "found") {
+        // The parser's own greedy ref (issue #222 follow-up finding)
+        // can't tell "next monday" — no ref at all, just a two-word date —
+        // apart from a real one-word ref "next" plus a one-word date
+        // "monday": both parse as ref "next" / date "monday", and a task
+        // titled "next steps" must still resolve via that same "next"
+        // keyword. So this is resolved here instead, and only for the
+        // "none" case: once "next" has already failed to match any task,
+        // check whether the *whole* typed argument is itself a complete
+        // date. If it is, the member typed a date with no ref, so show
+        // usage. The ambiguous-match path is untouched — a genuinely
+        // ambiguous keyword still gets the "which one?" list.
+        if (resolved.kind === "none" && isWholeArgDate(raw, clock.now())) {
+          await ctx.reply(DUE_USAGE, { parse_mode: "HTML" as const });
+          return;
+        }
+        await replyNotFoundOrAmbiguous(ctx, "/due", parsed.ref, resolved);
+        return;
+      }
+      const result = await service.editTask(caller, resolved.task.id, {
+        dueDate: parsed.dueDate.isoDate,
+      });
+      if (!result.ok) {
+        await ctx.reply(`❌ ${result.error}`);
+        return;
+      }
+      await ctx.reply(formatDueOk(result.value.title, result.value.dueDate, clock.now()), {
+        parse_mode: "HTML" as const,
+      });
+      await notifyStatusChange(
+        bot,
+        registrations,
+        result.value,
+        caller.username,
+        `@${caller.username} changed the due date on Task ${resolved.task.id} ("${result.value.title}") to ${parsed.dueDate.friendly}. Send /due ${resolved.task.id} <date> to change it again.`,
+      );
+    }),
+  );
 
   // ---- /addtask (one-liner; bare command gets a usage example, Devie-style,
   // not the removed step-by-step form) ------------------------------------

@@ -284,6 +284,7 @@ const HELP_SECTIONS: { heading: string; lines: string[] }[] = [
       "/update &lt;ref&gt; &lt;status&gt; — single update",
       `/done, /complete and /update all accept a comma- or newline-separated list of refs for bulk updates (e.g. /done ${formatTaskRefHtml(21)},${formatTaskRefHtml(22)},${formatTaskRefHtml(23)})`,
       "⚠️ /done marks In Review, not Done — use /complete to mark a task actually finished.",
+      "/due &lt;ref&gt; [by] &lt;date&gt; — change a task's deadline (e.g. /due 23 friday)",
     ],
   },
 ];
@@ -453,15 +454,27 @@ export function formatUpdateOk(title: string, status: TaskStatus): string {
   return `${emoji} <b>${esc(title)}</b>\nUpdated to: <b>${status.replace(/_/g, " ")}</b>`;
 }
 
+/**
+ * `/due`'s single-item confirmation (issue #222). The new deadline renders
+ * through the same `renderDueDate` long form `formatTaskAdded` uses, so the
+ * `📅 Due:` vocabulary reads identically across both commands.
+ */
+export function formatDueOk(title: string, dueDate: string, now: Date): string {
+  const due = renderDueDate(dueDate, now, false, "long");
+  return `✏️ <b>${esc(title)}</b>\n📅 Due: ${due}`;
+}
+
 // ---- Devie's batch replies (issue #124 stage S3) --------------------------
 
 export interface BatchSuccessLine {
   /** The `T-001` form (`formatTaskRef`). */
   ref: string;
   title: string;
-  /** Already-rendered status word, e.g. `"in review"`, `"done"`, or an
-   * `/update` batch item's own resolved status word. */
-  statusWord: string;
+  /** Already-rendered description of whatever the command changed on this
+   * item — e.g. `"in review"`, `"done"`, or an `/update` batch item's own
+   * resolved status word. Not always a status: a future command (e.g. a
+   * due-date change) populates this with its own change wording instead. */
+  changeWord: string;
   emoji: string;
   /** `/update`'s `🔗`/`📝` rider sub-lines, pre-rendered with their own
    * leading newlines — `""`/`undefined` for `/done`/`/complete`, whose
@@ -504,8 +517,8 @@ export function formatBatchReply(
     return lines.join("\n");
   }
 
-  const uniformStatusWord = successes.every((s) => s.statusWord === successes[0]!.statusWord)
-    ? successes[0]!.statusWord
+  const uniformChangeWord = successes.every((s) => s.changeWord === successes[0]!.changeWord)
+    ? successes[0]!.changeWord
     : undefined;
 
   const header =
@@ -513,15 +526,15 @@ export function formatBatchReply(
       ? `👀 <b>Moved ${pluralize(successes.length, "task")} to In Review.</b>`
       : kind === "complete"
         ? `✅ <b>Marked ${pluralize(successes.length, "task")} as done.</b>`
-        : uniformStatusWord !== undefined
-          ? `✅ <b>Updated ${pluralize(successes.length, "task")} to ${uniformStatusWord}.</b>`
+        : uniformChangeWord !== undefined
+          ? `✅ <b>Updated ${pluralize(successes.length, "task")} to ${uniformChangeWord}.</b>`
           : `✅ <b>Updated ${pluralize(successes.length, "task")}.</b>`;
 
   const lines = [header];
   for (const s of successes) {
-    const statusSuffix = uniformStatusWord !== undefined ? "" : ` → <b>${s.statusWord}</b>`;
+    const changeSuffix = uniformChangeWord !== undefined ? "" : ` → <b>${s.changeWord}</b>`;
     lines.push(
-      `• ${s.emoji} <code>${s.ref}</code> ${esc(s.title)}${statusSuffix}${s.metaSuffix ?? ""}`,
+      `• ${s.emoji} <code>${s.ref}</code> ${esc(s.title)}${changeSuffix}${s.metaSuffix ?? ""}`,
     );
   }
   if (failures.length > 0) {
@@ -582,6 +595,22 @@ export const UPDATE_USAGE = [
   "",
   "<i>Valid statuses: backlog · todo · in progress · in review · blocked · done</i>",
   "<i>Optionally append <code>link:&lt;url&gt;</code> and/or <code>note:&lt;text&gt;</code>.</i>",
+].join("\n");
+
+/** `/due`'s bare-command usage block (issue #222) — same shape as `DONE_USAGE`
+ * and `COMPLETE_USAGE` above, with worked examples covering the bare, `by`,
+ * numeric-ref and keyword-ref forms. Bulk forms aren't covered here since
+ * they aren't supported yet (single-item only, this ticket). */
+export const DUE_USAGE = [
+  "Usage: <code>/due &lt;number or keyword&gt; [by] &lt;date&gt;</code>",
+  "",
+  "<b>Examples:</b>",
+  "/due t21 friday",
+  "/due t21 by next monday",
+  "/due 23 sept 30",
+  "/due login bug friday",
+  "",
+  '<i>Sets a task\'s due date. The word "by" is optional.</i>',
 ].join("\n");
 
 /** Devie's unknown-command reply (issue #124 stage S3), sent with

@@ -25,6 +25,7 @@ made — usually before changing it.
 | [0013](./0013-remove-access-control-for-devie-parity.md) | **Delete roles and permissions entirely**, copying Devie | Live |
 | [0014](./0014-devie-parity-pass-2.md) | Seven parity gaps closed after a line-by-line re-read of Devie | Live |
 | [0015](./0015-required-environment-variables-are-asserted-at-build-time.md) | A missing environment variable fails the build, not every request | Live |
+| [0016](./0016-due-command-is-an-eleventh-command.md) | `/due` is a deliberate eleventh command, a documented exception to 0013's ten-command parity surface | Live |
 
 "Superseded" records are kept, not deleted — they explain why the code once looked the way it did,
 and their replacement links back to them.

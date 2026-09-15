@@ -9,6 +9,7 @@ import {
   formatDeadlines,
   formatDoneOk,
   formatCompleteOk,
+  formatDueOk,
   formatMyTasks,
   formatTaskAdded,
   formatTaskDetail,
@@ -22,6 +23,7 @@ import {
   DONE_USAGE,
   COMPLETE_USAGE,
   UPDATE_USAGE,
+  DUE_USAGE,
 } from "./format.js";
 import { formatTaskRefHtml } from "./taskRef.js";
 
@@ -379,6 +381,7 @@ describe("formatHelp (issue #124 stage S3: Devie's HTML card, verbatim)", () => 
     "/update &lt;ref&gt; &lt;status&gt; — single update",
     "/done, /complete and /update all accept a comma- or newline-separated list of refs for bulk updates (e.g. /done <code>T-021</code>,<code>T-022</code>,<code>T-023</code>)",
     "⚠️ /done marks In Review, not Done — use /complete to mark a task actually finished.",
+    "/due &lt;ref&gt; [by] &lt;date&gt; — change a task's deadline (e.g. /due 23 friday)",
     "",
     "<i>Statuses: backlog · todo · in progress · in review · blocked · done</i>",
   ].join("\n");
@@ -513,7 +516,7 @@ describe("chunkMessage (issue #55/F8)", () => {
     const successes = Array.from({ length: 400 }, (_, i) => ({
       ref: `T-${String(i + 1).padStart(3, "0")}`,
       title: `Some task title number ${i}`,
-      statusWord: "done",
+      changeWord: "done",
       emoji: "✅",
     }));
     const text = formatBatchReply("update", successes, []);
@@ -680,11 +683,27 @@ describe("formatDoneOk / formatCompleteOk / formatUpdateOk (issue #124 stage S3)
   });
 });
 
+describe("formatDueOk (issue #222)", () => {
+  const NOW = new Date("2026-09-09T12:00:00Z");
+
+  it("names the task title and renders the new deadline in long form, same '📅 Due:' vocabulary as formatTaskAdded", () => {
+    expect(formatDueOk("Fix the login bug", "2026-09-25", NOW)).toBe(
+      "✏️ <b>Fix the login bug</b>\n📅 Due: Friday, September 25",
+    );
+  });
+
+  it("HTML-escapes the title", () => {
+    expect(formatDueOk("<b>x</b> & y", "2026-09-25", NOW)).toContain(
+      "&lt;b&gt;x&lt;/b&gt; &amp; y",
+    );
+  });
+});
+
 describe("formatBatchReply (issue #124 stage S3)", () => {
   it("done batch, singular count", () => {
     const text = formatBatchReply(
       "done",
-      [{ ref: "T-001", title: "Fix the login bug", statusWord: "in review", emoji: "👀" }],
+      [{ ref: "T-001", title: "Fix the login bug", changeWord: "in review", emoji: "👀" }],
       [],
     );
     expect(text).toBe(
@@ -699,8 +718,8 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
     const text = formatBatchReply(
       "done",
       [
-        { ref: "T-001", title: "First", statusWord: "in review", emoji: "👀" },
-        { ref: "T-002", title: "Second", statusWord: "in review", emoji: "👀" },
+        { ref: "T-001", title: "First", changeWord: "in review", emoji: "👀" },
+        { ref: "T-002", title: "Second", changeWord: "in review", emoji: "👀" },
       ],
       [],
     );
@@ -710,7 +729,7 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
   it("complete batch", () => {
     const text = formatBatchReply(
       "complete",
-      [{ ref: "T-001", title: "Fix the login bug", statusWord: "done", emoji: "✅" }],
+      [{ ref: "T-001", title: "Fix the login bug", changeWord: "done", emoji: "✅" }],
       [],
     );
     expect(text).toBe(
@@ -728,7 +747,7 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
         {
           ref: "T-001",
           title: "Fix the login bug",
-          statusWord: "done",
+          changeWord: "done",
           emoji: "✅",
           metaSuffix: "\n  🔗 https://example.com/pr/1\n  📝 ready for QA",
         },
@@ -748,7 +767,7 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
   it("HTML-escapes the title of every success line", () => {
     const text = formatBatchReply(
       "update",
-      [{ ref: "T-001", title: "<b>x</b> & y", statusWord: "done", emoji: "✅" }],
+      [{ ref: "T-001", title: "<b>x</b> & y", changeWord: "done", emoji: "✅" }],
       [],
     );
     expect(text).toContain("&lt;b&gt;x&lt;/b&gt; &amp; y");
@@ -757,7 +776,7 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
   it("a batch with both successes and failures groups failures at the end under a Skipped header", () => {
     const text = formatBatchReply(
       "update",
-      [{ ref: "T-001", title: "Fix the login bug", statusWord: "done", emoji: "✅" }],
+      [{ ref: "T-001", title: "Fix the login bug", changeWord: "done", emoji: "✅" }],
       [{ ref: "t22", reason: "no active task found" }],
     );
     expect(text).toBe(
@@ -774,7 +793,7 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
   it("multiple failures pluralize 'items'", () => {
     const text = formatBatchReply(
       "update",
-      [{ ref: "T-001", title: "x", statusWord: "done", emoji: "✅" }],
+      [{ ref: "T-001", title: "x", changeWord: "done", emoji: "✅" }],
       [
         { ref: "t22", reason: "no active task found" },
         { ref: "t23", reason: "no active task found" },
@@ -813,8 +832,8 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
     const text = formatBatchReply(
       "update",
       [
-        { ref: "T-001", title: "First", statusWord: "done", emoji: "✅" },
-        { ref: "T-002", title: "Second", statusWord: "done", emoji: "✅" },
+        { ref: "T-001", title: "First", changeWord: "done", emoji: "✅" },
+        { ref: "T-002", title: "Second", changeWord: "done", emoji: "✅" },
       ],
       [],
     );
@@ -831,8 +850,8 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
     const text = formatBatchReply(
       "update",
       [
-        { ref: "T-001", title: "First", statusWord: "done", emoji: "✅" },
-        { ref: "T-002", title: "Second", statusWord: "in review", emoji: "👀" },
+        { ref: "T-001", title: "First", changeWord: "done", emoji: "✅" },
+        { ref: "T-002", title: "Second", changeWord: "in review", emoji: "👀" },
       ],
       [],
     );
@@ -849,8 +868,8 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
     const text = formatBatchReply(
       "done",
       [
-        { ref: "T-001", title: "First", statusWord: "in review", emoji: "👀" },
-        { ref: "T-002", title: "Second", statusWord: "in review", emoji: "👀" },
+        { ref: "T-001", title: "First", changeWord: "in review", emoji: "👀" },
+        { ref: "T-002", title: "Second", changeWord: "in review", emoji: "👀" },
       ],
       [],
     );
@@ -870,7 +889,7 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
         {
           ref: "T-001",
           title: "Fix the login bug",
-          statusWord: "done",
+          changeWord: "done",
           emoji: "✅",
           metaSuffix: "\n  🔗 https://example.com/pr/1",
         },
@@ -936,6 +955,22 @@ describe("usage blocks (issue #124 stage S3, Devie's verbatim text)", () => {
         "",
         "<i>Valid statuses: backlog · todo · in progress · in review · blocked · done</i>",
         "<i>Optionally append <code>link:&lt;url&gt;</code> and/or <code>note:&lt;text&gt;</code>.</i>",
+      ].join("\n"),
+    );
+  });
+
+  it("DUE_USAGE (issue #222)", () => {
+    expect(DUE_USAGE).toBe(
+      [
+        "Usage: <code>/due &lt;number or keyword&gt; [by] &lt;date&gt;</code>",
+        "",
+        "<b>Examples:</b>",
+        "/due t21 friday",
+        "/due t21 by next monday",
+        "/due 23 sept 30",
+        "/due login bug friday",
+        "",
+        "<i>Sets a task's due date. The word \"by\" is optional.</i>",
       ].join("\n"),
     );
   });
