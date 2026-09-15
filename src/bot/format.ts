@@ -114,9 +114,9 @@ export function formatAmbiguousTaskMatches(
  * the shared due-date renderer in short form — which already reads as
  * "3 days ago"/"yesterday"/"today" for anything late or due soon, so the
  * old bracketed `[⚠️ OVERDUE 5d]` flag is gone; the date text itself now
- * carries that. Distinct from `formatTaskLine` (the standup card's own
- * line, out of this ticket's scope) so converting the digest doesn't
- * change the standup card underneath it. */
+ * carries that. Distinct from `taskLine` (the standup card's own line,
+ * `standupCard.ts`) so the digest and the card stay independently
+ * adjustable. */
 function formatDigestTaskLine(task: TaskWithFlags, now: Date): string {
   const due = renderDueDate(task.dueDate, now, task.overdue, "short");
   return `• ${formatTaskRefHtml(task.id)}${PRIORITY_BADGE[task.priority]} ${esc(task.title)} — ${STATUS_EMOJI[task.status]} ${statusLabel(task.status)} (due ${due})`;

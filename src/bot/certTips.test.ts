@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   CERT_TIPS,
   renderCertTipHtml,
-  renderCertTipPlain,
   selectCertTipForDate,
   selectRandomCertTip,
 } from "./certTips.js";
@@ -94,7 +93,7 @@ describe("selectRandomCertTip", () => {
   });
 });
 
-describe("renderCertTipHtml / renderCertTipPlain", () => {
+describe("renderCertTipHtml", () => {
   const tip = {
     id: 1,
     lead: "Trust your prep and stop putting it off.",
@@ -105,12 +104,6 @@ describe("renderCertTipHtml / renderCertTipPlain", () => {
   it("renders the HTML variant with the expected shape", () => {
     expect(renderCertTipHtml(tip)).toBe(
       "🎓 CCA-F Cert Tip\n💡 <b>Trust your prep and stop putting it off.</b> Don't let anxiety delay you.\n— <i>Kim Fajardo</i>",
-    );
-  });
-
-  it("renders the plain variant with the expected shape", () => {
-    expect(renderCertTipPlain(tip)).toBe(
-      "🎓 CCA-F Cert Tip\n💡 Trust your prep and stop putting it off. Don't let anxiety delay you.\n— Kim Fajardo",
     );
   });
 
@@ -128,6 +121,5 @@ describe("renderCertTipHtml / renderCertTipPlain", () => {
     expect(renderCertTipHtml(noBody)).toBe(
       "🎓 CCA-F Cert Tip\n💡 <b>Just a lead.</b>\n— <i>Someone</i>",
     );
-    expect(renderCertTipPlain(noBody)).toBe("🎓 CCA-F Cert Tip\n💡 Just a lead.\n— Someone");
   });
 });
