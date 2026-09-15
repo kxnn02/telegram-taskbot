@@ -722,6 +722,33 @@ describe("paged /tasks (issue #103 items 1 and 2)", () => {
 });
 
 describe("standup filters (issue #103 item 3)", () => {
+  // Issue #209 (spec #201): the on-demand `/standup` reply now unifies onto
+  // the same markup send path as the scheduled push card and `/tasks`,
+  // instead of the plain-text send this used to be.
+  it("/standup is sent with parse_mode HTML, matching the scheduled card", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/standup"));
+
+    const call = lastCall(testBot.calls, "sendMessage")!;
+    expect(call.payload.parse_mode).toBe("HTML");
+  });
+
+  it("a standup filter edit is also sent with parse_mode HTML", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      callbackUpdate(userId, "alice", userId, "standup|backlog|0", 888),
+    );
+
+    const edit = lastCall(testBot.calls, "editMessageText")!;
+    expect(edit.payload.parse_mode).toBe("HTML");
+  });
+
   it("/standup sends the overview with Devie's five filter buttons", async () => {
     const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
     const testBot = makeTestBot(roster);

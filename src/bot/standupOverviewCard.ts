@@ -75,7 +75,7 @@ export function buildStandupOverviewCard(
     standupSummaryLine(report.tasks),
   ];
 
-  lines.push(...renderMemberBucketsHtml(report.tasks));
+  lines.push(...renderMemberBucketsHtml(report.tasks, opts.now));
 
   const bounds = getWeekBounds(manilaISODate(opts.now));
   const thisWeekLabel = formatWeekLabel(bounds.thisWeekStart, bounds.thisWeekEnd);
@@ -97,7 +97,7 @@ export function buildStandupOverviewCard(
     for (const t of doneLastWeek) lines.push(`▸ ${esc(t.title)} (@${esc(t.assigneeUsername)})`);
   }
 
-  lines.push(...renderReviewQueueHtml(report.tasks));
+  lines.push(...renderReviewQueueHtml(report.tasks, opts.now));
 
   if (opts.quote) {
     lines.push("", opts.quote);

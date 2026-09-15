@@ -10,6 +10,8 @@ import { esc } from "./html.js";
 // push card while `standup.ts`'s existing formatters stay the plain-text
 // `/standup` command output (see this ticket's PR body for why).
 
+const NOW = new Date("2026-09-01T00:00:00.000Z");
+
 function baseTask(overrides: Partial<TaskWithFlags> = {}): TaskWithFlags {
   return {
     id: 1,
@@ -75,67 +77,67 @@ describe("esc", () => {
 describe("taskLine", () => {
   it("with a task code (default): ▸ <code>T-001</code> Title · date", () => {
     const t = baseTask({ id: 1, priority: "low", status: "todo" });
-    const line = taskLine(t, { showStatus: false, showDue: true });
+    const line = taskLine(t, NOW, { showStatus: false, showDue: true });
     expect(line).toBe("▸ <code>T-001</code> Ship the thing · Sat, Sep 12");
   });
 
   it("without a task code", () => {
     const t = baseTask();
-    const line = taskLine(t, { showCode: false, showStatus: false, showDue: false });
+    const line = taskLine(t, NOW, { showCode: false, showStatus: false, showDue: false });
     expect(line).toBe("▸ Ship the thing");
   });
 
   it("urgent priority renders a leading-space red circle", () => {
     const t = baseTask({ priority: "urgent" });
-    const line = taskLine(t, { showCode: false, showStatus: false, showDue: false });
+    const line = taskLine(t, NOW, { showCode: false, showStatus: false, showDue: false });
     expect(line).toBe("▸ Ship the thing 🔴");
   });
 
   it("high priority renders a leading-space orange circle", () => {
     const t = baseTask({ priority: "high" });
-    const line = taskLine(t, { showCode: false, showStatus: false, showDue: false });
+    const line = taskLine(t, NOW, { showCode: false, showStatus: false, showDue: false });
     expect(line).toBe("▸ Ship the thing 🟠");
   });
 
   it("medium priority adds nothing", () => {
     const t = baseTask({ priority: "medium" });
-    const line = taskLine(t, { showCode: false, showStatus: false, showDue: false });
+    const line = taskLine(t, NOW, { showCode: false, showStatus: false, showDue: false });
     expect(line).toBe("▸ Ship the thing");
   });
 
   it("low priority adds nothing", () => {
     const t = baseTask({ priority: "low" });
-    const line = taskLine(t, { showCode: false, showStatus: false, showDue: false });
+    const line = taskLine(t, NOW, { showCode: false, showStatus: false, showDue: false });
     expect(line).toBe("▸ Ship the thing");
   });
 
   it("showStatus on appends the status emoji", () => {
     const t = baseTask({ status: "blocked" });
-    const line = taskLine(t, { showCode: false, showStatus: true, showDue: false });
+    const line = taskLine(t, NOW, { showCode: false, showStatus: true, showDue: false });
     expect(line).toBe("▸ Ship the thing 🚧");
   });
 
   it("showStatus off omits the status emoji", () => {
     const t = baseTask({ status: "blocked" });
-    const line = taskLine(t, { showCode: false, showStatus: false, showDue: false });
+    const line = taskLine(t, NOW, { showCode: false, showStatus: false, showDue: false });
     expect(line).toBe("▸ Ship the thing");
   });
 
   it("with a due date", () => {
     const t = baseTask({ dueDate: "2026-09-12" });
-    const line = taskLine(t, { showCode: false, showStatus: false, showDue: true });
+    const line = taskLine(t, NOW, { showCode: false, showStatus: false, showDue: true });
     expect(line).toBe("▸ Ship the thing · Sat, Sep 12");
   });
 
   it("without a due date", () => {
     const t = baseTask({ dueDate: "2026-09-12" });
-    const line = taskLine(t, { showCode: false, showStatus: false, showDue: false });
+    const line = taskLine(t, NOW, { showCode: false, showStatus: false, showDue: false });
     expect(line).toBe("▸ Ship the thing");
   });
 
   it("escapes < > & in a task title", () => {
     const t = baseTask({ title: "Fix <script> & \"bug\"" });
-    const line = taskLine(t, { showCode: false, showStatus: false, showDue: false });
+    const line = taskLine(t, NOW, { showCode: false, showStatus: false, showDue: false });
     expect(line).toBe("▸ Fix &lt;script&gt; &amp; \"bug\"");
   });
 
@@ -146,7 +148,7 @@ describe("taskLine", () => {
       blockedReason: "waiting on Figma access",
       dueDate: "2026-09-04",
     });
-    const line = taskLine(t, { showStatus: true, showDue: true });
+    const line = taskLine(t, NOW, { showStatus: true, showDue: true });
     expect(line).toBe(
       "▸ <code>T-003</code> Ship the thing 🚧 · Fri, Sep 4 — <i>waiting on Figma access</i>",
     );
@@ -154,13 +156,13 @@ describe("taskLine", () => {
 
   it("renders a blocked task with no reason exactly as before", () => {
     const t = baseTask({ id: 3, status: "blocked", blockedReason: null, dueDate: "2026-09-04" });
-    const line = taskLine(t, { showStatus: true, showDue: true });
+    const line = taskLine(t, NOW, { showStatus: true, showDue: true });
     expect(line).toBe("▸ <code>T-003</code> Ship the thing 🚧 · Fri, Sep 4");
   });
 
   it("never appends a reason to a task that is not blocked", () => {
     const t = baseTask({ status: "todo", blockedReason: "stale reason from an old block" });
-    const line = taskLine(t, { showCode: false, showStatus: false, showDue: false });
+    const line = taskLine(t, NOW, { showCode: false, showStatus: false, showDue: false });
     expect(line).toBe("▸ Ship the thing");
   });
 
@@ -171,10 +173,18 @@ describe("taskLine", () => {
       blockedReason: "blocked by <b>vendor</b> & co",
       dueDate: "2026-09-04",
     });
-    const line = taskLine(t, { showStatus: true, showDue: true });
+    const line = taskLine(t, NOW, { showStatus: true, showDue: true });
     expect(line).toBe(
       "▸ <code>T-003</code> Ship the thing 🚧 · Fri, Sep 4 — <i>blocked by &lt;b&gt;vendor&lt;/b&gt; &amp; co</i>",
     );
+  });
+
+  // Issue #209 (spec #201): an overdue task's due date renders as elapsed
+  // time through the shared date renderer, not a calendar date.
+  it("an overdue task's due date reads as elapsed time, not a calendar date", () => {
+    const t = baseTask({ dueDate: "2026-08-25", overdue: true });
+    const line = taskLine(t, NOW, { showCode: false, showStatus: false, showDue: true });
+    expect(line).toBe("▸ Ship the thing · 7 days ago");
   });
 });
 

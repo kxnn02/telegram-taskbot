@@ -109,14 +109,6 @@ export function formatAmbiguousTaskMatches(
   ].join("\n");
 }
 
-export function formatTaskLine(task: TaskWithFlags): string {
-  const flags: string[] = [];
-  if (task.overdue) flags.push(`⚠️ OVERDUE ${task.daysOverdue}d`);
-  if (task.status === "blocked") flags.push("🚧 BLOCKED");
-  const flagText = flags.length > 0 ? ` [${flags.join(", ")}]` : "";
-  return `#${task.id}${PRIORITY_BADGE[task.priority]} ${task.title} — ${STATUS_EMOJI[task.status]} ${statusLabel(task.status)} (due ${task.dueDate})${flagText}`;
-}
-
 /** One task's line on the daily digest (issue #206, spec #201's short
  * form): the shared monospace identifier, priority badge and bullet, plus
  * the shared due-date renderer in short form — which already reads as

@@ -4,16 +4,15 @@ import { formatTaskRef } from "./taskRef.js";
 import { PRIORITY_BADGE, STATUS_EMOJI } from "./format.js";
 import { MANILA_ZONE } from "../domain/overdue.js";
 import { esc } from "./html.js";
+import { renderDueDate } from "../date/renderDueDate.js";
 
 /**
  * Issue #107: the HTML-rendering presentation layer for the standup's
  * *push* card — the message the authenticated push endpoint sends into the
- * cohort group. Deliberately a separate module from `standup.ts`'s
- * `formatStandup`/`formatStandupFiltered`, which stay the plain-text
- * `/standup` in-chat command output established by issue #103 (see this
- * ticket's PR body for the reasoning: the ticket's HTML-rendering
- * requirement is interpreted as scoped to the new push card, not a rewrite
- * of the already-tested in-chat command).
+ * cohort group. Issue #209: `taskLine` is now shared with `standup.ts`'s
+ * `formatStandup`/`formatStandupFiltered` too — both standup surfaces render
+ * through this one HTML vocabulary and are sent with the same markup send
+ * path, so they read as one report rather than two.
  *
  * `esc`, `taskLine` and `groupByMember` below are Devie's own
  * `lib/standup.ts` helpers (`esc` @ line 59, `taskLine` @ line 95,
@@ -39,18 +38,20 @@ export interface TaskLineOptions {
   showDue?: boolean;
 }
 
-function formatShortDate(isoDate: string): string {
-  return DateTime.fromISO(isoDate, { zone: MANILA_ZONE }).toFormat("ccc, LLL d");
-}
-
 /**
  * Devie's `taskLine(t, opts)` (`lib/standup.ts:95`):
  * `▸ <code>T-001</code> Title 🔴 🔄 · Fri, Sep 12`. The priority badge
  * (`PRIORITY_BADGE`, `format.ts`) already carries its own leading space, so
  * `medium`/`low` add nothing and `urgent`/`high` add exactly one space
  * before the glyph.
+ *
+ * Issue #209 (spec #201): the due date renders through the shared
+ * `renderDueDate` short form rather than this module's own date format, so
+ * an overdue task reads as elapsed time (`3 days ago`/`yesterday`) instead
+ * of a plain calendar date — the standup card's own version of the trap
+ * `formatDigestTaskLine` already fixed for the daily digest.
  */
-export function taskLine(task: TaskWithFlags, opts: TaskLineOptions = {}): string {
+export function taskLine(task: TaskWithFlags, now: Date, opts: TaskLineOptions = {}): string {
   const showCode = opts.showCode ?? true;
   const showStatus = opts.showStatus ?? true;
   const showDue = opts.showDue ?? true;
@@ -60,7 +61,10 @@ export function taskLine(task: TaskWithFlags, opts: TaskLineOptions = {}): strin
   line += esc(task.title);
   line += PRIORITY_BADGE[task.priority];
   if (showStatus) line += ` ${STATUS_EMOJI[task.status]}`;
-  if (showDue) line += ` · ${formatShortDate(task.dueDate)}`;
+  if (showDue) {
+    const due = renderDueDate(task.dueDate, now, task.overdue, "short");
+    if (due) line += ` · ${due}`;
+  }
   if (task.status === "blocked" && task.blockedReason?.trim()) {
     line += ` — <i>${esc(task.blockedReason)}</i>`;
   }

@@ -11,7 +11,6 @@ import {
   formatCompleteOk,
   formatMyTasks,
   formatTaskAdded,
-  formatTaskLine,
   formatTaskDetail,
   formatTaskNotFound,
   formatUpdateOk,
@@ -309,38 +308,6 @@ describe("statusLabel", () => {
     for (const [status, label] of Object.entries(expected)) {
       expect(statusLabel(status as TaskStatus)).toBe(label);
     }
-  });
-});
-
-describe("formatTaskLine", () => {
-  it("renders the display label, not the raw snake_case status", () => {
-    const text = formatTaskLine(task({ status: "in_progress", previousStatus: null, blockedReason: null }));
-    expect(text).toContain("In Progress");
-    expect(text).not.toContain("in_progress");
-  });
-
-  it("renders an urgent task's priority badge with a leading space (issue #101)", () => {
-    const text = formatTaskLine(task({ priority: "urgent" }));
-    expect(text).toContain("#1 🔴");
-  });
-
-  it("renders a high task's priority badge with a leading space", () => {
-    const text = formatTaskLine(task({ priority: "high" }));
-    expect(text).toContain("#1 🟠");
-  });
-
-  it("renders nothing at all for medium priority — absence is the case to assert", () => {
-    const text = formatTaskLine(task({ priority: "medium" }));
-    expect(text).not.toContain("🔴");
-    expect(text).not.toContain("🟠");
-    expect(text).toContain(`#1 ${task().title}`);
-  });
-
-  it("renders nothing at all for low priority", () => {
-    const text = formatTaskLine(task({ priority: "low" }));
-    expect(text).not.toContain("🔴");
-    expect(text).not.toContain("🟠");
-    expect(text).toContain(`#1 ${task().title}`);
   });
 });
 

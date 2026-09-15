@@ -62,7 +62,7 @@ import {
   formatStandupFiltered,
   parseStandupCallback,
 } from "./standup.js";
-import { getCertTipById, renderCertTipPlain, selectRandomCertTip } from "./certTips.js";
+import { getCertTipById, renderCertTipHtml, selectRandomCertTip } from "./certTips.js";
 import {
   buildTasksPage,
   fetchTaskPages,
@@ -402,12 +402,15 @@ export function createBot(options: CreateBotOptions): CreatedBot {
     }),
   );
 
-  // `/standup` gains Devie's five filter buttons (#103 item 3). It stays
-  // plain text — only `/tasks` copies Devie's HTML — so the keyboard is the
-  // whole change here; the overview body is the existing `formatStandup`.
+  // `/standup` gains Devie's five filter buttons (#103 item 3).
+  //
+  // Issue #209 (spec #201): the overview body — `formatStandup` — is now
+  // sent through the same markup path as `/tasks` and the scheduled push
+  // card, so the on-demand reply and the pushed card read as one report
+  // instead of two.
   //
   // Issue #180: the initial `/standup` reply calls `formatStandup` directly
-  // (not `formatStandupFiltered`) so it alone can pass today's plain-text
+  // (not `formatStandupFiltered`) so it alone can pass today's rendered
   // cert tip. Tapping a filter button — including Overview — re-renders
   // through `formatStandupFiltered` below with no tip, per spec.
   bot.command(
@@ -418,12 +421,12 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       const lastTipId = await options.certTipHistoryStore.getLastTipId(caller.cohortId);
       const tip = selectRandomCertTip(lastTipId);
       await options.certTipHistoryStore.setLastTipId(caller.cohortId, tip.id);
-      const certTipPlain = renderCertTipPlain(tip);
+      const certTipHtml = renderCertTipHtml(tip);
       await sendCard(
         ctx,
-        formatStandup(report, certTipPlain),
+        formatStandup(report, certTipHtml),
         buildStandupKeyboard(report, "overview"),
-        false,
+        true,
       );
     }),
   );
@@ -469,12 +472,12 @@ export function createBot(options: CreateBotOptions): CreatedBot {
         // this cohort rather than calling `selectRandomCertTip` again.
         const lastTipId = await options.certTipHistoryStore.getLastTipId(caller.cohortId);
         const tip = lastTipId !== null ? getCertTipById(lastTipId) : undefined;
-        const certTipPlain = tip ? renderCertTipPlain(tip) : undefined;
+        const certTipHtml = tip ? renderCertTipHtml(tip) : undefined;
         await editCard(
           ctx,
-          formatStandupFiltered(report, standupCb.filter, certTipPlain),
+          formatStandupFiltered(report, standupCb.filter, certTipHtml),
           buildStandupKeyboard(report, standupCb.filter),
-          false,
+          true,
         );
       }
     }

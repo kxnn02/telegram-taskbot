@@ -15,7 +15,8 @@ import {
   VALID_STANDUP_FILTERS,
 } from "./standup.js";
 import { standupSummaryLine } from "./standupBuckets.js";
-import { renderCertTipPlain, selectCertTipForDate } from "./certTips.js";
+import { formatTaskRef } from "./taskRef.js";
+import { renderCertTipHtml, selectCertTipForDate } from "./certTips.js";
 
 const COHORT = "cohort-5";
 const NOW = new Date("2026-09-01T02:00:00.000Z"); // Tuesday
@@ -242,7 +243,7 @@ describe("formatStandup (standup redesign)", () => {
     expect(text).toContain("⚠️ 2 overdue");
 
     const summaryIdx = text.indexOf(standupSummaryLine(report.tasks));
-    const firstBucketIdx = text.indexOf("⚠️ Overdue (");
+    const firstBucketIdx = text.indexOf("⚠️ <b>Overdue (");
     expect(summaryIdx).toBeGreaterThanOrEqual(0);
     expect(firstBucketIdx).toBeGreaterThan(summaryIdx);
   });
@@ -319,9 +320,9 @@ describe("formatStandup (person-first layout, #165 S3)", () => {
     const report = await buildStandup(service, carla, NOW);
     const text = formatStandup(report);
 
-    expect(text.split("👤 @alice").length - 1).toBe(1);
-    expect(text.split("👤 @bob").length - 1).toBe(1);
-    expect(text.indexOf("👤 @alice")).toBeLessThan(text.indexOf("👤 @bob"));
+    expect(text.split("👤 <b>@alice</b>").length - 1).toBe(1);
+    expect(text.split("👤 <b>@bob</b>").length - 1).toBe(1);
+    expect(text.indexOf("👤 <b>@alice</b>")).toBeLessThan(text.indexOf("👤 <b>@bob</b>"));
   });
 
   it("the old @username: heading form is gone", async () => {
@@ -367,18 +368,21 @@ describe("formatStandup (person-first layout, #165 S3)", () => {
     const report = await buildStandup(service, carla, NOW);
     const text = formatStandup(report);
 
-    expect(text).toContain("⚠️ Overdue (1)");
-    expect(text).toContain("🔄 Doing (2)");
-    expect(text).toContain("👀 For approval (1)");
+    expect(text).toContain("⚠️ <b>Overdue (1)</b>");
+    expect(text).toContain("🔄 <b>Doing (2)</b>");
+    expect(text).toContain("👀 <b>For approval (1)</b>");
 
-    const overdueIdx = text.indexOf("⚠️ Overdue (");
-    const doingIdx = text.indexOf("🔄 Doing (");
-    const approvalIdx = text.indexOf("👀 For approval (");
+    const overdueIdx = text.indexOf("⚠️ <b>Overdue (");
+    const doingIdx = text.indexOf("🔄 <b>Doing (");
+    const approvalIdx = text.indexOf("👀 <b>For approval (");
     expect(overdueIdx).toBeLessThan(doingIdx);
     expect(doingIdx).toBeLessThan(approvalIdx);
   });
 
-  it("no HTML tags anywhere in the output", async () => {
+  // Issue #209 (spec #201): `/standup` now renders through the same HTML
+  // markup path as the scheduled push card — this used to pin the opposite
+  // (no HTML tags at all), back when this surface was plain text.
+  it("renders through the shared HTML vocabulary, same as the pushed card", async () => {
     const { service } = makeService();
     const created = await service.assignTask(carla, {
       assigneeUsername: "alice",
@@ -390,12 +394,11 @@ describe("formatStandup (person-first layout, #165 S3)", () => {
 
     const report = await buildStandup(service, carla, NOW);
     const text = formatStandup(report);
-    expect(text).not.toContain("<b>");
-    expect(text).not.toContain("<i>");
-    expect(text).not.toContain("<code>");
+    expect(text).toContain("<b>");
+    expect(text).toContain("<code>");
   });
 
-  it("task lines keep formatTaskLine's shape with the two-space prefix", async () => {
+  it("task lines carry the shared vocabulary: monospace id, short-form due date", async () => {
     const { service } = makeService();
     const created = await service.assignTask(carla, {
       assigneeUsername: "alice",
@@ -408,9 +411,8 @@ describe("formatStandup (person-first layout, #165 S3)", () => {
     const text = formatStandup(report);
     const taskLine = text.split("\n").find((l) => l.includes("Some task"));
     expect(taskLine).toBeDefined();
-    expect(taskLine).toMatch(/^ {2}- #\d+/);
-    expect(taskLine).toContain(`#${created.value.id}`);
-    expect(taskLine).toContain("(due ");
+    expect(taskLine).toContain(`<code>${formatTaskRef(created.value.id)}</code>`);
+    expect(taskLine).toContain(" · Sat, Sep 5");
   });
 
   it("empty cohort renders the no-open-tasks line alongside the existing header and done sections", async () => {
@@ -420,7 +422,7 @@ describe("formatStandup (person-first layout, #165 S3)", () => {
     expect(text).toContain("No open tasks right now.");
     expect(text).toContain("Cohort 5");
     expect(text).toContain("Tuesday, September 1, 2026");
-    expect(text).toContain("✅ Done this week (0)");
+    expect(text).toContain("✅ <b>Done this week (0)</b>");
     expect(text).toContain("No tasks completed this week yet.");
   });
 
@@ -713,7 +715,7 @@ describe("formatStandupFiltered (issue #103 item 3)", () => {
     const { service } = makeService();
     await seed(service, "Queued", "todo");
     const report = await buildStandup(service, carla, NOW);
-    const tip = renderCertTipPlain(selectCertTipForDate(NOW));
+    const tip = renderCertTipHtml(selectCertTipForDate(NOW));
     for (const filter of VALID_STANDUP_FILTERS) {
       expect(formatStandupFiltered(report, filter)).not.toContain(tip);
       expect(formatStandupFiltered(report, filter)).not.toContain("💡");
@@ -725,7 +727,7 @@ describe("formatStandup — cert tip (issue #180)", () => {
   it("ends with the plain-text cert tip when one is passed in", async () => {
     const { service } = makeService();
     const report = await buildStandup(service, carla, NOW);
-    const tip = renderCertTipPlain(selectCertTipForDate(NOW));
+    const tip = renderCertTipHtml(selectCertTipForDate(NOW));
 
     const text = formatStandup(report, tip);
 
@@ -756,11 +758,11 @@ describe("formatStandup — review and approval section (issue #186)", () => {
     const { service } = makeService();
     await seedReview(service, "Task for review");
     const report = await buildStandup(service, carla, NOW);
-    const tip = renderCertTipPlain(selectCertTipForDate(NOW));
+    const tip = renderCertTipHtml(selectCertTipForDate(NOW));
     const text = formatStandup(report, tip);
 
-    const doneIdx = text.indexOf("✅ Done this week");
-    const reviewIdx = text.indexOf("👀 For Review and Approval");
+    const doneIdx = text.indexOf("✅ <b>Done this week");
+    const reviewIdx = text.indexOf("👀 <b>For Review and Approval");
     const tipIdx = text.indexOf(tip);
     expect(doneIdx).toBeGreaterThan(-1);
     expect(reviewIdx).toBeGreaterThan(doneIdx);
@@ -773,8 +775,8 @@ describe("formatStandup — review and approval section (issue #186)", () => {
     const report = await buildStandup(service, carla, NOW);
     const text = formatStandup(report);
 
-    const doneIdx = text.indexOf("✅ Done this week");
-    const reviewIdx = text.indexOf("👀 For Review and Approval");
+    const doneIdx = text.indexOf("✅ <b>Done this week");
+    const reviewIdx = text.indexOf("👀 <b>For Review and Approval");
     expect(doneIdx).toBeGreaterThan(-1);
     expect(reviewIdx).toBeGreaterThan(doneIdx);
   });
@@ -784,19 +786,21 @@ describe("formatStandup — review and approval section (issue #186)", () => {
     const report = await buildStandup(service, carla, NOW);
     const text = formatStandup(report);
 
-    expect(text).toContain("👀 For Review and Approval — Dom / Jedd");
+    expect(text).toContain("👀 <b>For Review and Approval — Dom / Jedd</b>");
     expect(text).toContain("Nothing waiting for review right now.");
   });
 
-  it("carries no HTML tags in the plain output", async () => {
+  // Issue #209: this used to pin the opposite (no HTML tags) — now that
+  // `/standup` shares the pushed card's markup path, the review section
+  // renders through the same HTML vocabulary.
+  it("renders the review section through the shared HTML vocabulary", async () => {
     const { service } = makeService();
     await seedReview(service, "Task for review");
     const report = await buildStandup(service, carla, NOW);
     const text = formatStandup(report);
 
-    expect(text).not.toContain("<b>");
-    expect(text).not.toContain("<i>");
-    expect(text).not.toContain("<code>");
+    expect(text).toContain("👀 <b>For Review and Approval — Dom / Jedd</b>");
+    expect(text).toContain("<code>");
   });
 
   it("review section does not appear in active filter", async () => {
