@@ -373,16 +373,6 @@ export function formatStart(botDisplayName: string): string {
 
 // ---- Devie's taskAddedMsg (issue #124 stage S3) --------------------------
 
-/** Devie's `PRIORITY_EMOJI` (issue #124 stage S3) — deliberately distinct
- * from `PRIORITY_BADGE` above, which stays as-is for the standup card and
- * every other view. Used only by `formatTaskAdded`. */
-const TASK_ADDED_PRIORITY_EMOJI: Record<TaskPriority, string> = {
-  urgent: "🔴",
-  high: "🟠",
-  medium: "🔵",
-  low: "⚪",
-};
-
 function capitalizeFirst(word: string): string {
   return word.length === 0 ? word : word[0]!.toUpperCase() + word.slice(1);
 }
@@ -402,21 +392,30 @@ export interface TaskAddedInput {
  * `parse_mode: "HTML"`. This repo's kept extras (the past-due warning and
  * the couldn't-notify notice) are appended by `createBot.ts`'s addtask
  * handler, after this card's italic closing line — not part of this
- * function. */
-export function formatTaskAdded(input: TaskAddedInput): string {
-  const dot = TASK_ADDED_PRIORITY_EMOJI[input.priority];
+ * function.
+ *
+ * Issue #207 (spec #201's shared vocabulary): the priority dot now comes
+ * from the shared `PRIORITY_BADGE` table (medium/low carry none, replacing
+ * the second priority table this card used to keep for itself), the
+ * identifier renders through the shared `formatTaskRefHtml`, and the due
+ * date renders through the shared `renderDueDate` in long form — this card
+ * concerns a single task, matching every other single-task message. `now`
+ * is required for that renderer, same as every other formatter here that
+ * calls it. */
+export function formatTaskAdded(input: TaskAddedInput, now: Date): string {
+  const dot = PRIORITY_BADGE[input.priority];
   const lines = [
-    `${dot} Task added · ${capitalizeFirst(input.priority)}:`,
+    `Task added${dot} · ${capitalizeFirst(input.priority)}:`,
     `<b>${esc(input.title)}</b>`,
   ];
   if (input.assigneeUsername) {
     lines.push(`👤 Assigned to: @${esc(input.assigneeUsername)}`);
   }
   if (input.dueDate) {
-    const due = DateTime.fromISO(input.dueDate, { zone: MANILA_ZONE }).toFormat("LLL d, yyyy");
+    const due = renderDueDate(input.dueDate, now, false, "long");
     lines.push(`📅 Due: ${due}`);
   }
-  lines.push(`🪪 ID: <code>t${input.id}</code>`);
+  lines.push(`🪪 ID: ${formatTaskRefHtml(input.id)}`);
   lines.push("", "<i>Refresh the dashboard to see your changes.</i>");
   return lines.join("\n");
 }
@@ -432,8 +431,13 @@ export function formatCompleteOk(title: string): string {
 }
 
 /** `status` renders with underscores swapped for spaces, per issue #124
- * stage S3 — deliberately not `statusLabel`'s Title Case rendering. */
+ * stage S3 — deliberately not `statusLabel`'s Title Case rendering. Issue
+ * #207: `/done` and `/update <ref> review` produce the same outcome
+ * (`in_review`), so this delegates to `formatDoneOk` for that one status,
+ * making the two commands' confirmations byte-identical rather than merely
+ * similar. */
 export function formatUpdateOk(title: string, status: TaskStatus): string {
+  if (status === "in_review") return formatDoneOk(title);
   const emoji = STATUS_EMOJI[status] ?? "📌";
   return `${emoji} <b>${esc(title)}</b>\nUpdated to: <b>${status.replace(/_/g, " ")}</b>`;
 }
@@ -467,7 +471,14 @@ function pluralize(n: number, word: string): string {
 /** Devie's batch reply shapes (issue #124 stage S3): a per-kind success
  * header and line style, failures grouped at the end under a `⚠️ Skipped`
  * header, and — when nothing at all succeeded — the dedicated
- * "no tasks were updated" block instead of any per-command usage text. */
+ * "no tasks were updated" block instead of any per-command usage text.
+ *
+ * Issue #207 (spec #201's density reduction): when every success shares one
+ * status, the header already names it (`/done`/`/complete` always share
+ * one; `/update` gains it here), so each line's own trailing
+ * `→ <b>status</b>` is dropped — at twenty tasks that was twenty identical
+ * trailing phrases. It's retained only when a mixed-status `/update` batch
+ * makes the lines genuinely differ. */
 export function formatBatchReply(
   kind: "done" | "complete" | "update",
   successes: BatchSuccessLine[],
@@ -482,17 +493,24 @@ export function formatBatchReply(
     return lines.join("\n");
   }
 
+  const uniformStatusWord = successes.every((s) => s.statusWord === successes[0]!.statusWord)
+    ? successes[0]!.statusWord
+    : undefined;
+
   const header =
     kind === "done"
       ? `👀 <b>Moved ${pluralize(successes.length, "task")} to In Review.</b>`
       : kind === "complete"
         ? `✅ <b>Marked ${pluralize(successes.length, "task")} as done.</b>`
-        : `✅ <b>Updated ${pluralize(successes.length, "task")}.</b>`;
+        : uniformStatusWord !== undefined
+          ? `✅ <b>Updated ${pluralize(successes.length, "task")} to ${uniformStatusWord}.</b>`
+          : `✅ <b>Updated ${pluralize(successes.length, "task")}.</b>`;
 
   const lines = [header];
   for (const s of successes) {
+    const statusSuffix = uniformStatusWord !== undefined ? "" : ` → <b>${s.statusWord}</b>`;
     lines.push(
-      `• ${s.emoji} <code>${s.ref}</code> ${esc(s.title)} → <b>${s.statusWord}</b>${s.metaSuffix ?? ""}`,
+      `• ${s.emoji} <code>${s.ref}</code> ${esc(s.title)}${statusSuffix}${s.metaSuffix ?? ""}`,
     );
   }
   if (failures.length > 0) {

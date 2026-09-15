@@ -1157,7 +1157,7 @@ describe("Devie's batch reply shape (issue #124 stage S3)", () => {
     expect(call.payload.parse_mode).toBe("HTML");
     const text = call.payload.text as string;
     expect(text).toContain("👀 <b>Moved 1 task to In Review.</b>");
-    expect(text).toContain(`<code>T-${String(id).padStart(3, "0")}</code> Fix the login bug → <b>in review</b>`);
+    expect(text).toContain(`<code>T-${String(id).padStart(3, "0")}</code> Fix the login bug`);
     expect(text).toContain("⚠️ <b>Skipped 1 item:</b>");
     expect(text).toContain("t999");
   });
@@ -1197,7 +1197,7 @@ describe("Devie's batch reply shape (issue #124 stage S3)", () => {
 
     const call = lastCall(testBot.calls, "sendMessage")!;
     const text = call.payload.text as string;
-    expect(text).toContain("✅ <b>Updated 2 tasks.</b>");
+    expect(text).toContain("✅ <b>Updated 2 tasks to done.</b>");
     expect(text).toContain("  🔗 https://example.com/pr/1");
   });
 

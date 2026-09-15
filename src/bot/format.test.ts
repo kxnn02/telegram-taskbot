@@ -24,6 +24,7 @@ import {
   COMPLETE_USAGE,
   UPDATE_USAGE,
 } from "./format.js";
+import { formatTaskRefHtml } from "./taskRef.js";
 
 function task(overrides: Partial<TaskWithFlags> = {}): TaskWithFlags {
   return {
@@ -555,53 +556,80 @@ describe("chunkMessage (issue #55/F8)", () => {
   });
 });
 
-describe("formatTaskAdded (issue #124 stage S3, Devie's taskAddedMsg)", () => {
+describe("formatTaskAdded (issue #207 — shared vocabulary: shared identifier renderer, shared priority table, long-form due date)", () => {
+  const NOW = new Date("2026-09-09T12:00:00Z");
+
   it("renders every line when assignee and due date are both present", () => {
-    const text = formatTaskAdded({
-      id: 42,
-      title: "Fix the login bug",
-      priority: "medium",
-      assigneeUsername: "dale",
-      dueDate: "2026-09-09",
-    });
+    const text = formatTaskAdded(
+      {
+        id: 42,
+        title: "Fix the login bug",
+        priority: "medium",
+        assigneeUsername: "dale",
+        dueDate: "2026-09-10",
+      },
+      NOW,
+    );
     expect(text).toBe(
       [
-        "🔵 Task added · Medium:",
+        "Task added · Medium:",
         "<b>Fix the login bug</b>",
         "👤 Assigned to: @dale",
-        "📅 Due: Sep 9, 2026",
-        "🪪 ID: <code>t42</code>",
+        "📅 Due: tomorrow",
+        `🪪 ID: ${formatTaskRefHtml(42)}`,
         "",
         "<i>Refresh the dashboard to see your changes.</i>",
       ].join("\n"),
     );
   });
 
-  it("maps every priority to Devie's PRIORITY_EMOJI dot, not this repo's PRIORITY_BADGE", () => {
-    expect(formatTaskAdded({ id: 1, title: "t", priority: "urgent" })).toContain("🔴 Task added · Urgent:");
-    expect(formatTaskAdded({ id: 1, title: "t", priority: "high" })).toContain("🟠 Task added · High:");
-    expect(formatTaskAdded({ id: 1, title: "t", priority: "medium" })).toContain("🔵 Task added · Medium:");
-    expect(formatTaskAdded({ id: 1, title: "t", priority: "low" })).toContain("⚪ Task added · Low:");
+  it("renders the due date in long form (weekday + month name), via the shared renderer", () => {
+    const text = formatTaskAdded(
+      { id: 1, title: "t", priority: "medium", dueDate: "2026-09-25" },
+      NOW,
+    );
+    expect(text).toContain("📅 Due: Friday, September 25");
+  });
+
+  it("follows the shared priority table: urgent and high carry a dot, medium and low carry none", () => {
+    expect(formatTaskAdded({ id: 1, title: "t", priority: "urgent" }, NOW)).toContain(
+      "Task added 🔴 · Urgent:",
+    );
+    expect(formatTaskAdded({ id: 1, title: "t", priority: "high" }, NOW)).toContain(
+      "Task added 🟠 · High:",
+    );
+    expect(formatTaskAdded({ id: 1, title: "t", priority: "medium" }, NOW)).toContain(
+      "Task added · Medium:",
+    );
+    expect(formatTaskAdded({ id: 1, title: "t", priority: "low" }, NOW)).toContain(
+      "Task added · Low:",
+    );
   });
 
   it("omits the Assigned-to line when there is no assignee", () => {
-    const text = formatTaskAdded({ id: 1, title: "t", priority: "medium" });
+    const text = formatTaskAdded({ id: 1, title: "t", priority: "medium" }, NOW);
     expect(text).not.toContain("Assigned to");
   });
 
   it("omits the Due line when there is no due date", () => {
-    const text = formatTaskAdded({ id: 1, title: "t", priority: "medium", assigneeUsername: "dale" });
+    const text = formatTaskAdded(
+      { id: 1, title: "t", priority: "medium", assigneeUsername: "dale" },
+      NOW,
+    );
     expect(text).not.toContain("📅 Due");
   });
 
-  it("always renders the lowercase t{id} form, never the T-001 form", () => {
-    const text = formatTaskAdded({ id: 7, title: "t", priority: "medium" });
-    expect(text).toContain("<code>t7</code>");
-    expect(text).not.toContain("T-007");
+  it("renders the identifier through the shared monospace T-0xx renderer, not the lowercase t{id} form", () => {
+    const text = formatTaskAdded({ id: 7, title: "t", priority: "medium" }, NOW);
+    expect(text).toContain(formatTaskRefHtml(7));
+    expect(text).not.toContain("<code>t7</code>");
   });
 
   it("HTML-escapes a title containing < > &", () => {
-    const text = formatTaskAdded({ id: 1, title: "Fix <script> & \"bug\"", priority: "medium" });
+    const text = formatTaskAdded(
+      { id: 1, title: "Fix <script> & \"bug\"", priority: "medium" },
+      NOW,
+    );
     expect(text).toContain("<b>Fix &lt;script&gt; &amp; \"bug\"</b>");
   });
 });
@@ -639,6 +667,12 @@ describe("formatDoneOk / formatCompleteOk / formatUpdateOk (issue #124 stage S3)
     expect(formatCompleteOk(title)).toContain("&lt;b&gt;x&lt;/b&gt; &amp; y");
     expect(formatUpdateOk(title, "done")).toContain("&lt;b&gt;x&lt;/b&gt; &amp; y");
   });
+
+  it("issue #207: /done and /update <ref> review produce an identical confirmation sentence and leading emoji", () => {
+    expect(formatUpdateOk("Fix the login bug", "in_review")).toBe(
+      formatDoneOk("Fix the login bug"),
+    );
+  });
 });
 
 describe("formatBatchReply (issue #124 stage S3)", () => {
@@ -651,7 +685,7 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
     expect(text).toBe(
       [
         "👀 <b>Moved 1 task to In Review.</b>",
-        "• 👀 <code>T-001</code> Fix the login bug → <b>in review</b>",
+        "• 👀 <code>T-001</code> Fix the login bug",
       ].join("\n"),
     );
   });
@@ -677,7 +711,7 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
     expect(text).toBe(
       [
         "✅ <b>Marked 1 task as done.</b>",
-        "• ✅ <code>T-001</code> Fix the login bug → <b>done</b>",
+        "• ✅ <code>T-001</code> Fix the login bug",
       ].join("\n"),
     );
   });
@@ -698,8 +732,8 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
     );
     expect(text).toBe(
       [
-        "✅ <b>Updated 1 task.</b>",
-        "• ✅ <code>T-001</code> Fix the login bug → <b>done</b>",
+        "✅ <b>Updated 1 task to done.</b>",
+        "• ✅ <code>T-001</code> Fix the login bug",
         "  🔗 https://example.com/pr/1",
         "  📝 ready for QA",
       ].join("\n"),
@@ -723,8 +757,8 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
     );
     expect(text).toBe(
       [
-        "✅ <b>Updated 1 task.</b>",
-        "• ✅ <code>T-001</code> Fix the login bug → <b>done</b>",
+        "✅ <b>Updated 1 task to done.</b>",
+        "• ✅ <code>T-001</code> Fix the login bug",
         "",
         "⚠️ <b>Skipped 1 item:</b>",
         "• <b>t22</b> → no active task found",
@@ -768,6 +802,83 @@ describe("formatBatchReply (issue #124 stage S3)", () => {
     const text = formatBatchReply("done", [], [{ ref: "<x>", reason: "a & b" }]);
     expect(text).toContain("&lt;x&gt;");
     expect(text).toContain("a &amp; b");
+  });
+
+  it("issue #207: a single-status bulk reply omits the trailing status on each line", () => {
+    const text = formatBatchReply(
+      "update",
+      [
+        { ref: "T-001", title: "First", statusWord: "done", emoji: "✅" },
+        { ref: "T-002", title: "Second", statusWord: "done", emoji: "✅" },
+      ],
+      [],
+    );
+    expect(text).toBe(
+      [
+        "✅ <b>Updated 2 tasks to done.</b>",
+        "• ✅ <code>T-001</code> First",
+        "• ✅ <code>T-002</code> Second",
+      ].join("\n"),
+    );
+  });
+
+  it("issue #207: a mixed-status bulk update retains the trailing status on every line", () => {
+    const text = formatBatchReply(
+      "update",
+      [
+        { ref: "T-001", title: "First", statusWord: "done", emoji: "✅" },
+        { ref: "T-002", title: "Second", statusWord: "in review", emoji: "👀" },
+      ],
+      [],
+    );
+    expect(text).toBe(
+      [
+        "✅ <b>Updated 2 tasks.</b>",
+        "• ✅ <code>T-001</code> First → <b>done</b>",
+        "• 👀 <code>T-002</code> Second → <b>in review</b>",
+      ].join("\n"),
+    );
+  });
+
+  it("issue #207: /done and /complete batches (always single-status) also omit the trailing status", () => {
+    const text = formatBatchReply(
+      "done",
+      [
+        { ref: "T-001", title: "First", statusWord: "in review", emoji: "👀" },
+        { ref: "T-002", title: "Second", statusWord: "in review", emoji: "👀" },
+      ],
+      [],
+    );
+    expect(text).toBe(
+      [
+        "👀 <b>Moved 2 tasks to In Review.</b>",
+        "• 👀 <code>T-001</code> First",
+        "• 👀 <code>T-002</code> Second",
+      ].join("\n"),
+    );
+  });
+
+  it("issue #207: a single-success update batch still retains a link/note rider suffix", () => {
+    const text = formatBatchReply(
+      "update",
+      [
+        {
+          ref: "T-001",
+          title: "Fix the login bug",
+          statusWord: "done",
+          emoji: "✅",
+          metaSuffix: "\n  🔗 https://example.com/pr/1",
+        },
+      ],
+      [],
+    );
+    expect(text).toBe(
+      [
+        "✅ <b>Updated 1 task to done.</b>",
+        "• ✅ <code>T-001</code> Fix the login bug",
+        "  🔗 https://example.com/pr/1",
+      ].join("\n"),
+    );
   });
 });
 

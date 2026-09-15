@@ -1034,13 +1034,16 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       await ctx.reply(`Couldn't create the task: ${result.error}`);
       return;
     }
-    let reply = formatTaskAdded({
-      id: result.value.id,
-      title: result.value.title,
-      priority: result.value.priority,
-      assigneeUsername: result.value.assigneeUsername,
-      dueDate: result.value.dueDate,
-    });
+    let reply = formatTaskAdded(
+      {
+        id: result.value.id,
+        title: result.value.title,
+        priority: result.value.priority,
+        assigneeUsername: result.value.assigneeUsername,
+        dueDate: result.value.dueDate,
+      },
+      new Date(),
+    );
     if (isPastDate(result.value.dueDate, new Date())) {
       reply += `\n${PAST_DUE_WARNING}`;
     }
