@@ -336,6 +336,6 @@ describe("renderReviewQueueHtml", () => {
     const lines = renderReviewQueueHtml([], NOW);
     expect(lines[0]).toBe("");
     expect(lines[1]).toBe("👀 <b>For Review and Approval — Dom / Jedd</b>");
-    expect(lines[2]).toBe("<i>Nothing waiting for review right now.</i>");
+    expect(lines[2]).toBe("<i>No tasks waiting for review right now.</i>");
   });
 });

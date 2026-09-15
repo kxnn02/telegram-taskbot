@@ -28,7 +28,7 @@ export const STANDUP_BUCKET_EMOJI: Record<StandupBucket, string> = {
 export const NO_OPEN_TASKS_HTML = "<i>No open tasks right now.</i>";
 
 export const STANDUP_APPROVERS = "Dom / Jedd";
-export const NOTHING_FOR_REVIEW_HTML = "<i>Nothing waiting for review right now.</i>";
+export const NOTHING_FOR_REVIEW_HTML = "<i>No tasks waiting for review right now.</i>";
 
 export function bucketOf(task: TaskWithFlags): StandupBucket | undefined {
   if (task.status === "done") return undefined;

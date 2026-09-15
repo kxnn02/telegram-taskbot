@@ -85,14 +85,14 @@ export function buildStandupOverviewCard(
 
   lines.push("", `✅ <b>Done this week (${thisWeekLabel})</b>`);
   if (doneThisWeek.length === 0) {
-    lines.push("<i>No tasks completed this week yet.</i>");
+    lines.push("<i>No tasks completed this week.</i>");
   } else {
     for (const t of doneThisWeek) lines.push(`▸ ${esc(t.title)} (@${esc(t.assigneeUsername)})`);
   }
 
   lines.push("", `🗓️ <b>Done last week (${lastWeekLabel})</b>`);
   if (doneLastWeek.length === 0) {
-    lines.push("<i>Nothing completed last week.</i>");
+    lines.push("<i>No tasks completed last week.</i>");
   } else {
     for (const t of doneLastWeek) lines.push(`▸ ${esc(t.title)} (@${esc(t.assigneeUsername)})`);
   }

@@ -183,8 +183,8 @@ describe("buildStandupOverviewCard — person-first layout (#165 S2)", () => {
     expect(card.startsWith("Good afternoon, team!")).toBe(true);
     expect(card).toContain("✅ <b>Done this week");
     expect(card).toContain("🗓️ <b>Done last week");
-    expect(card).toContain("<i>No tasks completed this week yet.</i>");
-    expect(card).toContain("<i>Nothing completed last week.</i>");
+    expect(card).toContain("<i>No tasks completed this week.</i>");
+    expect(card).toContain("<i>No tasks completed last week.</i>");
     expect(card.endsWith(CERT_TIP_HTML)).toBe(true);
   });
 

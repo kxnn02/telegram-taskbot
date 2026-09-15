@@ -423,7 +423,7 @@ describe("formatStandup (person-first layout, #165 S3)", () => {
     expect(text).toContain("Cohort 5");
     expect(text).toContain("Tuesday, September 1, 2026");
     expect(text).toContain("✅ <b>Done this week (0)</b>");
-    expect(text).toContain("No tasks completed this week yet.");
+    expect(text).toContain("No tasks completed this week.");
   });
 
   it("formatStandupFiltered(report, 'overview') is exactly formatStandup(report)", async () => {
@@ -676,15 +676,15 @@ describe("formatStandupFiltered (issue #103 item 3)", () => {
     }
   });
 
-  it("uses Devie's empty-state wording for each filter, verbatim", async () => {
+  it("uses the shared empty-state shape for each filter (issue #208)", async () => {
     const { service } = makeService();
     const report = await buildStandup(service, carla, NOW);
-    expect(formatStandupFiltered(report, "active")).toContain("No active tasks right now.");
-    expect(formatStandupFiltered(report, "backlog")).toContain("Backlog is clear!");
+    expect(formatStandupFiltered(report, "active")).toContain("No open tasks right now.");
+    expect(formatStandupFiltered(report, "backlog")).toContain("No backlog tasks.");
     expect(formatStandupFiltered(report, "review")).toContain(
-      "Nothing waiting for review right now.",
+      "No tasks waiting for review right now.",
     );
-    expect(formatStandupFiltered(report, "done")).toContain("No tasks completed this week yet.");
+    expect(formatStandupFiltered(report, "done")).toContain("No tasks completed this week.");
   });
 
   it("cohort isolation: another cohort's tasks appear under no filter", async () => {
@@ -787,7 +787,7 @@ describe("formatStandup — review and approval section (issue #186)", () => {
     const text = formatStandup(report);
 
     expect(text).toContain("👀 <b>For Review and Approval — Dom / Jedd</b>");
-    expect(text).toContain("Nothing waiting for review right now.");
+    expect(text).toContain("No tasks waiting for review right now.");
   });
 
   // Issue #209: this used to pin the opposite (no HTML tags) — now that

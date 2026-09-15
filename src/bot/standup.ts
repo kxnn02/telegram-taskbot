@@ -201,7 +201,7 @@ export function formatStandup(report: StandupReport, certTipHtml?: string): stri
 
   lines.push("", `✅ <b>Done this week (${report.doneThisWeek.length})</b>`);
   if (report.doneThisWeek.length === 0) {
-    lines.push("<i>No tasks completed this week yet.</i>");
+    lines.push("<i>No tasks completed this week.</i>");
   } else {
     for (const t of report.doneThisWeek) {
       lines.push(`▸ ${formatTaskRefHtml(t.id)} ${esc(t.title)} (@${esc(t.assigneeUsername)})`);
@@ -280,26 +280,31 @@ export function buildStandupKeyboard(
  * (`lib/standup.ts:266-300`), copied verbatim apart from the HTML tags —
  * these headings/empty states stay unwrapped plain text even though the
  * surrounding card is now sent as HTML (issue #209); they carry no markup
- * either bot renders. */
+ * either bot renders.
+ *
+ * Issue #208: the heading labels (including "Active", carbon-copied from
+ * the bot this repo is modelled on — see `buildStandupKeyboard` above) are
+ * left untouched; only the empty-state sentences are collapsed onto the
+ * shared `No <thing>.` shape. */
 const FILTER_SECTION: Record<
   Exclude<StandupFilter, "overview">,
   { heading: (report: StandupReport) => string; empty: string }
 > = {
   active: {
     heading: (r) => `🔄 Active (${countFor(r, STANDUP_ACTIVE_COUNT_STATUSES)})`,
-    empty: "No active tasks right now.",
+    empty: "No open tasks right now.",
   },
   backlog: {
     heading: (r) => `📦 Backlog (${r.counts.backlog})`,
-    empty: "Backlog is clear!",
+    empty: "No backlog tasks.",
   },
   review: {
     heading: (r) => `👀 For Review (${r.counts.in_review})`,
-    empty: "Nothing waiting for review right now.",
+    empty: "No tasks waiting for review right now.",
   },
   done: {
     heading: (r) => `✅ Done this week (${r.doneThisWeek.length})`,
-    empty: "No tasks completed this week yet.",
+    empty: "No tasks completed this week.",
   },
 };
 
