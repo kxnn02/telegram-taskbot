@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseDueArgs, type DueParsed, type DueParseError } from "./dueParse.js";
+import { parseDueArgs, isWholeArgDate, type DueParsed, type DueParseError } from "./dueParse.js";
 
 // Monday, 2026-08-31, 10:00 Asia/Manila (02:00 UTC) — same reference instant
 // `addTaskParse.test.ts` uses, so ISO expectations line up across both.
@@ -82,5 +82,40 @@ describe("parseDueArgs", () => {
     const result = ok(parseDueArgs("t21 2020-01-15", REFERENCE));
     expect(result.ref).toBe("t21");
     expect(result.dueDate.isoDate).toBe("2020-01-15");
+  });
+
+  it("a multi-token, ref-less date still greedily takes the first token as ref (documented, handled by the caller, not here)", () => {
+    // "next monday" is indistinguishable, at this layer, from a one-word
+    // ref "next" plus a one-word date "monday" — see isWholeArgDate below,
+    // which is what createBot.ts's /due handler uses to recover from this
+    // once the ref has already failed to resolve against any real task.
+    const result = ok(parseDueArgs("next monday", REFERENCE));
+    expect(result.ref).toBe("next");
+  });
+});
+
+describe("isWholeArgDate", () => {
+  it("true for a multi-token phrase that is entirely a date", () => {
+    expect(isWholeArgDate("next monday", REFERENCE)).toBe(true);
+  });
+
+  it("true for a single-token date", () => {
+    expect(isWholeArgDate("friday", REFERENCE)).toBe(true);
+  });
+
+  it("false when a leading word isn't part of the date", () => {
+    expect(isWholeArgDate("nonexistent friday", REFERENCE)).toBe(false);
+  });
+
+  it("false for a plain ref with no date at all", () => {
+    expect(isWholeArgDate("t21", REFERENCE)).toBe(false);
+  });
+
+  it("tolerates trailing punctuation", () => {
+    expect(isWholeArgDate("next monday!", REFERENCE)).toBe(true);
+  });
+
+  it("false for an empty string", () => {
+    expect(isWholeArgDate("", REFERENCE)).toBe(false);
   });
 });

@@ -15,7 +15,7 @@ import { notifyUser, notifyStatusChange } from "./notify.js";
 import { suggestClosestUsername } from "./usernameSuggest.js";
 import { parseStatusWord, VALID_STATUS_WORDS_TEXT } from "./statusParse.js";
 import { parseRefListItems, parseUpdateItems, type BatchItem } from "./updateBatch.js";
-import { parseDueArgs } from "./dueParse.js";
+import { parseDueArgs, isWholeArgDate } from "./dueParse.js";
 import { findTaskByRef, type TaskLookup } from "./taskLookup.js";
 import { formatTaskRef, formatTaskRefHtml } from "./taskRef.js";
 import { renderDueDate } from "../date/renderDueDate.js";
@@ -875,6 +875,21 @@ export function createBot(options: CreateBotOptions): CreatedBot {
       }
       const resolved = await resolveRef(caller, parsed.ref);
       if (resolved.kind !== "found") {
+        // The parser's own greedy ref (issue #222 follow-up finding)
+        // can't tell "next monday" — no ref at all, just a two-word date —
+        // apart from a real one-word ref "next" plus a one-word date
+        // "monday": both parse as ref "next" / date "monday", and a task
+        // titled "next steps" must still resolve via that same "next"
+        // keyword. So this is resolved here instead, and only for the
+        // "none" case: once "next" has already failed to match any task,
+        // check whether the *whole* typed argument is itself a complete
+        // date. If it is, the member typed a date with no ref, so show
+        // usage. The ambiguous-match path is untouched — a genuinely
+        // ambiguous keyword still gets the "which one?" list.
+        if (resolved.kind === "none" && isWholeArgDate(raw, clock.now())) {
+          await ctx.reply(DUE_USAGE, { parse_mode: "HTML" as const });
+          return;
+        }
         await replyNotFoundOrAmbiguous(ctx, "/due", parsed.ref, resolved);
         return;
       }

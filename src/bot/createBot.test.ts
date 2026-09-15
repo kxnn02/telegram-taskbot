@@ -1233,6 +1233,53 @@ describe("/due (issue #222) — single-item only; bulk is a later ticket", () =>
     expect(lastReplyText(testBot.calls)).toBe(DUE_USAGE);
   });
 
+  it("a multi-token, ref-less date with no matching task replies with the usage block, not 'not found'", async () => {
+    // The parser can't tell "next monday" (no ref, just a two-word date)
+    // apart from a one-word ref "next" plus a one-word date "monday" —
+    // that's `/due`'s own doc comment. The handler resolves the ambiguity
+    // itself: only once "next" has failed to match any real task does it
+    // fall back to checking whether the whole argument is a complete date.
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/due next monday"));
+
+    const { DUE_USAGE } = await import("./format.js");
+    expect(lastReplyText(testBot.calls)).toBe(DUE_USAGE);
+  });
+
+  it("a ref-like leading word that is not part of any date still replies not-found, not usage", async () => {
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(
+      messageUpdate(userId, "alice", userId, "/due nonexistent friday"),
+    );
+
+    expect(lastReplyText(testBot.calls)).toContain("No open task found");
+  });
+
+  it("a real task whose title keyword matches the leading word of a ref-less-looking date is still re-dated", async () => {
+    // A task literally titled "next steps" must keep resolving via the
+    // "next" keyword — the ref-less-date fallback above must never shadow
+    // a genuine keyword match.
+    const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
+    const testBot = makeTestBot(roster);
+    const id = await seedTask(testBot, "alice", "alice", "next steps", "2026-09-10");
+    const userId = nextUserId();
+
+    await testBot.bot.handleUpdate(messageUpdate(userId, "alice", userId, "/due next monday"));
+
+    const reply = lastReplyText(testBot.calls);
+    expect(reply).toContain("next steps");
+    expect(reply).toContain("📅 Due:");
+    const task = await testBot.service.getTask({ username: "alice", cohortId: COHORT }, id);
+    if (!task.ok) throw new Error("read failed");
+    expect(task.value.dueDate).not.toBe("2026-09-10");
+  });
+
   it("non-date trailing text is rejected by name, not partially matched, and changes nothing", async () => {
     const roster = new Roster([{ username: "alice", cohortId: COHORT }]);
     const testBot = makeTestBot(roster);
