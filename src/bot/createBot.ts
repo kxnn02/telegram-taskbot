@@ -42,6 +42,7 @@ import {
   formatDeadlines,
   formatDoneOk,
   formatHelp,
+  formatStart,
   formatTaskAdded,
   formatTaskNotFound,
   formatUpdateOk,
@@ -267,16 +268,20 @@ export function createBot(options: CreateBotOptions): CreatedBot {
   });
 
   // ---- /start and /help --------------------------------------------------
-  // Issue #124 stage S3: Devie's /start is a pure alias for /help — no role
-  // question, no hello message of its own, no group-membership check.
-  // Registered on the same handler, exactly like /complete and /completed
-  // share `completeHandler` below.
+  // Issue #211: /start is a real onboarding message, not a /help alias
+  // (reversing issue #124 stage S3's deliberate alias) — a brand-new
+  // cohort member's first contact with the bot shouldn't be a twenty-five
+  // line command reference.
+
+  const startHandler = withCaller(async (ctx: import("grammy").Context) => {
+    await ctx.reply(formatStart(bot.botInfo.first_name), { parse_mode: "HTML" as const });
+  });
 
   const helpHandler = withCaller(async (ctx: import("grammy").Context) => {
     await ctx.reply(formatHelp(bot.botInfo.first_name), { parse_mode: "HTML" as const });
   });
 
-  bot.command("start", helpHandler);
+  bot.command("start", startHandler);
   bot.command("help", helpHandler);
 
   /** Sends `text` as one or more Telegram-sized messages (issue #55/F8):

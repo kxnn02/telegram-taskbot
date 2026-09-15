@@ -280,16 +280,16 @@ const HELP_SECTIONS: { heading: string; lines: string[] }[] = [
     ],
   },
   {
+    // Issue #211: bulk syntax used to be enumerated per command (eight
+    // near-identical lines). It's a property shared by all three update
+    // commands, so it's stated once here instead.
     heading: "✏️ <b>Update</b>",
     lines: [
-      "/done &lt;ref&gt; — mark as in review (e.g. /done 23)",
-      "/done t21,t22,t23 — bulk mark as in review",
-      "/complete &lt;ref&gt; (or /completed &lt;ref&gt;) — mark as done (e.g. /complete 23)",
-      "/complete t21,t22,t23 — bulk mark as done",
+      `/done &lt;ref&gt; — mark as in review (e.g. /done ${formatTaskRefHtml(23)})`,
+      "/complete &lt;ref&gt; (or /completed &lt;ref&gt;) — mark as done",
       "/update &lt;ref&gt; &lt;status&gt; — single update",
-      "/update t21,t22,t23 done — bulk shared status",
-      "/update t21 done, t22 review, t23 inprogress — bulk mixed status",
-      "/update, one ref+status per line — bulk multiline",
+      `/done, /complete and /update all accept a comma- or newline-separated list of refs for bulk updates (e.g. /done ${formatTaskRefHtml(21)},${formatTaskRefHtml(22)},${formatTaskRefHtml(23)})`,
+      "⚠️ /done marks In Review, not Done — use /complete to mark a task actually finished.",
     ],
   },
 ];
@@ -348,6 +348,26 @@ export function formatHelp(botDisplayName: string): string {
       "",
     ]),
     "<i>Statuses: backlog · todo · in progress · in review · blocked · done</i>",
+  ].join("\n");
+}
+
+/** Issue #211: a new member's first message, distinct from `formatHelp`.
+ * `/start` used to be a byte-identical alias of `/help` (issue #124 stage
+ * S3) — that's reversed here, so this is what a brand-new cohort member
+ * sees on first contact instead of the full command reference.
+ * `botDisplayName` is passed the same way `formatHelp` is. */
+export function formatStart(botDisplayName: string): string {
+  return [
+    `👋 <b>Hi, I'm ${botDisplayName}!</b> I track this cohort's tasks.`,
+    "",
+    "Three commands to try right away:",
+    "/addtask &lt;title&gt; — add a task",
+    "/tasks — see what's open",
+    `/done &lt;ref&gt; — send a task for review (e.g. /done ${formatTaskRefHtml(23)})`,
+    "",
+    "I'll DM you when a task's assigned to you, and post a standup here each morning.",
+    "",
+    "Send /help for the full command list.",
   ].join("\n");
 }
 

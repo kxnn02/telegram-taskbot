@@ -17,6 +17,7 @@ import {
   formatUpdateOk,
   formatWeeklyCompleted,
   formatHelp,
+  formatStart,
   statusLabel,
   UNKNOWN_COMMAND_REPLY,
   DONE_USAGE,
@@ -399,14 +400,11 @@ describe("formatHelp (issue #124 stage S3: Devie's HTML card, verbatim)", () => 
     '@-mention the bot, "add task &lt;title&gt; @username" — tag + assign in one go',
     "",
     "✏️ <b>Update</b>",
-    "/done &lt;ref&gt; — mark as in review (e.g. /done 23)",
-    "/done t21,t22,t23 — bulk mark as in review",
-    "/complete &lt;ref&gt; (or /completed &lt;ref&gt;) — mark as done (e.g. /complete 23)",
-    "/complete t21,t22,t23 — bulk mark as done",
+    "/done &lt;ref&gt; — mark as in review (e.g. /done <code>T-023</code>)",
+    "/complete &lt;ref&gt; (or /completed &lt;ref&gt;) — mark as done",
     "/update &lt;ref&gt; &lt;status&gt; — single update",
-    "/update t21,t22,t23 done — bulk shared status",
-    "/update t21 done, t22 review, t23 inprogress — bulk mixed status",
-    "/update, one ref+status per line — bulk multiline",
+    "/done, /complete and /update all accept a comma- or newline-separated list of refs for bulk updates (e.g. /done <code>T-021</code>,<code>T-022</code>,<code>T-023</code>)",
+    "⚠️ /done marks In Review, not Done — use /complete to mark a task actually finished.",
     "",
     "<i>Statuses: backlog · todo · in progress · in review · blocked · done</i>",
   ].join("\n");
@@ -431,6 +429,46 @@ describe("formatHelp (issue #124 stage S3: Devie's HTML card, verbatim)", () => 
 
   it("has no access-control wording of any kind", () => {
     const text = formatHelp("Test Bot").toLowerCase();
+    expect(text).not.toContain("higher-up");
+    expect(text).not.toContain("intern");
+    expect(text).not.toContain("restricted");
+  });
+});
+
+describe("formatStart (issue #211: a real onboarding message, not a /help alias)", () => {
+  it("differs from formatHelp", () => {
+    expect(formatStart("Test Bot")).not.toBe(formatHelp("Test Bot"));
+  });
+
+  it("names three commands a new member can try immediately", () => {
+    const text = formatStart("Test Bot");
+    expect(text).toContain("/addtask");
+    expect(text).toContain("/tasks");
+    expect(text).toContain("/done");
+  });
+
+  it("states that the bot DMs on assignment and posts a standup each morning", () => {
+    const text = formatStart("Test Bot").toLowerCase();
+    expect(text).toContain("dm");
+    expect(text).toContain("assign");
+    expect(text).toContain("standup");
+    expect(text).toContain("morning");
+  });
+
+  it("points at /help for the full list", () => {
+    expect(formatStart("Test Bot")).toContain("/help");
+  });
+
+  it("uses the shared monospace task-identifier vocabulary in its example", () => {
+    expect(formatStart("Test Bot")).toContain("<code>T-023</code>");
+  });
+
+  it("interpolates whatever display name it's given, unescaped", () => {
+    expect(formatStart("Cohort 5 Bot")).toContain("Cohort 5 Bot");
+  });
+
+  it("has no access-control wording of any kind", () => {
+    const text = formatStart("Test Bot").toLowerCase();
     expect(text).not.toContain("higher-up");
     expect(text).not.toContain("intern");
     expect(text).not.toContain("restricted");

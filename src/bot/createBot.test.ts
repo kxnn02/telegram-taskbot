@@ -294,8 +294,8 @@ describe("BOT_COMMANDS / HANDLED_COMMANDS", () => {
   });
 });
 
-describe("/start (issue #124 stage S3: a pure alias for /help)", () => {
-  it("registers the sender and sends byte-identical output to /help — no role question, no hello, no group check", async () => {
+describe("/start (issue #211: a real onboarding message, not a /help alias)", () => {
+  it("registers the sender and sends formatStart's output, not formatHelp's", async () => {
     const roster = new Roster([]);
     const testBot = makeTestBot(roster);
     const userId = nextUserId();
@@ -303,8 +303,9 @@ describe("/start (issue #124 stage S3: a pure alias for /help)", () => {
     await testBot.bot.handleUpdate(messageUpdate(userId, "newbie", userId, "/start"));
 
     const text = lastReplyText(testBot.calls);
-    const { formatHelp } = await import("./format.js");
-    expect(text).toBe(formatHelp("TestBot"));
+    const { formatStart, formatHelp } = await import("./format.js");
+    expect(text).toBe(formatStart("TestBot"));
+    expect(text).not.toBe(formatHelp("TestBot"));
     expect(text.toLowerCase()).not.toContain("intern");
     expect(text.toLowerCase()).not.toContain("higher-up");
     expect(await testBot.registrations.findUsername(userId)).toBe("newbie");
