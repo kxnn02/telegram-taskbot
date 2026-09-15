@@ -294,10 +294,22 @@ const HELP_SECTIONS: { heading: string; lines: string[] }[] = [
  * throw `Bad Request: message is too long`. `limit` defaults to 4000, not
  * 4096, to leave headroom for Telegram's own overhead. The single shared
  * implementation for every chunked reply, including the `/update` batch
- * summary — one rule, one place. */
+ * summary and the standup card's `<blockquote>` review queue (issue #210)
+ * — one rule, one place.
+ *
+ * Issue #210: a plain running-length split has no awareness of the
+ * `<blockquote>`/`</blockquote>` pair the standup card now always emits
+ * around its review queue, and Telegram rejects the *entire* message on a
+ * split that severs the pair. So while inside that region, the ordinary
+ * overflow checks below are suppressed — the region is left to grow past
+ * `limit` rather than split (a degraded, oversized chunk is safe; a
+ * malformed tag pair is not) — and only resume once `</blockquote>` closes
+ * it, which naturally forces a flush at that boundary on the very next
+ * line. A normal, blockquote-free message chunks exactly as before. */
 export function chunkMessage(text: string, limit = 4000): string[] {
   const chunks: string[] = [];
   let current = "";
+  let insideBlockquote = false;
 
   function flush() {
     if (current.length > 0) chunks.push(current);
@@ -305,7 +317,9 @@ export function chunkMessage(text: string, limit = 4000): string[] {
   }
 
   for (const line of text.split("\n")) {
-    if (line.length > limit) {
+    const trimmed = line.trim();
+
+    if (line.length > limit && !insideBlockquote) {
       flush();
       for (let i = 0; i < line.length; i += limit) {
         chunks.push(line.slice(i, i + limit));
@@ -313,12 +327,15 @@ export function chunkMessage(text: string, limit = 4000): string[] {
       continue;
     }
     const candidate = current.length === 0 ? line : `${current}\n${line}`;
-    if (candidate.length > limit) {
+    if (candidate.length > limit && !insideBlockquote) {
       flush();
       current = line;
     } else {
       current = candidate;
     }
+
+    if (trimmed === "<blockquote>") insideBlockquote = true;
+    else if (trimmed === "</blockquote>") insideBlockquote = false;
   }
   flush();
 

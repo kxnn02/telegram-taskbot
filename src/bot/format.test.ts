@@ -527,6 +527,38 @@ describe("chunkMessage (issue #55/F8)", () => {
       }
     }
   });
+
+  it("never splits inside a <blockquote> region, even when the region alone forces an over-limit chunk (issue #210)", () => {
+    // A standup-shaped card: some lines above the review queue, then a
+    // <blockquote> region long enough on its own to cross the limit,
+    // followed by more content after it closes.
+    const before = Array.from({ length: 20 }, (_, i) => `Above line ${i} padded out a bit`).join("\n");
+    const blockquoteBody = Array.from({ length: 150 }, (_, i) => `Queued task ${i} padded out to add length`).join("\n");
+    const after = Array.from({ length: 20 }, (_, i) => `Below line ${i} padded out a bit`).join("\n");
+    const text = [before, "<blockquote>", blockquoteBody, "</blockquote>", after].join("\n");
+
+    const chunks = chunkMessage(text, 4000);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      const opens = (chunk.match(/<blockquote>/g) ?? []).length;
+      const closes = (chunk.match(/<\/blockquote>/g) ?? []).length;
+      expect(opens).toBe(closes);
+    }
+    expect(chunks.join("\n")).toBe(text);
+  });
+
+  it("ordinary text with no <blockquote> still chunks exactly as before (no behavior change for a normal cohort)", () => {
+    const lines = Array.from({ length: 500 }, (_, i) => `Task #${i} — some line of text to pad it out`);
+    const text = lines.join("\n");
+
+    const chunks = chunkMessage(text, 4000);
+
+    expect(chunks.join("\n")).toBe(text);
+    for (const chunk of chunks) {
+      expect(chunk.length).toBeLessThanOrEqual(4000);
+    }
+  });
 });
 
 describe("formatTaskAdded (issue #207 — shared vocabulary: shared identifier renderer, shared priority table, long-form due date)", () => {
