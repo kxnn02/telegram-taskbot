@@ -16,7 +16,10 @@ interface Holiday {
   kind: HolidayKind;
 }
 
-// 2026 Philippine holidays, per Proclamation No. 727 s. 2025. Eid'l Fitr and
+// 2026 Philippine holidays, per Proclamation No. 1006 s. 2025, verified
+// against the proclamation for #228. The EDSA People Power Anniversary
+// (2026-02-25) is deliberately absent: that proclamation declares it a
+// special *working* day, so the standup still goes out. Eid'l Fitr and
 // Eid'l Adha are proclamation-dependent (set annually, close to the date)
 // and are deliberately omitted rather than guessed — see the fail-open note
 // below for what happens on an unconfirmed date.
@@ -32,7 +35,6 @@ const PH_HOLIDAYS_2026: Holiday[] = [
   { date: "2026-12-25", name: "Christmas Day", kind: "regular" },
   { date: "2026-12-30", name: "Rizal Day", kind: "regular" },
   { date: "2026-02-17", name: "Chinese New Year", kind: "special" },
-  { date: "2026-02-25", name: "EDSA People Power Anniversary", kind: "special" },
   { date: "2026-04-04", name: "Black Saturday", kind: "special" },
   { date: "2026-08-21", name: "Ninoy Aquino Day", kind: "special" },
   { date: "2026-11-01", name: "All Saints' Day", kind: "special" },
