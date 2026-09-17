@@ -36,10 +36,8 @@ describe("standupSkipReason", () => {
   });
 
   it("reports weekend, not holiday, when a holiday falls on a weekend", () => {
-    // 2026-08-31 (National Heroes Day) is a Monday, Asia/Manila — pick one
-    // that actually falls on a weekend: 2026-12-25 (Christmas Day) is a
-    // Friday, so use 2026-02-17 vs weekend check instead. Confirmed:
-    // 2026-11-01 (All Saints' Day) is a Sunday, Asia/Manila.
+    // 2026-11-01 (All Saints' Day, a special non-working day) is a Sunday
+    // in Asia/Manila, so the weekend check wins over the holiday check.
     const now = new Date("2026-11-01T04:00:00.000Z");
     expect(standupSkipReason(now)).toBe("weekend");
   });
