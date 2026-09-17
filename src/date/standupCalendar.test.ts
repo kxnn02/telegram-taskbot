@@ -35,6 +35,14 @@ describe("standupSkipReason", () => {
     expect(standupSkipReason(now)).toBe("holiday");
   });
 
+  it("sends on the EDSA anniversary, which is a special WORKING day", () => {
+    // 2026-02-25 is a Wednesday, Asia/Manila. Proclamation No. 1006 s. 2025
+    // declares it a special *working* day, not a non-working one, so the
+    // Cohort is at work and the standup must still go out (#228).
+    const now = new Date("2026-02-25T04:00:00.000Z");
+    expect(standupSkipReason(now)).toBeUndefined();
+  });
+
   it("reports weekend, not holiday, when a holiday falls on a weekend", () => {
     // 2026-11-01 (All Saints' Day, a special non-working day) is a Sunday
     // in Asia/Manila, so the weekend check wins over the holiday check.
