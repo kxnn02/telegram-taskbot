@@ -348,6 +348,42 @@ Note: Standby on-site.`;
     expect(result[2]!.title).toBe("deploy the site");
   });
 
+  it("strips the ‣ marker from every title of a mention-free ‣ list (issue #198)", () => {
+    const message = `‣ buy the domain
+‣ set up DNS
+‣ deploy the site`;
+    const result = parseBulkTasksHeuristic(message, REFERENCE);
+    expect(result).toHaveLength(3);
+    expect(result[0]!.title).toBe("buy the domain");
+    expect(result[1]!.title).toBe("set up DNS");
+    expect(result[2]!.title).toBe("deploy the site");
+    expect(result.every((t) => !t.title.includes("‣"))).toBe(true);
+  });
+
+  it("keeps a ‣ that appears mid-title intact (issue #198)", () => {
+    const message = `- render the A ‣ B transition
+- ship it`;
+    const result = parseBulkTasksHeuristic(message, REFERENCE);
+    expect(result).toHaveLength(2);
+    expect(result[0]!.title).toBe("render the A ‣ B transition");
+    expect(result[1]!.title).toBe("ship it");
+  });
+
+  it("still strips -, *, • and numbered markers after the ‣ fix (regression, issue #198)", () => {
+    const message = `* first thing
+• second thing
+- third thing
+4. fourth thing`;
+    const result = parseBulkTasksHeuristic(message, REFERENCE);
+    expect(result).toHaveLength(4);
+    expect(result.map((t) => t.title)).toEqual([
+      "first thing",
+      "second thing",
+      "third thing",
+      "fourth thing",
+    ]);
+  });
+
   it("does not bullet-split when only one line looks like a bullet (issue #193)", () => {
     const message = `- buy the domain
 set up DNS
