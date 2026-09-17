@@ -249,12 +249,24 @@ export function cleanTaskTitle(
 
 const BULK_TASK_LABEL_STRIP_RE = /^(action\s*plan|note|fyi|task|update)\s*:\s*/i;
 
+/** The set of literal bullet-marker characters (`-`, `*`, `•`, `‣`). The single
+ * source both `BULLET_LINE_RE` (detection) and the title-cleanup regex in
+ * `parseBulkTasksHeuristic` (stripping) are built from, so a marker accepted by
+ * one can never be left dangling by the other (issue #198). `-` stays first so
+ * it is a literal, not a range, when spliced into a character class. */
+const BULLET_MARKER_CHARS = "-*•‣";
+
 /** Matches a bullet/numbered list line (`- `, `* `, `• `, `‣ `, `1.`/`1)`).
  * The single source of truth for "is this line a list item?" — shared with
  * `shouldTriggerBulkCreate` (`src/bot/bulkTaskCreate.ts`) so the trigger's
  * "2+ bullet lines" gate and this module's segmentation never drift apart
  * (issue #193). */
-export const BULLET_LINE_RE = /^\s*(?:[-*•‣]|\d+[.)])\s+\S/;
+export const BULLET_LINE_RE = new RegExp(`^\\s*(?:[${BULLET_MARKER_CHARS}]|\\d+[.)])\\s+\\S`);
+
+/** Strips a leading run of list-marker noise (bullet chars, digits, `.`/`)`,
+ * whitespace) off a segmented title. Shares `BULLET_MARKER_CHARS` with
+ * `BULLET_LINE_RE` so every accepted marker is also stripped (issue #198). */
+const BULLET_PREFIX_STRIP_RE = new RegExp(`^[${BULLET_MARKER_CHARS}\\d.)\\s]+`);
 
 /** The no-model fallback `parseBulkTasks` degrades to — on a missing API
  * key, a garbage response, or the model throwing. Deterministic paragraph
@@ -298,7 +310,7 @@ export function parseBulkTasksHeuristic(
   for (const paragraph of paragraphs) {
     const isContextNote = /^\s*(note|fyi)\s*:/i.test(paragraph);
     const cleaned = paragraph
-      .replace(/^[-*•\d.)\s]+/, "")
+      .replace(BULLET_PREFIX_STRIP_RE, "")
       .replace(BULK_TASK_LABEL_STRIP_RE, "")
       .trim();
     if (!cleaned) continue;
