@@ -135,7 +135,9 @@ describe("sendStandupPush", () => {
 });
 
 describe("handleStandupPushEndpoint", () => {
-  function deps(overrides: { verify?: boolean; enabled?: boolean } = {}) {
+  function deps(
+    overrides: { verify?: boolean; enabled?: boolean; now?: Date } = {},
+  ) {
     const sendMessage = vi.fn(async () => ({}));
     const buildPreview = vi.fn(async () => "the preview text");
     const send = vi.fn(async () => ({ sent: true }));
@@ -146,6 +148,7 @@ describe("handleStandupPushEndpoint", () => {
         buildPreview,
         send,
         isEnabled,
+        now: overrides.now ?? NOW,
       },
       sendMessage,
       buildPreview,
@@ -205,5 +208,49 @@ describe("handleStandupPushEndpoint", () => {
     const { deps: d } = deps({ verify: true });
     const result = await handleStandupPushEndpoint(d, { method: "DELETE", headers: {} });
     expect(result.status).toBe(405);
+  });
+
+  // Issue #227 (spec #226): the standup skips weekends and Philippine
+  // holidays on the POST (send) path only, before the standup_enabled
+  // lookup — the GET preview is unaffected.
+
+  it("a POST on a Manila weekend skips: 200, sent:false, reason weekend, no isEnabled lookup", async () => {
+    // 2026-09-19 is a Saturday, Asia/Manila.
+    const now = new Date("2026-09-19T04:00:00.000Z");
+    const { deps: d, send, isEnabled } = deps({ verify: true, now });
+    const result = await handleStandupPushEndpoint(d, { method: "POST", headers: {} });
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({ sent: false, reason: "weekend" });
+    expect(isEnabled).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("a POST on an encoded holiday skips: 200, sent:false, reason holiday", async () => {
+    // 2026-06-12 is Independence Day (a Friday), Asia/Manila.
+    const now = new Date("2026-06-12T04:00:00.000Z");
+    const { deps: d, send, isEnabled } = deps({ verify: true, now });
+    const result = await handleStandupPushEndpoint(d, { method: "POST", headers: {} });
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({ sent: false, reason: "holiday" });
+    expect(isEnabled).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("a POST on a working day with standup_enabled true still sends (guards against an inverted guard)", async () => {
+    const { deps: d, send } = deps({ verify: true, enabled: true });
+    const result = await handleStandupPushEndpoint(d, { method: "POST", headers: {} });
+    expect(result.status).toBe(200);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("a GET on a Manila weekend still returns the preview", async () => {
+    // 2026-09-19 is a Saturday, Asia/Manila.
+    const now = new Date("2026-09-19T04:00:00.000Z");
+    const { deps: d, buildPreview, send } = deps({ verify: true, now });
+    const result = await handleStandupPushEndpoint(d, { method: "GET", headers: {} });
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({ preview: "the preview text" });
+    expect(buildPreview).toHaveBeenCalledTimes(1);
+    expect(send).not.toHaveBeenCalled();
   });
 });

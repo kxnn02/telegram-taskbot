@@ -46,6 +46,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             now,
           ),
         isEnabled: () => deps.cohorts.isStandupEnabled(env.activeCohortId),
+        now,
       },
       {
         method: req.method,
