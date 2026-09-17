@@ -7,6 +7,7 @@ import { buildStandupOverviewCard } from "../bot/standupOverviewCard.js";
 import { dailyQuote } from "../bot/standupQuote.js";
 import { chunkMessage } from "../bot/format.js";
 import { renderCertTipHtml, selectCertTipForDate } from "../bot/certTips.js";
+import { standupSkipReason } from "../date/standupCalendar.js";
 
 /**
  * Issue #107, item 5: the standup push endpoint — Devie's
@@ -131,6 +132,10 @@ export interface StandupPushEndpointDeps {
    * `sendStandupPush` directly and never reaches this envelope, so it is
    * unaffected. */
   isEnabled(): Promise<boolean>;
+  /** The instant the scheduled function already constructs, passed through
+   * so the POST branch can decide whether today is a working day (issue
+   * #227) without reading the system clock itself. */
+  now: Date;
 }
 
 /**
@@ -155,6 +160,14 @@ export async function handleStandupPushEndpoint(
   if (req.method === "GET") {
     const preview = await deps.buildPreview();
     return { status: 200, body: { preview } };
+  }
+  // Issue #227: the calendar skip is checked before `isEnabled()`, so a
+  // skipped day costs no database round trip. Weekends and Philippine
+  // holidays are silent skips, reported as success (200) so the scheduler
+  // never retries; `standup_enabled` keeps working unchanged below.
+  const skipReason = standupSkipReason(deps.now);
+  if (skipReason) {
+    return { status: 200, body: { sent: false, reason: skipReason } };
   }
   const enabled = await deps.isEnabled();
   if (!enabled) {
